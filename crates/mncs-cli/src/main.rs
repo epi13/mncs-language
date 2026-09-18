@@ -1945,7 +1945,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
         }
     };
     let call_options = EmbedCallOptions::budgeted(options.step_budget);
-    let empty = session.call("mncs.test.suite.v1", "empty", Vec::new(), &call_options);
+    let empty = session.call("mncs.test.suite", "empty", Vec::new(), &call_options);
     let mut suite_value = match returned_value(&empty) {
         Some(value) => value.clone(),
         None => {
@@ -1984,7 +1984,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
         };
         let native_result = native_test_value(native_value);
         let projection_output = session.call(
-            "mncs.test.assertions.v1",
+            "mncs.test.assertions",
             "project_test",
             vec![native_value.clone()],
             &call_options,
@@ -2009,7 +2009,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             .and_then(serde_json::Value::as_str)
             .unwrap_or("infrastructure_failure");
         let observed = session.call(
-            "mncs.test.suite.v1",
+            "mncs.test.suite",
             "observe",
             vec![suite_value.clone(), native_value.clone()],
             &call_options,
@@ -2047,7 +2047,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
     }
     let suite_summary = native_suite_value(&suite_value);
     let suite_projection_output = session.call(
-        "mncs.test.suite.v1",
+        "mncs.test.suite",
         "project",
         vec![suite_value.clone()],
         &call_options,
@@ -2157,7 +2157,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             "compiler_owned_inventory": true
         },
         "provenance": {
-            "runner": {"name": "mncs.test.runner.v1", "language": "mncs", "host": "mncs-toolchain"},
+            "runner": {"name": "mncs.test.runner", "language": "mncs", "host": "mncs-toolchain"},
             "source": source_path,
             "inventory_identity": inventory_identity
         }
@@ -2225,7 +2225,7 @@ fn finite_field_label(value: &ExecutionValue, name: &str) -> Option<String> {
 }
 
 /// Project native semantic decisions for the external compatibility document.
-/// The decisions themselves come from mncs.test.assertions.v1; this helper only
+/// The decisions themselves come from mncs.test.assertions; this helper only
 /// spells bounded finite values at the JSON boundary.
 fn native_test_projection(value: &ExecutionValue) -> serde_json::Value {
     let lower = |name: &str, fallback: &str| {
@@ -2371,7 +2371,7 @@ fn finish_native_test_output(
             "kind": "mncs-test-result",
             "producer": "mncs-test",
             "contract_revision": "mncs.test-result/1",
-            "authority": "mncs.test.suite.v1",
+            "authority": "mncs.test.suite",
             "authority_status": verdict,
             "digest": digest
         }],

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mncs.language-capabilities/1",
+  "title": "MNCS language capability index",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generator_identity",
+    "language",
+    "current_profile",
+    "profile_registry_identity",
+    "profiles",
+    "library_modules",
+    "intrinsics",
+    "topics",
+    "examples",
+    "provenance",
+    "projections",
+    "capsule",
+    "content_identity"
+  ],
+  "properties": {
+    "schema_version": {"const": "mncs.language-capabilities/1"},
+    "generator_identity": {"type": "string"},
+    "language": {"const": "MNCS"},
+    "current_profile": {"type": "string"},
+    "profile_registry_identity": {"pattern": "^sha256:[0-9a-f]{64}$"},
+    "profiles": {"type": "array", "items": {"type": "object"}},
+    "library_modules": {"type": "array", "items": {"$ref": "#/$defs/module"}},
+    "intrinsics": {"type": "array", "items": {"type": "object"}},
+    "topics": {"type": "array", "items": {"type": "object"}},
+    "examples": {"type": "array", "items": {"type": "object"}},
+    "provenance": {"type": "array", "items": {"type": "object"}},
+    "projections": {"type": "object"},
+    "capsule": {"type": "object"},
+    "content_identity": {"pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "module": {
+      "type": "object",
+      "required": ["module", "profile", "path", "source_identity", "symbols"],
+      "properties": {
+        "module": {"type": "string"},
+        "profile": {"type": ["string", "null"]},
+        "path": {"type": "string"},
+        "source_identity": {"pattern": "^sha256:[0-9a-f]{64}$"},
+        "symbols": {"type": "array"}
+      }
+    }
+  }
+}

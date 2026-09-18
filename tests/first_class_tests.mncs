@@ -5,8 +5,8 @@ mncs 0.17;
 // verification declarations so its subject identity can be tracked alone.
 module mncs.language.first_class_tests;
 
-use mncs.test.assertions.v1;
-use mncs.test.suite.v1;
+use mncs.test.assertions;
+use mncs.test.suite;
 
 fn add_operands(left: i64, right: i64) -> (result: i64) {
     return left +% right;

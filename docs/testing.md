@@ -14,8 +14,8 @@ ordinary MNCS function signature and body grammar:
 mncs 0.17;
 module example;
 
-use mncs.test.assertions.v1;
-use mncs.test.suite.v1;
+use mncs.test.assertions;
+use mncs.test.suite;
 
 test arithmetic() -> (result: TestResult) {
     return from_assertion(equals_i64(42, 19 +% 23, 1001));
@@ -69,7 +69,7 @@ mncs-test run --manifest mncs-test.toml \
 
 The normal path compiles once, opens one retained `mncs-embed` session, and
 batch-invokes the discovered tests, then folds the returned native
-`TestResult` values through `mncs.test.suite.v1::empty` and `observe` in the
+`TestResult` values through `mncs.test.suite::empty` and `observe` in the
 same session. Importing the suite module makes that native aggregation
 dependency explicit; it is not a registration table. The subprocess path is
 retained only as a transport fallback when the embed library is unavailable.

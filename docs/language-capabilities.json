@@ -1,0 +1,6131 @@
+{
+  "capsule": {
+    "effects": [
+      "declared capabilities",
+      "structured_read",
+      "structured_write",
+      "artifact publication"
+    ],
+    "evolution": "source facts evolve in place; persistent contracts carry explicit identities",
+    "profile": "0.18",
+    "standard_library_namespaces": [
+      "mncs.core",
+      "mncs.family",
+      "mncs.jit",
+      "mncs.std"
+    ],
+    "syntax": [
+      "module",
+      "use",
+      "record",
+      "enum",
+      "fn",
+      "bounded sequences",
+      "effects"
+    ],
+    "types": [
+      "nominal records",
+      "finite enums",
+      "bounded sequences",
+      "views",
+      "byte arrays"
+    ]
+  },
+  "content_identity": "sha256:ae0d02e6a926d221bee2c9775244fa156d3030f2774f7cdd6a470ad07e7219df",
+  "current_profile": "0.18",
+  "examples": [
+    {
+      "identity": "mncs.example/bounded-collections/1",
+      "path": "examples/source/bounded-min.mncs",
+      "profile": "0.2",
+      "source_identity": "sha256:a40ef04b6eeb82aa79d0d3ad8d07fdceab34ecb0cb6d2a9994292ef332fe7ed1",
+      "topics": [
+        "bounded collections"
+      ],
+      "verification": "examples/source and compiler test suites"
+    },
+    {
+      "identity": "mncs.example/identity/1",
+      "path": "examples/source/identity.mncs",
+      "profile": "0.1",
+      "source_identity": "sha256:da274a91b9adeeb34d3a0c19ede84475ca4e28d72df2bd068797d08c4b3f29f2",
+      "topics": [
+        "identity"
+      ],
+      "verification": "examples/source and compiler test suites"
+    },
+    {
+      "identity": "mncs.example/effects/1",
+      "path": "examples/source/cre3-retry-authority.mncs",
+      "profile": "0.4",
+      "source_identity": "sha256:2a523615014d98435d5339cfef5581ae78835641f287abc40c7f16cc7462dd9a",
+      "topics": [
+        "effects"
+      ],
+      "verification": "examples/source and compiler test suites"
+    },
+    {
+      "identity": "mncs.example/structured-artifacts/1",
+      "path": "examples/source/structured-artifact.mncs",
+      "profile": "0.18",
+      "source_identity": "sha256:da5c47990cf8722fb2eb3ee3e4c7943d988baac9da97a4af3285171c8ac09521",
+      "topics": [
+        "structured artifacts"
+      ],
+      "verification": "examples/source and compiler test suites"
+    },
+    {
+      "identity": "mncs.example/applications/1",
+      "path": "examples/source/application-entry.mncs",
+      "profile": "0.16",
+      "source_identity": "sha256:323eb56ab3010bc614d747303fa5959d5e4ad5b34114907b10391559c5f52fb6",
+      "topics": [
+        "applications"
+      ],
+      "verification": "examples/source and compiler test suites"
+    }
+  ],
+  "generator_identity": "mncs-language-capabilities-generator/1",
+  "intrinsics": [
+    {
+      "name": "elaborate_program",
+      "source": "crates/mncs-cli/tests/proof_demo.rs",
+      "source_identity": "sha256:94d2803566391f0720c98cfafeb02c03c549313c590b05038f378e8026eff676"
+    },
+    {
+      "name": "elaborate_program",
+      "source": "crates/mncs-codegen/src/lib.rs",
+      "source_identity": "sha256:783872168c42416a5e66eec0261577d57dffb534f779e972ffc74c2fe1ff7a9b"
+    },
+    {
+      "name": "elaborate_bool_match",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_bounded_iteration",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_checked_index",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_clock_read",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_crypto_view",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_ed25519_verify",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_expr",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_expr_inner",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_float_intrinsic",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_fs_append_bytes_at",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_fs_create_file",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_fs_entry_at",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_fs_index",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_fs_index_mutation",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_fs_mkdir",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_fs_name_view",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_fs_nullary",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_fs_read_bytes_at",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_fs_rename_at",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_fs_write_bytes_at",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_function",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_host_read",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_host_write",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_import_closure",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_linked_module_with_source_map",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_process_run",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_program",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_program_with_resolutions",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_program_with_resolver",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_program_with_resolver_and_modules",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_program_with_resolver_and_modules_and_seeds",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_program_with_resolver_and_modules_and_seeds_with_map",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_provider_call",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_scalar_match",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_sequence_copy",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_sha256_digest",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_statement",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_statements",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_structured_digest",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_structured_read",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_structured_read_identity",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_structured_view",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_structured_write",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_vector_intrinsic",
+      "source": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "name": "elaborate_program",
+      "source": "crates/mncs-compiler/src/lib.rs",
+      "source_identity": "sha256:c349be2aca66e6652d585bc965cf55d5d005881213248d41a55e1bf3bb127393"
+    },
+    {
+      "name": "elaborate_program_with_resolutions",
+      "source": "crates/mncs-compiler/src/lib.rs",
+      "source_identity": "sha256:c349be2aca66e6652d585bc965cf55d5d005881213248d41a55e1bf3bb127393"
+    },
+    {
+      "name": "elaborate_program_with_resolver",
+      "source": "crates/mncs-compiler/src/lib.rs",
+      "source_identity": "sha256:c349be2aca66e6652d585bc965cf55d5d005881213248d41a55e1bf3bb127393"
+    },
+    {
+      "name": "elaborate_program_with_resolver_and_modules",
+      "source": "crates/mncs-compiler/src/lib.rs",
+      "source_identity": "sha256:c349be2aca66e6652d585bc965cf55d5d005881213248d41a55e1bf3bb127393"
+    },
+    {
+      "name": "elaborate_program_with_resolver_and_modules_and_seeds",
+      "source": "crates/mncs-compiler/src/lib.rs",
+      "source_identity": "sha256:c349be2aca66e6652d585bc965cf55d5d005881213248d41a55e1bf3bb127393"
+    },
+    {
+      "name": "elaborate_program_with_resolver_and_modules_and_seeds_with_map",
+      "source": "crates/mncs-compiler/src/lib.rs",
+      "source_identity": "sha256:c349be2aca66e6652d585bc965cf55d5d005881213248d41a55e1bf3bb127393"
+    },
+    {
+      "name": "elaborate_program_with_resolver",
+      "source": "crates/mncs-compiler/src/proof_admission.rs",
+      "source_identity": "sha256:adc44fe587ccc90fc5d27023601e7a9f7af6eed7eee3ca49f19d841283a796d6"
+    },
+    {
+      "name": "elaborate_program_with_resolutions",
+      "source": "crates/mncs-compiler/src/resolution.rs",
+      "source_identity": "sha256:59a19becba40ee76ff2d8d6aee1ae939c05847ebd8007b11ba1f9c297526ec0f"
+    },
+    {
+      "name": "elaborate_program_with_resolver",
+      "source": "crates/mncs-compiler/tests/executable_contracts.rs",
+      "source_identity": "sha256:4a2fbd8193751a6dd7f43e9458ffa7d7dc9343bf9bd9da8dc1f599f6c175e647"
+    },
+    {
+      "name": "elaborate_program_with_resolver",
+      "source": "crates/mncs-compiler/tests/iteration_identity.rs",
+      "source_identity": "sha256:91c680fcde8e654be289c853511d70b8916a913ba5eb7ecd37bf806be49f136f"
+    },
+    {
+      "name": "elaborate_full",
+      "source": "crates/mncs-compiler/tests/module_imports.rs",
+      "source_identity": "sha256:bef201e21005ec8697217d08057bb2ee43ad116be058f9028d57a33c6ceaef8b"
+    },
+    {
+      "name": "elaborate_program_with_resolver",
+      "source": "crates/mncs-compiler/tests/module_imports.rs",
+      "source_identity": "sha256:bef201e21005ec8697217d08057bb2ee43ad116be058f9028d57a33c6ceaef8b"
+    },
+    {
+      "name": "elaborate_program_with_resolver_and_modules",
+      "source": "crates/mncs-compiler/tests/module_imports.rs",
+      "source_identity": "sha256:bef201e21005ec8697217d08057bb2ee43ad116be058f9028d57a33c6ceaef8b"
+    },
+    {
+      "name": "elaborate_program_with_resolver",
+      "source": "crates/mncs-compiler/tests/projection_chains.rs",
+      "source_identity": "sha256:7182eaee49e3aa66fc6605756446dc9cf1cc862c49e4443ceada09948613fba2"
+    },
+    {
+      "name": "elaborate_program_with_resolver_and_modules",
+      "source": "crates/mncs-compiler/tests/stdlib_bundle.rs",
+      "source_identity": "sha256:e4daa467f4dafd19e820c8b6af5185585273e4574ecb5a81e654c96731984a1c"
+    },
+    {
+      "name": "elaborate_program_with_resolver",
+      "source": "crates/mncs-compiler/tests/type_architecture.rs",
+      "source_identity": "sha256:b009fdf16e386d491699c7c610dd5c407bbea50995032cf627b84bd567b69293"
+    },
+    {
+      "name": "elaborate_program_with_resolver",
+      "source": "crates/mncs-conformance/tests/conformance.rs",
+      "source_identity": "sha256:2bd51e086efa0c5a4f60a56c70ff73f58c90605392a2e04459a1a6f861edb495"
+    }
+  ],
+  "language": "MNCS",
+  "library_modules": [
+    {
+      "module": "mncs.core.bounds.v1",
+      "path": "library/core/bounds.mncs",
+      "profile": "0.5",
+      "source_identity": "sha256:ed11a325208e0450ad196998c297f33ac2cae3f810ea29089f9cdd07ac6d0f62",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "clamp_i64"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.bytes.v1",
+      "path": "library/core/bytes.mncs",
+      "profile": "0.7",
+      "source_identity": "sha256:02a87c9fe7c8c5f8eee9e177c5090bd57614ad6a05b84a339ebab5b90f61f337",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Pair"
+        },
+        {
+          "kind": "function",
+          "name": "checksum4"
+        },
+        {
+          "kind": "function",
+          "name": "digit_value"
+        },
+        {
+          "kind": "function",
+          "name": "eq_ascii_fold"
+        },
+        {
+          "kind": "function",
+          "name": "fingerprint4"
+        },
+        {
+          "kind": "function",
+          "name": "fold_byte"
+        },
+        {
+          "kind": "function",
+          "name": "is_ascii_alpha"
+        },
+        {
+          "kind": "function",
+          "name": "is_ascii_lower"
+        },
+        {
+          "kind": "function",
+          "name": "is_ascii_space"
+        },
+        {
+          "kind": "function",
+          "name": "is_ascii_upper"
+        },
+        {
+          "kind": "function",
+          "name": "is_digit"
+        },
+        {
+          "kind": "function",
+          "name": "join"
+        },
+        {
+          "kind": "function",
+          "name": "mask"
+        },
+        {
+          "kind": "function",
+          "name": "nibbles"
+        },
+        {
+          "kind": "function",
+          "name": "order"
+        },
+        {
+          "kind": "function",
+          "name": "shift_left"
+        },
+        {
+          "kind": "function",
+          "name": "shift_right"
+        },
+        {
+          "kind": "function",
+          "name": "to_ascii_lower"
+        },
+        {
+          "kind": "function",
+          "name": "to_ascii_upper"
+        },
+        {
+          "kind": "function",
+          "name": "xor"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.contracts.v1",
+      "path": "library/core/contracts.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:343902e73e4a6b0bb07e078906da2ed1e5f3c1b1a11971245ab347e0875938cb",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "abs_diff_i64"
+        },
+        {
+          "kind": "function",
+          "name": "abs_diff_u64"
+        },
+        {
+          "kind": "function",
+          "name": "byte_equal"
+        },
+        {
+          "kind": "function",
+          "name": "iff"
+        },
+        {
+          "kind": "function",
+          "name": "implies"
+        },
+        {
+          "kind": "function",
+          "name": "within_tolerance_byte"
+        },
+        {
+          "kind": "function",
+          "name": "within_tolerance_i64"
+        },
+        {
+          "kind": "function",
+          "name": "within_tolerance_u64"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.geometry.v1",
+      "path": "library/core/geometry.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:6ea8f9a6a160a707048fef415b3a4e5d07b7f72b1e01914e84cfbe08fbddb0ca",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Insets"
+        },
+        {
+          "kind": "record",
+          "name": "Point"
+        },
+        {
+          "kind": "record",
+          "name": "Rect"
+        },
+        {
+          "kind": "record",
+          "name": "RectPair"
+        },
+        {
+          "kind": "record",
+          "name": "Size"
+        },
+        {
+          "kind": "function",
+          "name": "adjacent_horizontal"
+        },
+        {
+          "kind": "function",
+          "name": "align_center_offset"
+        },
+        {
+          "kind": "function",
+          "name": "align_end_offset"
+        },
+        {
+          "kind": "function",
+          "name": "align_offset"
+        },
+        {
+          "kind": "function",
+          "name": "clamp_between"
+        },
+        {
+          "kind": "function",
+          "name": "contains_any4"
+        },
+        {
+          "kind": "function",
+          "name": "disjoint_horizontal"
+        },
+        {
+          "kind": "function",
+          "name": "first_point4"
+        },
+        {
+          "kind": "function",
+          "name": "insets_equal"
+        },
+        {
+          "kind": "function",
+          "name": "insets_is_empty"
+        },
+        {
+          "kind": "function",
+          "name": "insets_uniform"
+        },
+        {
+          "kind": "function",
+          "name": "pick_i64"
+        },
+        {
+          "kind": "function",
+          "name": "point_add"
+        },
+        {
+          "kind": "function",
+          "name": "point_anchor"
+        },
+        {
+          "kind": "function",
+          "name": "point_equal"
+        },
+        {
+          "kind": "function",
+          "name": "point_sub"
+        },
+        {
+          "kind": "function",
+          "name": "point_translate"
+        },
+        {
+          "kind": "function",
+          "name": "rect_adjacent"
+        },
+        {
+          "kind": "function",
+          "name": "rect_apply_insets"
+        },
+        {
+          "kind": "function",
+          "name": "rect_area"
+        },
+        {
+          "kind": "function",
+          "name": "rect_bottom"
+        },
+        {
+          "kind": "function",
+          "name": "rect_center"
+        },
+        {
+          "kind": "function",
+          "name": "rect_clip"
+        },
+        {
+          "kind": "function",
+          "name": "rect_contains_point"
+        },
+        {
+          "kind": "function",
+          "name": "rect_contains_rect"
+        },
+        {
+          "kind": "function",
+          "name": "rect_disjoint"
+        },
+        {
+          "kind": "function",
+          "name": "rect_equal"
+        },
+        {
+          "kind": "function",
+          "name": "rect_expand"
+        },
+        {
+          "kind": "function",
+          "name": "rect_from_point_size"
+        },
+        {
+          "kind": "function",
+          "name": "rect_intersect"
+        },
+        {
+          "kind": "function",
+          "name": "rect_intersects"
+        },
+        {
+          "kind": "function",
+          "name": "rect_is_empty"
+        },
+        {
+          "kind": "function",
+          "name": "rect_place"
+        },
+        {
+          "kind": "function",
+          "name": "rect_right"
+        },
+        {
+          "kind": "function",
+          "name": "rect_shrink"
+        },
+        {
+          "kind": "function",
+          "name": "rect_split_horizontal"
+        },
+        {
+          "kind": "function",
+          "name": "rect_split_vertical"
+        },
+        {
+          "kind": "function",
+          "name": "rect_translate"
+        },
+        {
+          "kind": "function",
+          "name": "rect_union"
+        },
+        {
+          "kind": "function",
+          "name": "size_area"
+        },
+        {
+          "kind": "function",
+          "name": "size_clamp"
+        },
+        {
+          "kind": "function",
+          "name": "size_clamp_between"
+        },
+        {
+          "kind": "function",
+          "name": "size_equal"
+        },
+        {
+          "kind": "function",
+          "name": "size_is_empty"
+        },
+        {
+          "kind": "function",
+          "name": "size_max"
+        },
+        {
+          "kind": "function",
+          "name": "size_min"
+        },
+        {
+          "kind": "function",
+          "name": "split_first_width"
+        },
+        {
+          "kind": "function",
+          "name": "split_second_width"
+        },
+        {
+          "kind": "function",
+          "name": "union4"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.identity.v1",
+      "path": "library/core/identity.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:0348822874eab9bfa496024809b36983e1a00e8241357a753dc79148faa528d2",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Digest32"
+        },
+        {
+          "kind": "record",
+          "name": "OrderState"
+        },
+        {
+          "kind": "function",
+          "name": "equal"
+        },
+        {
+          "kind": "function",
+          "name": "is_zero"
+        },
+        {
+          "kind": "function",
+          "name": "less"
+        },
+        {
+          "kind": "function",
+          "name": "make"
+        },
+        {
+          "kind": "function",
+          "name": "zero"
+        },
+        {
+          "kind": "function",
+          "name": "zero_bytes"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.image.v1",
+      "path": "library/core/image.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:cc53b671cfd4eda6275ed5d07610e776a132a00e59e9288e980d65750ae36138",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "abs_diff_mag"
+        },
+        {
+          "kind": "function",
+          "name": "blank"
+        },
+        {
+          "kind": "function",
+          "name": "box_blur3"
+        },
+        {
+          "kind": "function",
+          "name": "brighten"
+        },
+        {
+          "kind": "function",
+          "name": "clamp_col"
+        },
+        {
+          "kind": "function",
+          "name": "clamp_row"
+        },
+        {
+          "kind": "function",
+          "name": "count_above"
+        },
+        {
+          "kind": "function",
+          "name": "count_equal"
+        },
+        {
+          "kind": "function",
+          "name": "edge_magnitude"
+        },
+        {
+          "kind": "function",
+          "name": "get_pixel"
+        },
+        {
+          "kind": "function",
+          "name": "grad_orientation"
+        },
+        {
+          "kind": "function",
+          "name": "grad_x_mag"
+        },
+        {
+          "kind": "function",
+          "name": "grad_y_mag"
+        },
+        {
+          "kind": "function",
+          "name": "image_equal"
+        },
+        {
+          "kind": "function",
+          "name": "image_index"
+        },
+        {
+          "kind": "function",
+          "name": "in_bounds"
+        },
+        {
+          "kind": "function",
+          "name": "invert"
+        },
+        {
+          "kind": "function",
+          "name": "is_uniform"
+        },
+        {
+          "kind": "function",
+          "name": "law_blur_preserves_uniform"
+        },
+        {
+          "kind": "function",
+          "name": "law_brighten_zero"
+        },
+        {
+          "kind": "function",
+          "name": "law_invert_involution"
+        },
+        {
+          "kind": "function",
+          "name": "law_mirror_involution"
+        },
+        {
+          "kind": "function",
+          "name": "law_render_outline_count"
+        },
+        {
+          "kind": "function",
+          "name": "law_render_rect_area"
+        },
+        {
+          "kind": "function",
+          "name": "law_rotate4_identity"
+        },
+        {
+          "kind": "function",
+          "name": "law_threshold_splits"
+        },
+        {
+          "kind": "function",
+          "name": "law_uniform_no_edges"
+        },
+        {
+          "kind": "function",
+          "name": "mirror_horizontal"
+        },
+        {
+          "kind": "function",
+          "name": "render_rect"
+        },
+        {
+          "kind": "function",
+          "name": "render_rect_outline"
+        },
+        {
+          "kind": "function",
+          "name": "rotate90_cw"
+        },
+        {
+          "kind": "function",
+          "name": "sample_frame"
+        },
+        {
+          "kind": "function",
+          "name": "sample_replicate"
+        },
+        {
+          "kind": "function",
+          "name": "set_pixel"
+        },
+        {
+          "kind": "function",
+          "name": "sobel_magnitude"
+        },
+        {
+          "kind": "function",
+          "name": "threshold"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.lineage.v1",
+      "path": "library/core/lineage.mncs",
+      "profile": "0.10",
+      "source_identity": "sha256:b26698131716bdbdc6baf34a4f33d7c0477a43c5641dba2a5c53f6477c6ae061",
+      "symbols": [
+        {
+          "kind": "enum",
+          "name": "Relation"
+        },
+        {
+          "kind": "function",
+          "name": "classify"
+        },
+        {
+          "kind": "function",
+          "name": "valid_root_or_successor"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.logic.v1",
+      "path": "library/core/logic.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:3cc836943a01ff32ee3efd690f4b9de0c5757dd9718af33ed48ae924588ac32a",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "bool_and"
+        },
+        {
+          "kind": "function",
+          "name": "bool_implies"
+        },
+        {
+          "kind": "function",
+          "name": "bool_not"
+        },
+        {
+          "kind": "function",
+          "name": "bool_or"
+        },
+        {
+          "kind": "function",
+          "name": "bool_xor"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.mask.v1",
+      "path": "library/core/mask.mncs",
+      "profile": "0.8",
+      "source_identity": "sha256:8a979917d86ca80bf61d65bcf737f22c735ecb648fd9773765d4b5fabbaf70b7",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "all_nonzero4"
+        },
+        {
+          "kind": "function",
+          "name": "all_of"
+        },
+        {
+          "kind": "function",
+          "name": "and4"
+        },
+        {
+          "kind": "function",
+          "name": "any_negative4"
+        },
+        {
+          "kind": "function",
+          "name": "any_of"
+        },
+        {
+          "kind": "function",
+          "name": "from_bools"
+        },
+        {
+          "kind": "function",
+          "name": "identity4"
+        },
+        {
+          "kind": "function",
+          "name": "none_negative4"
+        },
+        {
+          "kind": "function",
+          "name": "none_of"
+        },
+        {
+          "kind": "function",
+          "name": "not4"
+        },
+        {
+          "kind": "function",
+          "name": "or4"
+        },
+        {
+          "kind": "function",
+          "name": "xor4"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.numeric.v1",
+      "path": "library/core/numeric.mncs",
+      "profile": "0.8",
+      "source_identity": "sha256:567c2ed24d833a597670176b2c7be09cb73788aee6e860429a8eed24a01b863c",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "centroid4"
+        },
+        {
+          "kind": "function",
+          "name": "clamp4"
+        },
+        {
+          "kind": "function",
+          "name": "l2_squared4"
+        },
+        {
+          "kind": "function",
+          "name": "mean4_wrap"
+        },
+        {
+          "kind": "function",
+          "name": "sum4_wrap"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.ordering.v1",
+      "path": "library/core/ordering.mncs",
+      "profile": "0.5",
+      "source_identity": "sha256:5773304071aab4adc80ada57aa00f8ea94949b74f9c1b32852d7571e4117f76d",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "clamp_i32"
+        },
+        {
+          "kind": "function",
+          "name": "clamp_i64"
+        },
+        {
+          "kind": "function",
+          "name": "max_i32"
+        },
+        {
+          "kind": "function",
+          "name": "max_i64"
+        },
+        {
+          "kind": "function",
+          "name": "min_i32"
+        },
+        {
+          "kind": "function",
+          "name": "min_i64"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.partition.v1",
+      "path": "library/core/partition.mncs",
+      "profile": "0.8",
+      "source_identity": "sha256:e942038c0143515c4a7877ba16e025b35a2a52270acdcea99b2fc6b56b6d8e9f",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "MulDivState"
+        },
+        {
+          "kind": "record",
+          "name": "Split4"
+        },
+        {
+          "kind": "record",
+          "name": "WeightedSplit"
+        },
+        {
+          "kind": "function",
+          "name": "equal_split"
+        },
+        {
+          "kind": "function",
+          "name": "mul_div_floor_remainder"
+        },
+        {
+          "kind": "function",
+          "name": "mul_div_floor_small"
+        },
+        {
+          "kind": "function",
+          "name": "normalize_weight"
+        },
+        {
+          "kind": "function",
+          "name": "partition_max_i64"
+        },
+        {
+          "kind": "function",
+          "name": "partition_nonnegative"
+        },
+        {
+          "kind": "function",
+          "name": "split_among_grow"
+        },
+        {
+          "kind": "function",
+          "name": "split_consumes_all"
+        },
+        {
+          "kind": "function",
+          "name": "sum4"
+        },
+        {
+          "kind": "function",
+          "name": "total_weight4"
+        },
+        {
+          "kind": "function",
+          "name": "weighted_consumes_all"
+        },
+        {
+          "kind": "function",
+          "name": "weighted_floor"
+        },
+        {
+          "kind": "function",
+          "name": "weighted_split4"
+        },
+        {
+          "kind": "function",
+          "name": "weights_fit4"
+        },
+        {
+          "kind": "function",
+          "name": "weights_invalid4"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.proof_admit.v1",
+      "path": "library/core/proof_admit.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:ccdff8991beeff8144669e3888b19b83a4ee0fa5e53c9c63bf5724160b9c7d58",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "ProofBinding"
+        },
+        {
+          "kind": "function",
+          "name": "binding_authorizes"
+        },
+        {
+          "kind": "function",
+          "name": "binding_reusable"
+        },
+        {
+          "kind": "function",
+          "name": "bytes32_equal"
+        },
+        {
+          "kind": "function",
+          "name": "cell_equal_at"
+        },
+        {
+          "kind": "function",
+          "name": "cells_prefix_equal"
+        },
+        {
+          "kind": "function",
+          "name": "deps_equal"
+        },
+        {
+          "kind": "function",
+          "name": "expected_kernel"
+        },
+        {
+          "kind": "function",
+          "name": "expected_kernel_len"
+        },
+        {
+          "kind": "function",
+          "name": "kernel_matches"
+        },
+        {
+          "kind": "function",
+          "name": "seal_binding"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.proof_check.v1",
+      "path": "library/core/proof_check.mncs",
+      "profile": "0.10",
+      "source_identity": "sha256:de683d8680f697a60c4c406c607d0bea501ffe703546e20a8c860bbeb26884c6",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Memo"
+        },
+        {
+          "kind": "record",
+          "name": "Triple"
+        },
+        {
+          "kind": "function",
+          "name": "adv_apply"
+        },
+        {
+          "kind": "function",
+          "name": "adv_eq"
+        },
+        {
+          "kind": "function",
+          "name": "adv_lambda"
+        },
+        {
+          "kind": "function",
+          "name": "adv_nat"
+        },
+        {
+          "kind": "function",
+          "name": "adv_nat_elim"
+        },
+        {
+          "kind": "function",
+          "name": "adv_pi"
+        },
+        {
+          "kind": "function",
+          "name": "adv_plus"
+        },
+        {
+          "kind": "function",
+          "name": "adv_refl"
+        },
+        {
+          "kind": "function",
+          "name": "adv_succ"
+        },
+        {
+          "kind": "function",
+          "name": "adv_universe"
+        },
+        {
+          "kind": "function",
+          "name": "adv_unsupported"
+        },
+        {
+          "kind": "function",
+          "name": "adv_var"
+        },
+        {
+          "kind": "function",
+          "name": "adv_zero"
+        },
+        {
+          "kind": "function",
+          "name": "advance"
+        },
+        {
+          "kind": "function",
+          "name": "at16"
+        },
+        {
+          "kind": "function",
+          "name": "check_proof"
+        },
+        {
+          "kind": "function",
+          "name": "check_proof_code"
+        },
+        {
+          "kind": "function",
+          "name": "denote"
+        },
+        {
+          "kind": "function",
+          "name": "initial"
+        },
+        {
+          "kind": "function",
+          "name": "join"
+        },
+        {
+          "kind": "function",
+          "name": "ref_ok"
+        },
+        {
+          "kind": "function",
+          "name": "run_pass"
+        },
+        {
+          "kind": "function",
+          "name": "store_rep"
+        },
+        {
+          "kind": "function",
+          "name": "store_type"
+        },
+        {
+          "kind": "function",
+          "name": "to_code"
+        },
+        {
+          "kind": "function",
+          "name": "to_status"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.proof_dep.v2",
+      "path": "library/core/proof_dep.mncs",
+      "profile": "0.10",
+      "source_identity": "sha256:782f74d6354a824891c8c27bc4b855127508d7fded0cd21b567419e28ef3aa61",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "AdvOut"
+        },
+        {
+          "kind": "record",
+          "name": "AncState"
+        },
+        {
+          "kind": "record",
+          "name": "AssumptionSet"
+        },
+        {
+          "kind": "record",
+          "name": "BinderStep"
+        },
+        {
+          "kind": "record",
+          "name": "Binders"
+        },
+        {
+          "kind": "record",
+          "name": "CODRes"
+        },
+        {
+          "kind": "record",
+          "name": "CORes"
+        },
+        {
+          "kind": "record",
+          "name": "Cell"
+        },
+        {
+          "kind": "record",
+          "name": "CheckRes"
+        },
+        {
+          "kind": "record",
+          "name": "ClaimRes"
+        },
+        {
+          "kind": "record",
+          "name": "ClassHead"
+        },
+        {
+          "kind": "record",
+          "name": "DEState"
+        },
+        {
+          "kind": "record",
+          "name": "DefRes"
+        },
+        {
+          "kind": "record",
+          "name": "EExt"
+        },
+        {
+          "kind": "record",
+          "name": "ElimBuild"
+        },
+        {
+          "kind": "record",
+          "name": "ElimRes"
+        },
+        {
+          "kind": "record",
+          "name": "ElimUnfold"
+        },
+        {
+          "kind": "record",
+          "name": "ElimWalk"
+        },
+        {
+          "kind": "record",
+          "name": "Envs"
+        },
+        {
+          "kind": "record",
+          "name": "HypAnc"
+        },
+        {
+          "kind": "record",
+          "name": "Infer"
+        },
+        {
+          "kind": "record",
+          "name": "IntWalk"
+        },
+        {
+          "kind": "record",
+          "name": "Lookup"
+        },
+        {
+          "kind": "record",
+          "name": "LookupState"
+        },
+        {
+          "kind": "record",
+          "name": "MARes"
+        },
+        {
+          "kind": "record",
+          "name": "NEAlloc"
+        },
+        {
+          "kind": "record",
+          "name": "NEOp"
+        },
+        {
+          "kind": "record",
+          "name": "NEState"
+        },
+        {
+          "kind": "record",
+          "name": "NEval"
+        },
+        {
+          "kind": "record",
+          "name": "ParentInfo"
+        },
+        {
+          "kind": "record",
+          "name": "ParentStep"
+        },
+        {
+          "kind": "record",
+          "name": "Parents"
+        },
+        {
+          "kind": "record",
+          "name": "PlusBuild"
+        },
+        {
+          "kind": "record",
+          "name": "PlusRes"
+        },
+        {
+          "kind": "record",
+          "name": "PlusSpine"
+        },
+        {
+          "kind": "record",
+          "name": "Shape"
+        },
+        {
+          "kind": "enum",
+          "name": "TermTag"
+        },
+        {
+          "kind": "record",
+          "name": "Topo"
+        },
+        {
+          "kind": "record",
+          "name": "UnivHead"
+        },
+        {
+          "kind": "record",
+          "name": "VAlloc"
+        },
+        {
+          "kind": "record",
+          "name": "VPool"
+        },
+        {
+          "kind": "record",
+          "name": "VSRes"
+        },
+        {
+          "kind": "record",
+          "name": "VSState"
+        },
+        {
+          "kind": "record",
+          "name": "WalkState"
+        },
+        {
+          "kind": "function",
+          "name": "adv_app"
+        },
+        {
+          "kind": "function",
+          "name": "adv_cong"
+        },
+        {
+          "kind": "function",
+          "name": "adv_dispatch"
+        },
+        {
+          "kind": "function",
+          "name": "adv_elim"
+        },
+        {
+          "kind": "function",
+          "name": "adv_eq"
+        },
+        {
+          "kind": "function",
+          "name": "adv_hyp"
+        },
+        {
+          "kind": "function",
+          "name": "adv_infer"
+        },
+        {
+          "kind": "function",
+          "name": "adv_lam"
+        },
+        {
+          "kind": "function",
+          "name": "adv_nat"
+        },
+        {
+          "kind": "function",
+          "name": "adv_pi"
+        },
+        {
+          "kind": "function",
+          "name": "adv_plus"
+        },
+        {
+          "kind": "function",
+          "name": "adv_refl"
+        },
+        {
+          "kind": "function",
+          "name": "adv_succ"
+        },
+        {
+          "kind": "function",
+          "name": "adv_topo"
+        },
+        {
+          "kind": "function",
+          "name": "adv_universe"
+        },
+        {
+          "kind": "function",
+          "name": "adv_var"
+        },
+        {
+          "kind": "function",
+          "name": "adv_var_type"
+        },
+        {
+          "kind": "function",
+          "name": "adv_zero"
+        },
+        {
+          "kind": "function",
+          "name": "assumption_set"
+        },
+        {
+          "kind": "function",
+          "name": "assumption_set_equal"
+        },
+        {
+          "kind": "function",
+          "name": "assumptions_code"
+        },
+        {
+          "kind": "function",
+          "name": "at32"
+        },
+        {
+          "kind": "function",
+          "name": "at64"
+        },
+        {
+          "kind": "function",
+          "name": "binder_level_of"
+        },
+        {
+          "kind": "function",
+          "name": "bnot"
+        },
+        {
+          "kind": "function",
+          "name": "cell_arg"
+        },
+        {
+          "kind": "function",
+          "name": "check_claim"
+        },
+        {
+          "kind": "function",
+          "name": "check_proof_code"
+        },
+        {
+          "kind": "function",
+          "name": "check_proof_inner"
+        },
+        {
+          "kind": "function",
+          "name": "child_mention"
+        },
+        {
+          "kind": "function",
+          "name": "classifier_head"
+        },
+        {
+          "kind": "function",
+          "name": "de_children"
+        },
+        {
+          "kind": "function",
+          "name": "de_cod"
+        },
+        {
+          "kind": "function",
+          "name": "de_pi_pair"
+        },
+        {
+          "kind": "function",
+          "name": "de_push"
+        },
+        {
+          "kind": "function",
+          "name": "de_step"
+        },
+        {
+          "kind": "function",
+          "name": "defeq"
+        },
+        {
+          "kind": "function",
+          "name": "eenv_extend"
+        },
+        {
+          "kind": "function",
+          "name": "elim_apply"
+        },
+        {
+          "kind": "function",
+          "name": "elim_cod_ok"
+        },
+        {
+          "kind": "function",
+          "name": "elim_push_slot"
+        },
+        {
+          "kind": "function",
+          "name": "elim_slot_at"
+        },
+        {
+          "kind": "function",
+          "name": "elim_unfold"
+        },
+        {
+          "kind": "function",
+          "name": "env_lookup"
+        },
+        {
+          "kind": "function",
+          "name": "find_parent"
+        },
+        {
+          "kind": "function",
+          "name": "has_ref"
+        },
+        {
+          "kind": "function",
+          "name": "hyp_ancestor"
+        },
+        {
+          "kind": "function",
+          "name": "hyp_used"
+        },
+        {
+          "kind": "function",
+          "name": "immediate_ok"
+        },
+        {
+          "kind": "function",
+          "name": "indices_ok"
+        },
+        {
+          "kind": "function",
+          "name": "initial_assumption_set"
+        },
+        {
+          "kind": "function",
+          "name": "initial_binders"
+        },
+        {
+          "kind": "function",
+          "name": "initial_destate"
+        },
+        {
+          "kind": "function",
+          "name": "initial_envs"
+        },
+        {
+          "kind": "function",
+          "name": "initial_infer"
+        },
+        {
+          "kind": "function",
+          "name": "initial_nestate"
+        },
+        {
+          "kind": "function",
+          "name": "initial_parents"
+        },
+        {
+          "kind": "function",
+          "name": "initial_shape"
+        },
+        {
+          "kind": "function",
+          "name": "initial_topo"
+        },
+        {
+          "kind": "function",
+          "name": "initial_vpool"
+        },
+        {
+          "kind": "function",
+          "name": "initial_vsstate"
+        },
+        {
+          "kind": "function",
+          "name": "intval"
+        },
+        {
+          "kind": "function",
+          "name": "is_ancestor"
+        },
+        {
+          "kind": "function",
+          "name": "is_binder_code"
+        },
+        {
+          "kind": "function",
+          "name": "is_pi_lam_code"
+        },
+        {
+          "kind": "function",
+          "name": "is_stuck_head"
+        },
+        {
+          "kind": "function",
+          "name": "join"
+        },
+        {
+          "kind": "function",
+          "name": "join_all"
+        },
+        {
+          "kind": "function",
+          "name": "literal_cap"
+        },
+        {
+          "kind": "function",
+          "name": "max_universe"
+        },
+        {
+          "kind": "function",
+          "name": "midx_at"
+        },
+        {
+          "kind": "function",
+          "name": "midx_put"
+        },
+        {
+          "kind": "function",
+          "name": "motive_apply"
+        },
+        {
+          "kind": "function",
+          "name": "ne_alloc"
+        },
+        {
+          "kind": "function",
+          "name": "ne_apply"
+        },
+        {
+          "kind": "function",
+          "name": "ne_dive"
+        },
+        {
+          "kind": "function",
+          "name": "ne_extend"
+        },
+        {
+          "kind": "function",
+          "name": "ne_give"
+        },
+        {
+          "kind": "function",
+          "name": "ne_halt_unknown"
+        },
+        {
+          "kind": "function",
+          "name": "ne_pop"
+        },
+        {
+          "kind": "function",
+          "name": "ne_push"
+        },
+        {
+          "kind": "function",
+          "name": "ne_set_focus"
+        },
+        {
+          "kind": "function",
+          "name": "ne_set_value"
+        },
+        {
+          "kind": "function",
+          "name": "ne_step"
+        },
+        {
+          "kind": "function",
+          "name": "ne_with_nops"
+        },
+        {
+          "kind": "function",
+          "name": "neval"
+        },
+        {
+          "kind": "function",
+          "name": "plusVal"
+        },
+        {
+          "kind": "function",
+          "name": "pool_start"
+        },
+        {
+          "kind": "function",
+          "name": "probe_defeq_code"
+        },
+        {
+          "kind": "function",
+          "name": "probe_eval_code"
+        },
+        {
+          "kind": "function",
+          "name": "ref_ok"
+        },
+        {
+          "kind": "function",
+          "name": "resolve_var"
+        },
+        {
+          "kind": "function",
+          "name": "run_binders"
+        },
+        {
+          "kind": "function",
+          "name": "run_envs"
+        },
+        {
+          "kind": "function",
+          "name": "run_infer"
+        },
+        {
+          "kind": "function",
+          "name": "run_parents"
+        },
+        {
+          "kind": "function",
+          "name": "run_reach"
+        },
+        {
+          "kind": "function",
+          "name": "run_shape"
+        },
+        {
+          "kind": "function",
+          "name": "run_topo"
+        },
+        {
+          "kind": "function",
+          "name": "singleton_nat"
+        },
+        {
+          "kind": "function",
+          "name": "singleton_universe"
+        },
+        {
+          "kind": "function",
+          "name": "singleton_zero"
+        },
+        {
+          "kind": "function",
+          "name": "tag_code"
+        },
+        {
+          "kind": "function",
+          "name": "to_code"
+        },
+        {
+          "kind": "function",
+          "name": "to_status"
+        },
+        {
+          "kind": "function",
+          "name": "univ_head"
+        },
+        {
+          "kind": "function",
+          "name": "v_app"
+        },
+        {
+          "kind": "function",
+          "name": "v_elim"
+        },
+        {
+          "kind": "function",
+          "name": "v_eq"
+        },
+        {
+          "kind": "function",
+          "name": "v_invalid"
+        },
+        {
+          "kind": "function",
+          "name": "v_lam"
+        },
+        {
+          "kind": "function",
+          "name": "v_nat"
+        },
+        {
+          "kind": "function",
+          "name": "v_neutral"
+        },
+        {
+          "kind": "function",
+          "name": "v_pi"
+        },
+        {
+          "kind": "function",
+          "name": "v_plus"
+        },
+        {
+          "kind": "function",
+          "name": "v_proof"
+        },
+        {
+          "kind": "function",
+          "name": "v_succ"
+        },
+        {
+          "kind": "function",
+          "name": "v_universe"
+        },
+        {
+          "kind": "function",
+          "name": "v_zero"
+        },
+        {
+          "kind": "function",
+          "name": "valloc"
+        },
+        {
+          "kind": "function",
+          "name": "vc0_at"
+        },
+        {
+          "kind": "function",
+          "name": "vchild_count"
+        },
+        {
+          "kind": "function",
+          "name": "vchild_pool_at"
+        },
+        {
+          "kind": "function",
+          "name": "vcn_at"
+        },
+        {
+          "kind": "function",
+          "name": "vs_emit"
+        },
+        {
+          "kind": "function",
+          "name": "vs_visit"
+        },
+        {
+          "kind": "function",
+          "name": "vsubst"
+        },
+        {
+          "kind": "function",
+          "name": "vtag_at"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.proof_term.v1",
+      "path": "library/core/proof_term.mncs",
+      "profile": "0.10",
+      "source_identity": "sha256:158550265441cd2189bb40ded0118d9cb228027d41d4d64059d56b9b81be7c33",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Cell"
+        },
+        {
+          "kind": "enum",
+          "name": "TermTag"
+        },
+        {
+          "kind": "function",
+          "name": "buffer_capacity"
+        },
+        {
+          "kind": "function",
+          "name": "is_binder_code"
+        },
+        {
+          "kind": "function",
+          "name": "make_cell"
+        },
+        {
+          "kind": "function",
+          "name": "max_universe"
+        },
+        {
+          "kind": "function",
+          "name": "tag_code"
+        },
+        {
+          "kind": "function",
+          "name": "type_eq"
+        },
+        {
+          "kind": "function",
+          "name": "type_invalid"
+        },
+        {
+          "kind": "function",
+          "name": "type_nat"
+        },
+        {
+          "kind": "function",
+          "name": "type_pi"
+        },
+        {
+          "kind": "function",
+          "name": "type_universe"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.random.v1",
+      "path": "library/core/random.mncs",
+      "profile": "0.6",
+      "source_identity": "sha256:98c9628fbcb7942d9249e97486f9e42a77a04bc5a04af7882d812cc6311d78a4",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "BoundedDraw"
+        },
+        {
+          "kind": "record",
+          "name": "ShufflePick"
+        },
+        {
+          "kind": "record",
+          "name": "SplitStreams"
+        },
+        {
+          "kind": "record",
+          "name": "TwoDraws"
+        },
+        {
+          "kind": "function",
+          "name": "derive"
+        },
+        {
+          "kind": "function",
+          "name": "lcg_next"
+        },
+        {
+          "kind": "function",
+          "name": "lcg_next_bounded"
+        },
+        {
+          "kind": "function",
+          "name": "shuffle_index"
+        },
+        {
+          "kind": "function",
+          "name": "split"
+        },
+        {
+          "kind": "function",
+          "name": "two_bounded"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.result.v1",
+      "path": "library/core/result.mncs",
+      "profile": "0.6",
+      "source_identity": "sha256:37ab3f0187ee27fc334ebe1feae6d11eb38b495e4014da874634e65dbc34b9ad",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Gate"
+        },
+        {
+          "kind": "enum",
+          "name": "Result"
+        },
+        {
+          "kind": "function",
+          "name": "bounded_divide"
+        },
+        {
+          "kind": "function",
+          "name": "divide"
+        },
+        {
+          "kind": "function",
+          "name": "reason_of"
+        },
+        {
+          "kind": "function",
+          "name": "value_or"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.sequences.v1",
+      "path": "library/core/sequences.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:ef8fc2bdb651071fdba8c9d8b3ec520db5dee5b2b27ad310c5ff727f1f23731c",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "ByteViewBuilder16"
+        },
+        {
+          "kind": "record",
+          "name": "ByteViewBuilder256"
+        },
+        {
+          "kind": "record",
+          "name": "ByteViewBuilder64"
+        },
+        {
+          "kind": "enum",
+          "name": "Found"
+        },
+        {
+          "kind": "record",
+          "name": "Scan"
+        },
+        {
+          "kind": "function",
+          "name": "all_true4"
+        },
+        {
+          "kind": "function",
+          "name": "any_true4"
+        },
+        {
+          "kind": "function",
+          "name": "byte_view_builder16_empty"
+        },
+        {
+          "kind": "function",
+          "name": "byte_view_builder16_finish"
+        },
+        {
+          "kind": "function",
+          "name": "byte_view_builder16_push"
+        },
+        {
+          "kind": "function",
+          "name": "byte_view_builder64_empty"
+        },
+        {
+          "kind": "function",
+          "name": "byte_view_builder64_finish"
+        },
+        {
+          "kind": "function",
+          "name": "byte_view_builder64_push"
+        },
+        {
+          "kind": "function",
+          "name": "byte_view_builder_empty"
+        },
+        {
+          "kind": "function",
+          "name": "byte_view_builder_finish"
+        },
+        {
+          "kind": "function",
+          "name": "byte_view_builder_push"
+        },
+        {
+          "kind": "function",
+          "name": "collect_selected16"
+        },
+        {
+          "kind": "function",
+          "name": "collect_selected4"
+        },
+        {
+          "kind": "function",
+          "name": "collect_selected64"
+        },
+        {
+          "kind": "function",
+          "name": "contains4"
+        },
+        {
+          "kind": "function",
+          "name": "contains_byte4"
+        },
+        {
+          "kind": "function",
+          "name": "count4"
+        },
+        {
+          "kind": "function",
+          "name": "count_nonzero4"
+        },
+        {
+          "kind": "function",
+          "name": "count_true4"
+        },
+        {
+          "kind": "function",
+          "name": "equals4"
+        },
+        {
+          "kind": "function",
+          "name": "find_index4"
+        },
+        {
+          "kind": "function",
+          "name": "first_of"
+        },
+        {
+          "kind": "function",
+          "name": "first_or"
+        },
+        {
+          "kind": "function",
+          "name": "first_u64"
+        },
+        {
+          "kind": "function",
+          "name": "first_u64_view"
+        },
+        {
+          "kind": "function",
+          "name": "identity_u64"
+        },
+        {
+          "kind": "function",
+          "name": "is_sorted4"
+        },
+        {
+          "kind": "function",
+          "name": "last_of"
+        },
+        {
+          "kind": "function",
+          "name": "last_or"
+        },
+        {
+          "kind": "function",
+          "name": "make_found"
+        },
+        {
+          "kind": "function",
+          "name": "max4"
+        },
+        {
+          "kind": "function",
+          "name": "min4"
+        },
+        {
+          "kind": "function",
+          "name": "no_found"
+        },
+        {
+          "kind": "function",
+          "name": "prefix2"
+        },
+        {
+          "kind": "function",
+          "name": "put4"
+        },
+        {
+          "kind": "function",
+          "name": "reverse4"
+        },
+        {
+          "kind": "function",
+          "name": "scan_sorted"
+        },
+        {
+          "kind": "function",
+          "name": "start_scan"
+        },
+        {
+          "kind": "function",
+          "name": "starts_with2"
+        },
+        {
+          "kind": "function",
+          "name": "suffix2"
+        },
+        {
+          "kind": "function",
+          "name": "sum4"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.status.v1",
+      "path": "library/core/status.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:7690a6d6bff4d74cb60fa930a87d078db8d31a0a7e7533a876ed7daa7cd52ff6",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "PrefixState"
+        },
+        {
+          "kind": "enum",
+          "name": "Status"
+        },
+        {
+          "kind": "record",
+          "name": "StatusPair"
+        },
+        {
+          "kind": "record",
+          "name": "StatusSummary"
+        },
+        {
+          "kind": "function",
+          "name": "combine"
+        },
+        {
+          "kind": "function",
+          "name": "dominate"
+        },
+        {
+          "kind": "function",
+          "name": "dominate4"
+        },
+        {
+          "kind": "function",
+          "name": "dominates"
+        },
+        {
+          "kind": "function",
+          "name": "is_decided"
+        },
+        {
+          "kind": "function",
+          "name": "summarize8"
+        },
+        {
+          "kind": "function",
+          "name": "summary_step"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.vector.v1",
+      "path": "library/core/vector.mncs",
+      "profile": "0.8",
+      "source_identity": "sha256:8e4b72d710a6a928186c547cda613b77587ea73d77cbc0dfdcf3d5ff2bfb2259",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "dot4_wrap"
+        },
+        {
+          "kind": "function",
+          "name": "doubled4"
+        },
+        {
+          "kind": "function",
+          "name": "identity_u64"
+        },
+        {
+          "kind": "function",
+          "name": "positive_sum4"
+        },
+        {
+          "kind": "function",
+          "name": "positives_u64"
+        },
+        {
+          "kind": "function",
+          "name": "reduce_u64"
+        },
+        {
+          "kind": "function",
+          "name": "reduce_vec4"
+        },
+        {
+          "kind": "function",
+          "name": "replace2"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.version.v1",
+      "path": "library/core/version.mncs",
+      "profile": "0.6",
+      "source_identity": "sha256:686a9a08d0739b6e7c6fd43b3dda2fd3c74463deb293fccb634cb547d5272c3b",
+      "symbols": [
+        {
+          "kind": "enum",
+          "name": "Envelope"
+        },
+        {
+          "kind": "enum",
+          "name": "Ordering"
+        },
+        {
+          "kind": "record",
+          "name": "Version"
+        },
+        {
+          "kind": "function",
+          "name": "compare"
+        },
+        {
+          "kind": "function",
+          "name": "is_breaking_upgrade"
+        },
+        {
+          "kind": "function",
+          "name": "make"
+        },
+        {
+          "kind": "function",
+          "name": "order_satisfies"
+        },
+        {
+          "kind": "function",
+          "name": "satisfies"
+        }
+      ]
+    },
+    {
+      "module": "mncs.core.vision.v1",
+      "path": "library/core/vision.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:41f8b1a80caf3f61b18979bf874b8508388a9c37459e86de2ad7ca20c38d6227",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "BoundsAcc"
+        },
+        {
+          "kind": "record",
+          "name": "ChainState"
+        },
+        {
+          "kind": "record",
+          "name": "ContourInfo"
+        },
+        {
+          "kind": "record",
+          "name": "CornerSet"
+        },
+        {
+          "kind": "record",
+          "name": "EdgeSample"
+        },
+        {
+          "kind": "record",
+          "name": "EdgeSegment"
+        },
+        {
+          "kind": "record",
+          "name": "EdgeSet"
+        },
+        {
+          "kind": "record",
+          "name": "LineCandidate"
+        },
+        {
+          "kind": "record",
+          "name": "RectangleCandidate"
+        },
+        {
+          "kind": "record",
+          "name": "SceneDelta"
+        },
+        {
+          "kind": "record",
+          "name": "SceneGraph"
+        },
+        {
+          "kind": "record",
+          "name": "SceneNode"
+        },
+        {
+          "kind": "record",
+          "name": "SegmentSet"
+        },
+        {
+          "kind": "function",
+          "name": "add_corner_if_new"
+        },
+        {
+          "kind": "function",
+          "name": "add_segment_corners"
+        },
+        {
+          "kind": "function",
+          "name": "adjacent"
+        },
+        {
+          "kind": "function",
+          "name": "bounding_contour"
+        },
+        {
+          "kind": "function",
+          "name": "bounds_seed"
+        },
+        {
+          "kind": "function",
+          "name": "bounds_step"
+        },
+        {
+          "kind": "function",
+          "name": "chain_step"
+        },
+        {
+          "kind": "function",
+          "name": "chain_step_guarded"
+        },
+        {
+          "kind": "function",
+          "name": "collect_corners"
+        },
+        {
+          "kind": "function",
+          "name": "corner_contains"
+        },
+        {
+          "kind": "function",
+          "name": "detect_edges"
+        },
+        {
+          "kind": "function",
+          "name": "edge_count"
+        },
+        {
+          "kind": "function",
+          "name": "empty_contour"
+        },
+        {
+          "kind": "function",
+          "name": "empty_corner_set"
+        },
+        {
+          "kind": "function",
+          "name": "empty_delta"
+        },
+        {
+          "kind": "function",
+          "name": "empty_edge_set"
+        },
+        {
+          "kind": "function",
+          "name": "empty_node"
+        },
+        {
+          "kind": "function",
+          "name": "empty_sample"
+        },
+        {
+          "kind": "function",
+          "name": "empty_scene"
+        },
+        {
+          "kind": "function",
+          "name": "empty_segment"
+        },
+        {
+          "kind": "function",
+          "name": "empty_segment_set"
+        },
+        {
+          "kind": "function",
+          "name": "estimate_closed"
+        },
+        {
+          "kind": "function",
+          "name": "fit_rectangle"
+        },
+        {
+          "kind": "function",
+          "name": "fresh_segment"
+        },
+        {
+          "kind": "function",
+          "name": "group_segments"
+        },
+        {
+          "kind": "function",
+          "name": "grow_segment"
+        },
+        {
+          "kind": "function",
+          "name": "index_to_point"
+        },
+        {
+          "kind": "function",
+          "name": "law_observe_empty"
+        },
+        {
+          "kind": "function",
+          "name": "law_rect_roundtrip"
+        },
+        {
+          "kind": "function",
+          "name": "law_rotate_bbox"
+        },
+        {
+          "kind": "function",
+          "name": "law_track_move"
+        },
+        {
+          "kind": "function",
+          "name": "longest_segment"
+        },
+        {
+          "kind": "function",
+          "name": "observe"
+        },
+        {
+          "kind": "function",
+          "name": "push_sample_if"
+        },
+        {
+          "kind": "function",
+          "name": "push_segment"
+        },
+        {
+          "kind": "function",
+          "name": "rect_confidence"
+        },
+        {
+          "kind": "function",
+          "name": "scene_delta"
+        },
+        {
+          "kind": "function",
+          "name": "select_longer_guarded"
+        },
+        {
+          "kind": "function",
+          "name": "singleton_scene"
+        },
+        {
+          "kind": "function",
+          "name": "track"
+        }
+      ]
+    },
+    {
+      "module": "mncs.family.coherence.v01",
+      "path": "library/family/coherence.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:7f9230b52c6ae95732006287527991f859534c34e7591fc53a0b13127cd017cf",
+      "symbols": [
+        {
+          "kind": "enum",
+          "name": "ChangeSetEvent"
+        },
+        {
+          "kind": "enum",
+          "name": "ChangeSetState"
+        },
+        {
+          "kind": "record",
+          "name": "CheckVector"
+        },
+        {
+          "kind": "enum",
+          "name": "CoherenceVerdict"
+        },
+        {
+          "kind": "record",
+          "name": "CompatibilityClaim"
+        },
+        {
+          "kind": "enum",
+          "name": "DriftKind"
+        },
+        {
+          "kind": "record",
+          "name": "DriftObservation"
+        },
+        {
+          "kind": "enum",
+          "name": "ImpactClass"
+        },
+        {
+          "kind": "record",
+          "name": "ImpactObservation"
+        },
+        {
+          "kind": "record",
+          "name": "PromotionCase"
+        },
+        {
+          "kind": "enum",
+          "name": "PromotionDecision"
+        },
+        {
+          "kind": "record",
+          "name": "Transition"
+        },
+        {
+          "kind": "function",
+          "name": "accept"
+        },
+        {
+          "kind": "function",
+          "name": "aggregate_checks"
+        },
+        {
+          "kind": "function",
+          "name": "assess_drift"
+        },
+        {
+          "kind": "function",
+          "name": "assess_promotion_readiness"
+        },
+        {
+          "kind": "function",
+          "name": "classify_impact"
+        },
+        {
+          "kind": "function",
+          "name": "drift_references"
+        },
+        {
+          "kind": "function",
+          "name": "evaluate_compatibility"
+        },
+        {
+          "kind": "function",
+          "name": "evaluate_envelope"
+        },
+        {
+          "kind": "function",
+          "name": "hold"
+        },
+        {
+          "kind": "function",
+          "name": "promotion_decision"
+        },
+        {
+          "kind": "function",
+          "name": "transition"
+        }
+      ]
+    },
+    {
+      "module": "mncs.family.journal.v1",
+      "path": "library/family/journal.mncs",
+      "profile": "0.10",
+      "source_identity": "sha256:a9cfa0e10dfbeccce0b83ebfbcdf6f0dba5faea157bff74f0cb74183fb1c22c9",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "AdmissionCase"
+        },
+        {
+          "kind": "enum",
+          "name": "AdmissionVerdict"
+        },
+        {
+          "kind": "enum",
+          "name": "EventKind"
+        },
+        {
+          "kind": "record",
+          "name": "EvidenceTally"
+        },
+        {
+          "kind": "record",
+          "name": "ModelOpinion"
+        },
+        {
+          "kind": "enum",
+          "name": "ModelRole"
+        },
+        {
+          "kind": "record",
+          "name": "Sensitivity"
+        },
+        {
+          "kind": "enum",
+          "name": "TrustEvent"
+        },
+        {
+          "kind": "enum",
+          "name": "TrustLevel"
+        },
+        {
+          "kind": "record",
+          "name": "TrustTransition"
+        },
+        {
+          "kind": "function",
+          "name": "admission_decision"
+        },
+        {
+          "kind": "function",
+          "name": "chain_ok"
+        },
+        {
+          "kind": "function",
+          "name": "check_fork_link"
+        },
+        {
+          "kind": "function",
+          "name": "check_genesis_link"
+        },
+        {
+          "kind": "function",
+          "name": "check_model_never_admits"
+        },
+        {
+          "kind": "function",
+          "name": "check_reorder_link"
+        },
+        {
+          "kind": "function",
+          "name": "check_successor_link"
+        },
+        {
+          "kind": "function",
+          "name": "gate_admit"
+        },
+        {
+          "kind": "function",
+          "name": "may_render_public"
+        },
+        {
+          "kind": "function",
+          "name": "model_hint_duplicate"
+        },
+        {
+          "kind": "function",
+          "name": "model_hint_sensitive"
+        },
+        {
+          "kind": "function",
+          "name": "model_hint_worthy"
+        },
+        {
+          "kind": "function",
+          "name": "model_may_admit"
+        },
+        {
+          "kind": "function",
+          "name": "sample_digest"
+        },
+        {
+          "kind": "function",
+          "name": "trust_accept"
+        },
+        {
+          "kind": "function",
+          "name": "trust_hold"
+        },
+        {
+          "kind": "function",
+          "name": "trust_transition"
+        },
+        {
+          "kind": "function",
+          "name": "trust_upgrade"
+        }
+      ]
+    },
+    {
+      "module": "mncs.family.rfc_status.v1",
+      "path": "library/family/rfc_status.mncs",
+      "profile": "0.10",
+      "source_identity": "sha256:bd8afffcd37a1381ebdfc733074924776a959b0fcefce54684498c4fbfca1594",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "CriterionTally"
+        },
+        {
+          "kind": "enum",
+          "name": "DesignState"
+        },
+        {
+          "kind": "enum",
+          "name": "ImplState"
+        },
+        {
+          "kind": "function",
+          "name": "check_rfc0007_experimental"
+        },
+        {
+          "kind": "function",
+          "name": "check_rfc0007_implemented"
+        },
+        {
+          "kind": "function",
+          "name": "gate_experimental"
+        },
+        {
+          "kind": "function",
+          "name": "gate_implemented"
+        },
+        {
+          "kind": "function",
+          "name": "rank"
+        },
+        {
+          "kind": "function",
+          "name": "rfc0007_tally"
+        },
+        {
+          "kind": "function",
+          "name": "transition_allowed"
+        }
+      ]
+    },
+    {
+      "module": "mncs.jit.binding.v1",
+      "path": "library/jit/binding.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:9517c094badc3c60bbd7fd0f236b3d5a23d26f5c479b2c317dc45751f121cbd0",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "AbandonOut"
+        },
+        {
+          "kind": "record",
+          "name": "NoteOut"
+        },
+        {
+          "kind": "record",
+          "name": "PublishOut"
+        },
+        {
+          "kind": "record",
+          "name": "PublishScan"
+        },
+        {
+          "kind": "record",
+          "name": "ResolveOut"
+        },
+        {
+          "kind": "record",
+          "name": "RetireArtifactOut"
+        },
+        {
+          "kind": "record",
+          "name": "RetireBindFold"
+        },
+        {
+          "kind": "function",
+          "name": "abandon"
+        },
+        {
+          "kind": "function",
+          "name": "artifact_slot"
+        },
+        {
+          "kind": "function",
+          "name": "binding_slot"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_abandon"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_note_guards"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_publish_flow"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_retire"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_stale_proof"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_supersede"
+        },
+        {
+          "kind": "function",
+          "name": "def_slot"
+        },
+        {
+          "kind": "function",
+          "name": "latest_generation"
+        },
+        {
+          "kind": "function",
+          "name": "nodeps"
+        },
+        {
+          "kind": "function",
+          "name": "note_compiled"
+        },
+        {
+          "kind": "function",
+          "name": "publish"
+        },
+        {
+          "kind": "function",
+          "name": "resolve"
+        },
+        {
+          "kind": "function",
+          "name": "retire_artifact"
+        }
+      ]
+    },
+    {
+      "module": "mncs.jit.depends.v1",
+      "path": "library/jit/depends.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:4a07aaed3e0385fca8d17f6999876cabefcb72cd26d28b4a39f32edfcf0f10ac",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "DependFold"
+        },
+        {
+          "kind": "record",
+          "name": "DependentsOut"
+        },
+        {
+          "kind": "record",
+          "name": "DirectOut"
+        },
+        {
+          "kind": "record",
+          "name": "EdgeInsertOut"
+        },
+        {
+          "kind": "record",
+          "name": "StaleOut"
+        },
+        {
+          "kind": "function",
+          "name": "affected_has"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_body_only"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_direct_call_layout"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_insert_guards"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_policy_matrix"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_transitive_chain"
+        },
+        {
+          "kind": "function",
+          "name": "classify_dependent"
+        },
+        {
+          "kind": "function",
+          "name": "depend_round"
+        },
+        {
+          "kind": "function",
+          "name": "dependents_seeded"
+        },
+        {
+          "kind": "function",
+          "name": "direct_has"
+        },
+        {
+          "kind": "function",
+          "name": "direct_kind"
+        },
+        {
+          "kind": "function",
+          "name": "direct_users"
+        },
+        {
+          "kind": "function",
+          "name": "edge_known"
+        },
+        {
+          "kind": "function",
+          "name": "empty_binding"
+        },
+        {
+          "kind": "function",
+          "name": "empty_bindings"
+        },
+        {
+          "kind": "function",
+          "name": "empty_edge"
+        },
+        {
+          "kind": "function",
+          "name": "empty_edges"
+        },
+        {
+          "kind": "function",
+          "name": "escalate_transitive"
+        },
+        {
+          "kind": "function",
+          "name": "insert_edge"
+        },
+        {
+          "kind": "function",
+          "name": "select_binding"
+        },
+        {
+          "kind": "function",
+          "name": "select_binding_edge"
+        },
+        {
+          "kind": "function",
+          "name": "stale_bindings"
+        },
+        {
+          "kind": "function",
+          "name": "stale_reason_for"
+        }
+      ]
+    },
+    {
+      "module": "mncs.jit.lifecycle.v1",
+      "path": "library/jit/lifecycle.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:f4656413e1bc5f19950407749b6cc21f68c1d98d7e753a4317be6aaa9bf0e622",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "RetireOut"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_matrix"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_retire_window"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_unknown_closed"
+        },
+        {
+          "kind": "function",
+          "name": "retire_window"
+        },
+        {
+          "kind": "function",
+          "name": "select_executable"
+        },
+        {
+          "kind": "function",
+          "name": "transition_allowed"
+        }
+      ]
+    },
+    {
+      "module": "mncs.jit.plan.v1",
+      "path": "library/jit/plan.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:6c5e71ce936f72157876c35f7a82f8f3f22258f1c13bc94a17513507b54213ef",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Plan"
+        },
+        {
+          "kind": "record",
+          "name": "PlanDecision"
+        },
+        {
+          "kind": "function",
+          "name": "build_plan"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_plan_accept"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_selection_flags"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_selection_rows"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_tier_policy"
+        },
+        {
+          "kind": "function",
+          "name": "hot_candidate"
+        },
+        {
+          "kind": "function",
+          "name": "recommend_tier"
+        },
+        {
+          "kind": "function",
+          "name": "select_provider"
+        }
+      ]
+    },
+    {
+      "module": "mncs.jit.profile.v1",
+      "path": "library/jit/profile.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:366038a748de23925abfc39a4d6c0dc89eef9cb5b5c4ac58d145d8d2e39c3415",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Profile"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_empty_profile"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_observe_chain"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_saturation"
+        },
+        {
+          "kind": "function",
+          "name": "is_steady"
+        },
+        {
+          "kind": "function",
+          "name": "mean_exec_ms"
+        },
+        {
+          "kind": "function",
+          "name": "observe_call"
+        },
+        {
+          "kind": "function",
+          "name": "observe_compile"
+        },
+        {
+          "kind": "function",
+          "name": "profile_zero"
+        },
+        {
+          "kind": "function",
+          "name": "saturating_add"
+        }
+      ]
+    },
+    {
+      "module": "mncs.jit.proof.v1",
+      "path": "library/jit/proof.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:9df360436fc3f1d85ac5506232ab6755295f736b472643736829d965bca3ea19",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Specialization"
+        },
+        {
+          "kind": "function",
+          "name": "admit_specialization"
+        },
+        {
+          "kind": "function",
+          "name": "artifact_proof_valid"
+        },
+        {
+          "kind": "function",
+          "name": "assumptions_match"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_axes"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_dual_key"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_era_matrix"
+        },
+        {
+          "kind": "function",
+          "name": "proof_current"
+        }
+      ]
+    },
+    {
+      "module": "mncs.jit.session.v1",
+      "path": "library/jit/session.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:731c0e25ee0c66885810aeec9674aab87e2070048a87219eafbbed670f01f5c5",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "ArtifactQuery"
+        },
+        {
+          "kind": "record",
+          "name": "BindingQuery"
+        },
+        {
+          "kind": "record",
+          "name": "CloseFold"
+        },
+        {
+          "kind": "record",
+          "name": "Counts"
+        },
+        {
+          "kind": "record",
+          "name": "DefineOut"
+        },
+        {
+          "kind": "record",
+          "name": "EdgeFold"
+        },
+        {
+          "kind": "record",
+          "name": "ProofQuery"
+        },
+        {
+          "kind": "function",
+          "name": "advance_proof"
+        },
+        {
+          "kind": "function",
+          "name": "advance_semantic"
+        },
+        {
+          "kind": "function",
+          "name": "artifact_of"
+        },
+        {
+          "kind": "function",
+          "name": "binding_index"
+        },
+        {
+          "kind": "function",
+          "name": "binding_of"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_create_define"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_era_close"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_guards"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_redefine_flow"
+        },
+        {
+          "kind": "function",
+          "name": "close"
+        },
+        {
+          "kind": "function",
+          "name": "create"
+        },
+        {
+          "kind": "function",
+          "name": "define"
+        },
+        {
+          "kind": "function",
+          "name": "define_new"
+        },
+        {
+          "kind": "function",
+          "name": "define_redefine"
+        },
+        {
+          "kind": "function",
+          "name": "definition_proof"
+        },
+        {
+          "kind": "function",
+          "name": "has_room_edges"
+        },
+        {
+          "kind": "function",
+          "name": "insert_dep_edges"
+        },
+        {
+          "kind": "function",
+          "name": "latest_generation"
+        },
+        {
+          "kind": "function",
+          "name": "latest_hash"
+        },
+        {
+          "kind": "function",
+          "name": "no_deps"
+        },
+        {
+          "kind": "function",
+          "name": "select_edge_fold"
+        },
+        {
+          "kind": "function",
+          "name": "session_counts"
+        },
+        {
+          "kind": "function",
+          "name": "zero_binding"
+        },
+        {
+          "kind": "function",
+          "name": "zero_definition"
+        },
+        {
+          "kind": "function",
+          "name": "zero_edge"
+        },
+        {
+          "kind": "function",
+          "name": "zero_executable"
+        }
+      ]
+    },
+    {
+      "module": "mncs.jit.types.v1",
+      "path": "library/jit/types.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:2017f25e2c0df0a00e651fc330459d56967c4b82e29886a992cda950fdc27fb5",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Binding"
+        },
+        {
+          "kind": "enum",
+          "name": "ChangeKind"
+        },
+        {
+          "kind": "record",
+          "name": "Definition"
+        },
+        {
+          "kind": "record",
+          "name": "DepEdge"
+        },
+        {
+          "kind": "enum",
+          "name": "DepKind"
+        },
+        {
+          "kind": "enum",
+          "name": "DepVerdict"
+        },
+        {
+          "kind": "record",
+          "name": "Executable"
+        },
+        {
+          "kind": "enum",
+          "name": "Lifecycle"
+        },
+        {
+          "kind": "record",
+          "name": "ProofRef"
+        },
+        {
+          "kind": "enum",
+          "name": "Provider"
+        },
+        {
+          "kind": "record",
+          "name": "Session"
+        },
+        {
+          "kind": "enum",
+          "name": "Tier"
+        },
+        {
+          "kind": "enum",
+          "name": "Validity"
+        },
+        {
+          "kind": "enum",
+          "name": "Workload"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_change_policy"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_codes_roundtrip"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_lifecycle_table"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_provider_table"
+        },
+        {
+          "kind": "function",
+          "name": "change_code"
+        },
+        {
+          "kind": "function",
+          "name": "change_forces_dependent_review"
+        },
+        {
+          "kind": "function",
+          "name": "change_is_known"
+        },
+        {
+          "kind": "function",
+          "name": "change_of"
+        },
+        {
+          "kind": "function",
+          "name": "dep_kind_code"
+        },
+        {
+          "kind": "function",
+          "name": "dep_kind_is_known"
+        },
+        {
+          "kind": "function",
+          "name": "dep_kind_of"
+        },
+        {
+          "kind": "function",
+          "name": "lifecycle_code"
+        },
+        {
+          "kind": "function",
+          "name": "lifecycle_is_known"
+        },
+        {
+          "kind": "function",
+          "name": "lifecycle_is_live"
+        },
+        {
+          "kind": "function",
+          "name": "lifecycle_is_terminal"
+        },
+        {
+          "kind": "function",
+          "name": "lifecycle_of"
+        },
+        {
+          "kind": "function",
+          "name": "provider_code"
+        },
+        {
+          "kind": "function",
+          "name": "provider_is_implemented"
+        },
+        {
+          "kind": "function",
+          "name": "provider_is_known"
+        },
+        {
+          "kind": "function",
+          "name": "provider_is_native"
+        },
+        {
+          "kind": "function",
+          "name": "provider_of"
+        },
+        {
+          "kind": "function",
+          "name": "tier_code"
+        },
+        {
+          "kind": "function",
+          "name": "tier_is_known"
+        },
+        {
+          "kind": "function",
+          "name": "tier_of"
+        },
+        {
+          "kind": "function",
+          "name": "validity_code"
+        },
+        {
+          "kind": "function",
+          "name": "validity_is_known"
+        },
+        {
+          "kind": "function",
+          "name": "validity_of"
+        },
+        {
+          "kind": "function",
+          "name": "verdict_code"
+        },
+        {
+          "kind": "function",
+          "name": "verdict_requires_recompile"
+        },
+        {
+          "kind": "function",
+          "name": "workload_code"
+        },
+        {
+          "kind": "function",
+          "name": "workload_is_known"
+        },
+        {
+          "kind": "function",
+          "name": "workload_of"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.ansi.v1",
+      "path": "library/std/ansi.mncs",
+      "profile": "0.8",
+      "source_identity": "sha256:634e6acece32a5875e448a8b03c06cecb602a5326950c0f81b60fb928ae37e53",
+      "symbols": [
+        {
+          "kind": "enum",
+          "name": "AnsiEvent"
+        },
+        {
+          "kind": "record",
+          "name": "ParseResult"
+        },
+        {
+          "kind": "record",
+          "name": "ParserState"
+        },
+        {
+          "kind": "function",
+          "name": "ansi_event_is_unknown"
+        },
+        {
+          "kind": "function",
+          "name": "append"
+        },
+        {
+          "kind": "function",
+          "name": "byte_value"
+        },
+        {
+          "kind": "function",
+          "name": "one_digit"
+        },
+        {
+          "kind": "function",
+          "name": "parse_sequence"
+        },
+        {
+          "kind": "function",
+          "name": "parser_feed"
+        },
+        {
+          "kind": "function",
+          "name": "parser_init"
+        },
+        {
+          "kind": "function",
+          "name": "sequence_event"
+        },
+        {
+          "kind": "function",
+          "name": "two_digits"
+        },
+        {
+          "kind": "function",
+          "name": "unknown"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.application.v1",
+      "path": "library/std/application.mncs",
+      "profile": "0.16",
+      "source_identity": "sha256:d10591c3f9ec3e5b4c72bdef0ae9e0e2a0fcf1f120acc6379491c8528088b0e0",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "ApplicationContext"
+        },
+        {
+          "kind": "record",
+          "name": "ApplicationExit"
+        },
+        {
+          "kind": "record",
+          "name": "EnvironmentEntry"
+        },
+        {
+          "kind": "function",
+          "name": "context_is_bounded"
+        },
+        {
+          "kind": "function",
+          "name": "failure"
+        },
+        {
+          "kind": "function",
+          "name": "success"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.channel.v1",
+      "path": "library/std/channel.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:b8f76368658b8add78e2c0df7baab89bde173ac2b3b669422c93e5f777165b31",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Channel"
+        },
+        {
+          "kind": "record",
+          "name": "CloseOut"
+        },
+        {
+          "kind": "record",
+          "name": "DoneOut"
+        },
+        {
+          "kind": "record",
+          "name": "RecvOut"
+        },
+        {
+          "kind": "record",
+          "name": "SendOut"
+        },
+        {
+          "kind": "record",
+          "name": "ShiftFold"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_channel_empty"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_channel_flow"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_send_closed"
+        },
+        {
+          "kind": "function",
+          "name": "close"
+        },
+        {
+          "kind": "function",
+          "name": "new"
+        },
+        {
+          "kind": "function",
+          "name": "producer_done"
+        },
+        {
+          "kind": "function",
+          "name": "recv"
+        },
+        {
+          "kind": "function",
+          "name": "send"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.chunk.v1",
+      "path": "library/std/chunk.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:70e505eec17a7cc10c8e8fb4cf549a412758527570a85040dac739595b658311",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Cursor"
+        },
+        {
+          "kind": "record",
+          "name": "JoinedLine"
+        },
+        {
+          "kind": "record",
+          "name": "LineStep"
+        },
+        {
+          "kind": "record",
+          "name": "Span"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_continue_line"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_find_newline"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_next_line"
+        },
+        {
+          "kind": "function",
+          "name": "continue_line"
+        },
+        {
+          "kind": "function",
+          "name": "find_newline"
+        },
+        {
+          "kind": "function",
+          "name": "line_length"
+        },
+        {
+          "kind": "function",
+          "name": "next_line"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.clock.v1",
+      "path": "library/std/clock.mncs",
+      "profile": "0.10",
+      "source_identity": "sha256:a825fe196cc3569576e2cadd2106b1b298be562df4582c5d6b9440221e0773b6",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "elapsed"
+        },
+        {
+          "kind": "function",
+          "name": "expired"
+        },
+        {
+          "kind": "function",
+          "name": "fresh_within"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.encoding.v1",
+      "path": "library/std/encoding.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:86c3cab77708b87dc2d01ff484416ebf815ef6c0c3b0776fde99745f3b8eb9c5",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "decode_u16"
+        },
+        {
+          "kind": "function",
+          "name": "decode_u32"
+        },
+        {
+          "kind": "function",
+          "name": "decode_u64"
+        },
+        {
+          "kind": "function",
+          "name": "encode_u16"
+        },
+        {
+          "kind": "function",
+          "name": "encode_u32"
+        },
+        {
+          "kind": "function",
+          "name": "encode_u64"
+        },
+        {
+          "kind": "function",
+          "name": "encode_version"
+        },
+        {
+          "kind": "function",
+          "name": "read_u16_le"
+        },
+        {
+          "kind": "function",
+          "name": "read_u32_le"
+        },
+        {
+          "kind": "function",
+          "name": "u16_roundtrip"
+        },
+        {
+          "kind": "function",
+          "name": "u32_roundtrip"
+        },
+        {
+          "kind": "function",
+          "name": "u64_roundtrip"
+        },
+        {
+          "kind": "function",
+          "name": "version_major"
+        },
+        {
+          "kind": "function",
+          "name": "version_minor"
+        },
+        {
+          "kind": "function",
+          "name": "version_patch"
+        },
+        {
+          "kind": "function",
+          "name": "version_roundtrip"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.fixed.v1",
+      "path": "library/std/fixed.mncs",
+      "profile": "0.6",
+      "source_identity": "sha256:62bc1be04c3af5f6413362799dab3bb652f6c741a32f3cb46162b9e2eefa9899",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Score"
+        },
+        {
+          "kind": "function",
+          "name": "add"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_blend"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_clamp"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_margin"
+        },
+        {
+          "kind": "function",
+          "name": "clamp_score"
+        },
+        {
+          "kind": "function",
+          "name": "millis"
+        },
+        {
+          "kind": "function",
+          "name": "score"
+        },
+        {
+          "kind": "function",
+          "name": "sub"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.json.v1",
+      "path": "library/std/json.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:bbf08cfd0b220b5ed50aa3276cdd099efb518820f187841b5a5f2dd51418506c",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "ScanState"
+        },
+        {
+          "kind": "function",
+          "name": "after_value"
+        },
+        {
+          "kind": "function",
+          "name": "is_hex"
+        },
+        {
+          "kind": "function",
+          "name": "is_space"
+        },
+        {
+          "kind": "function",
+          "name": "literal_byte"
+        },
+        {
+          "kind": "function",
+          "name": "literal_end"
+        },
+        {
+          "kind": "function",
+          "name": "scan"
+        },
+        {
+          "kind": "function",
+          "name": "scan_bad"
+        },
+        {
+          "kind": "function",
+          "name": "scan_begin_container"
+        },
+        {
+          "kind": "function",
+          "name": "scan_begin_string"
+        },
+        {
+          "kind": "function",
+          "name": "scan_close_value"
+        },
+        {
+          "kind": "function",
+          "name": "scan_end_container"
+        },
+        {
+          "kind": "function",
+          "name": "scan_finish_end"
+        },
+        {
+          "kind": "function",
+          "name": "scan_literal_step"
+        },
+        {
+          "kind": "function",
+          "name": "scan_number_delimiter"
+        },
+        {
+          "kind": "function",
+          "name": "scan_number_step"
+        },
+        {
+          "kind": "function",
+          "name": "scan_step"
+        },
+        {
+          "kind": "function",
+          "name": "scan_string_step"
+        },
+        {
+          "kind": "function",
+          "name": "scan_structural"
+        },
+        {
+          "kind": "function",
+          "name": "stack_weight"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.json_cursor.v1",
+      "path": "library/std/json_cursor.mncs",
+      "profile": "0.10",
+      "source_identity": "sha256:3ac6292bbff6f7c531aca51b1c83b5674540397a76cced1a47026da7ad71e36e",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Cursor"
+        },
+        {
+          "kind": "function",
+          "name": "feed_byte"
+        },
+        {
+          "kind": "function",
+          "name": "feed_chunk"
+        },
+        {
+          "kind": "function",
+          "name": "hex_value"
+        },
+        {
+          "kind": "function",
+          "name": "init"
+        },
+        {
+          "kind": "function",
+          "name": "is_hex"
+        },
+        {
+          "kind": "function",
+          "name": "is_utf8_continuation"
+        },
+        {
+          "kind": "function",
+          "name": "is_valid"
+        },
+        {
+          "kind": "function",
+          "name": "pop"
+        },
+        {
+          "kind": "function",
+          "name": "push"
+        },
+        {
+          "kind": "function",
+          "name": "stack_weight"
+        },
+        {
+          "kind": "function",
+          "name": "string_byte"
+        },
+        {
+          "kind": "function",
+          "name": "top"
+        },
+        {
+          "kind": "function",
+          "name": "utf8_first_continuation_valid"
+        },
+        {
+          "kind": "function",
+          "name": "utf8_lead_need"
+        },
+        {
+          "kind": "function",
+          "name": "zero_key"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.json_emit.v1",
+      "path": "library/std/json_emit.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:509b80aa679dfadffcb526d96aa4da28fb612bc75976dc955b62be9222dd84dd",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Digits"
+        },
+        {
+          "kind": "record",
+          "name": "EmitStep"
+        },
+        {
+          "kind": "record",
+          "name": "Emitted"
+        },
+        {
+          "kind": "record",
+          "name": "Writer"
+        },
+        {
+          "kind": "function",
+          "name": "begin_array"
+        },
+        {
+          "kind": "function",
+          "name": "begin_object"
+        },
+        {
+          "kind": "function",
+          "name": "bool_value"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_array"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_escaped"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_long_string"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_metrics_row"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_null"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_stray_end"
+        },
+        {
+          "kind": "function",
+          "name": "comma_if_needed"
+        },
+        {
+          "kind": "function",
+          "name": "digit_state"
+        },
+        {
+          "kind": "function",
+          "name": "digit_step"
+        },
+        {
+          "kind": "function",
+          "name": "end_array"
+        },
+        {
+          "kind": "function",
+          "name": "end_object"
+        },
+        {
+          "kind": "function",
+          "name": "finish"
+        },
+        {
+          "kind": "function",
+          "name": "hexchar"
+        },
+        {
+          "kind": "function",
+          "name": "int_value"
+        },
+        {
+          "kind": "function",
+          "name": "null_value"
+        },
+        {
+          "kind": "function",
+          "name": "open"
+        },
+        {
+          "kind": "function",
+          "name": "put"
+        },
+        {
+          "kind": "function",
+          "name": "put_quoted_byte"
+        },
+        {
+          "kind": "function",
+          "name": "put_quoted_live"
+        },
+        {
+          "kind": "function",
+          "name": "put_u64"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.json_projection.v1",
+      "path": "library/std/json_projection.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:d6927c358ec88d62c4d0d93ca063d32dc6bbe431c76dac98ca789eb606f6925b",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "count_key"
+        },
+        {
+          "kind": "function",
+          "name": "count_member"
+        },
+        {
+          "kind": "function",
+          "name": "is_space"
+        },
+        {
+          "kind": "function",
+          "name": "project_chunk"
+        },
+        {
+          "kind": "function",
+          "name": "projection_escaped"
+        },
+        {
+          "kind": "function",
+          "name": "projection_key_hits"
+        },
+        {
+          "kind": "function",
+          "name": "projection_key_match"
+        },
+        {
+          "kind": "function",
+          "name": "projection_member_hits"
+        },
+        {
+          "kind": "function",
+          "name": "projection_mode"
+        },
+        {
+          "kind": "function",
+          "name": "projection_pack"
+        },
+        {
+          "kind": "function",
+          "name": "projection_position"
+        },
+        {
+          "kind": "function",
+          "name": "projection_step"
+        },
+        {
+          "kind": "function",
+          "name": "projection_string_step"
+        },
+        {
+          "kind": "function",
+          "name": "projection_value_match"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.json_stream.v1",
+      "path": "library/std/json_stream.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:fa5f414698be449b0336949733d901e61bdb3ca99c50bac232c543e6a5cdc707",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "depth"
+        },
+        {
+          "kind": "function",
+          "name": "escape_mode"
+        },
+        {
+          "kind": "function",
+          "name": "feed"
+        },
+        {
+          "kind": "function",
+          "name": "feed_chunk"
+        },
+        {
+          "kind": "function",
+          "name": "finish"
+        },
+        {
+          "kind": "function",
+          "name": "init"
+        },
+        {
+          "kind": "function",
+          "name": "is_hex"
+        },
+        {
+          "kind": "function",
+          "name": "is_non_space"
+        },
+        {
+          "kind": "function",
+          "name": "is_space"
+        },
+        {
+          "kind": "function",
+          "name": "pack"
+        },
+        {
+          "kind": "function",
+          "name": "root_complete"
+        },
+        {
+          "kind": "function",
+          "name": "stack"
+        },
+        {
+          "kind": "function",
+          "name": "stack_weight"
+        },
+        {
+          "kind": "function",
+          "name": "started"
+        },
+        {
+          "kind": "function",
+          "name": "string_mode"
+        },
+        {
+          "kind": "function",
+          "name": "unicode_remaining"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.platform.v1",
+      "path": "library/std/platform.mncs",
+      "profile": "0.6",
+      "source_identity": "sha256:bc07d20cc2790928877c618dd046644265d82c84bea50f9ef174508f3627702e",
+      "symbols": [
+        {
+          "kind": "enum",
+          "name": "Accel"
+        },
+        {
+          "kind": "enum",
+          "name": "Arch"
+        },
+        {
+          "kind": "enum",
+          "name": "Envelope"
+        },
+        {
+          "kind": "enum",
+          "name": "ExecMode"
+        },
+        {
+          "kind": "enum",
+          "name": "Init"
+        },
+        {
+          "kind": "enum",
+          "name": "Libc"
+        },
+        {
+          "kind": "enum",
+          "name": "Ordering"
+        },
+        {
+          "kind": "enum",
+          "name": "Os"
+        },
+        {
+          "kind": "enum",
+          "name": "ReqArch"
+        },
+        {
+          "kind": "enum",
+          "name": "ReqLibc"
+        },
+        {
+          "kind": "enum",
+          "name": "ReqOs"
+        },
+        {
+          "kind": "record",
+          "name": "Version"
+        },
+        {
+          "kind": "record",
+          "name": "WorkerEnv"
+        },
+        {
+          "kind": "record",
+          "name": "WorkloadReq"
+        },
+        {
+          "kind": "function",
+          "name": "arch_matches"
+        },
+        {
+          "kind": "function",
+          "name": "arch_satisfies"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_arch"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_cuda"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_env"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_flag"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_libc"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_os"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_resources"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_version"
+        },
+        {
+          "kind": "function",
+          "name": "compare"
+        },
+        {
+          "kind": "function",
+          "name": "cuda_satisfies"
+        },
+        {
+          "kind": "function",
+          "name": "env_satisfies"
+        },
+        {
+          "kind": "function",
+          "name": "flag_satisfies"
+        },
+        {
+          "kind": "function",
+          "name": "libc_satisfies"
+        },
+        {
+          "kind": "function",
+          "name": "make_version"
+        },
+        {
+          "kind": "function",
+          "name": "order_satisfies"
+        },
+        {
+          "kind": "function",
+          "name": "os_satisfies"
+        },
+        {
+          "kind": "function",
+          "name": "resources_satisfy"
+        },
+        {
+          "kind": "function",
+          "name": "version_satisfies"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.process.v1",
+      "path": "library/std/process.mncs",
+      "profile": "0.16",
+      "source_identity": "sha256:60d13b8850304578e9443f3779bb046226e389f732acc8efd8ed7ae9c9026b85",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "EnvironmentEntry"
+        },
+        {
+          "kind": "record",
+          "name": "ProcessRequest"
+        },
+        {
+          "kind": "record",
+          "name": "ProcessResult"
+        },
+        {
+          "kind": "function",
+          "name": "run"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.relation.v1",
+      "path": "library/std/relation.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:f0fcd04818e5286f7a696927922b0bc16e849dc88a128a1be58454d1fb528971",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "ClosureOut"
+        },
+        {
+          "kind": "record",
+          "name": "CompactOut"
+        },
+        {
+          "kind": "record",
+          "name": "DepthFold"
+        },
+        {
+          "kind": "record",
+          "name": "Edge"
+        },
+        {
+          "kind": "record",
+          "name": "EdgeSet"
+        },
+        {
+          "kind": "record",
+          "name": "ExpandOut"
+        },
+        {
+          "kind": "record",
+          "name": "InsertOut"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_budget"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_chain"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_cycle_dup"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_diamond"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_missing_order"
+        },
+        {
+          "kind": "function",
+          "name": "closure"
+        },
+        {
+          "kind": "function",
+          "name": "contains"
+        },
+        {
+          "kind": "function",
+          "name": "edge_insert_step"
+        },
+        {
+          "kind": "function",
+          "name": "edge_less"
+        },
+        {
+          "kind": "function",
+          "name": "expand_round"
+        },
+        {
+          "kind": "function",
+          "name": "insert"
+        },
+        {
+          "kind": "function",
+          "name": "normalize"
+        },
+        {
+          "kind": "function",
+          "name": "pack_closure"
+        },
+        {
+          "kind": "function",
+          "name": "visited_has"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.scope.v1",
+      "path": "library/std/scope.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:cff2b5ce6cc05c2bcaea9779f61bc4d77d79644250532d25aabe6936a6aad873",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "CancelFold"
+        },
+        {
+          "kind": "record",
+          "name": "Scope"
+        },
+        {
+          "kind": "record",
+          "name": "Settled"
+        },
+        {
+          "kind": "record",
+          "name": "Spawned"
+        },
+        {
+          "kind": "record",
+          "name": "TaskSlot"
+        },
+        {
+          "kind": "enum",
+          "name": "TaskState"
+        },
+        {
+          "kind": "function",
+          "name": "blank_slot"
+        },
+        {
+          "kind": "function",
+          "name": "can_settle"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_cancel_cleanup"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_failure"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_scope_escape"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_settle_rejected"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_task_join"
+        },
+        {
+          "kind": "function",
+          "name": "close"
+        },
+        {
+          "kind": "function",
+          "name": "code_of"
+        },
+        {
+          "kind": "function",
+          "name": "complete"
+        },
+        {
+          "kind": "function",
+          "name": "join_pack2"
+        },
+        {
+          "kind": "function",
+          "name": "join_sum"
+        },
+        {
+          "kind": "function",
+          "name": "open"
+        },
+        {
+          "kind": "function",
+          "name": "record_failure"
+        },
+        {
+          "kind": "function",
+          "name": "request_cancel"
+        },
+        {
+          "kind": "function",
+          "name": "slot_is_done"
+        },
+        {
+          "kind": "function",
+          "name": "slot_is_pending"
+        },
+        {
+          "kind": "function",
+          "name": "spawn"
+        },
+        {
+          "kind": "function",
+          "name": "state_of"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.sha256.v1",
+      "path": "library/std/sha256.mncs",
+      "profile": "0.14",
+      "source_identity": "sha256:9065c75f7b3e3ea81f4786ff587b0e47da1eed82b70fe9d166340b695fffff6c",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "DigestState"
+        },
+        {
+          "kind": "record",
+          "name": "State"
+        },
+        {
+          "kind": "function",
+          "name": "big_sigma0"
+        },
+        {
+          "kind": "function",
+          "name": "big_sigma1"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_sha256_abc"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_sha256_blocks"
+        },
+        {
+          "kind": "function",
+          "name": "ch"
+        },
+        {
+          "kind": "function",
+          "name": "compress"
+        },
+        {
+          "kind": "function",
+          "name": "finalize"
+        },
+        {
+          "kind": "function",
+          "name": "init"
+        },
+        {
+          "kind": "function",
+          "name": "length_byte"
+        },
+        {
+          "kind": "function",
+          "name": "maj"
+        },
+        {
+          "kind": "function",
+          "name": "not32"
+        },
+        {
+          "kind": "function",
+          "name": "rotr"
+        },
+        {
+          "kind": "function",
+          "name": "rounds"
+        },
+        {
+          "kind": "function",
+          "name": "schedule"
+        },
+        {
+          "kind": "function",
+          "name": "small_sigma0"
+        },
+        {
+          "kind": "function",
+          "name": "small_sigma1"
+        },
+        {
+          "kind": "function",
+          "name": "state_to_bytes"
+        },
+        {
+          "kind": "function",
+          "name": "update"
+        },
+        {
+          "kind": "function",
+          "name": "word_at"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.simd.v1",
+      "path": "library/std/simd.mncs",
+      "profile": "0.8",
+      "source_identity": "sha256:c50c38f9c5d92c7f63ed5287ef1394df9c498ee14cab22f3a76b499b55b785d1",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "affine_relu_sum4"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.sort.v1",
+      "path": "library/std/sort.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:9fb698dbd9c40abe2bb963afd157c27ab0bf04dd1fcfb7656549e31069f0f08e",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "candidate_sort_dedup"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_sort_edges"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_sort_reverse"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.store.v1",
+      "path": "library/std/store.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:e968d2293dd8af808c063ab790f2af890e19fc1d48e772835220c1d4db9696d7",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "CasOut"
+        },
+        {
+          "kind": "record",
+          "name": "ReadOut"
+        },
+        {
+          "kind": "record",
+          "name": "ReclaimOut"
+        },
+        {
+          "kind": "record",
+          "name": "Snapshot"
+        },
+        {
+          "kind": "record",
+          "name": "Store"
+        },
+        {
+          "kind": "function",
+          "name": "acquire"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_cas_race"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_durability_receipt"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_reclaim"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_snapshot_isolation"
+        },
+        {
+          "kind": "function",
+          "name": "cas"
+        },
+        {
+          "kind": "function",
+          "name": "read_through"
+        },
+        {
+          "kind": "function",
+          "name": "reclaim_scan"
+        },
+        {
+          "kind": "function",
+          "name": "release"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.task.v1",
+      "path": "library/std/task.mncs",
+      "profile": "0.8",
+      "source_identity": "sha256:169d17cb48d9c818f5e11eae79d9c74d8a2f3b5e477469762eb2ea3e0b0c6ce8",
+      "symbols": [
+        {
+          "kind": "enum",
+          "name": "Phase"
+        },
+        {
+          "kind": "record",
+          "name": "Task"
+        },
+        {
+          "kind": "record",
+          "name": "Transition"
+        },
+        {
+          "kind": "function",
+          "name": "advance"
+        },
+        {
+          "kind": "function",
+          "name": "advance_running"
+        },
+        {
+          "kind": "function",
+          "name": "begin"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_cancel"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_invalid"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_lifecycle"
+        },
+        {
+          "kind": "function",
+          "name": "finish"
+        },
+        {
+          "kind": "function",
+          "name": "is_terminal"
+        },
+        {
+          "kind": "function",
+          "name": "request_cancel"
+        },
+        {
+          "kind": "function",
+          "name": "spawn"
+        },
+        {
+          "kind": "function",
+          "name": "was_cancelled"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.text_map.v1",
+      "path": "library/std/text_map.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:e30c79a0316b0a7b723241d2a6385ccf5fdb65150e766c25079591d87234276d",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Coded16"
+        },
+        {
+          "kind": "record",
+          "name": "Coded32"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_lookup16"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_lookup32"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.text_scan.v1",
+      "path": "library/std/text_scan.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:9d09428028957c4f1002bc86024e6c2b672ec895241484a3e0a46183f3f865a9",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Cmp"
+        },
+        {
+          "kind": "record",
+          "name": "WordScan"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_compare"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_contains"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_count_byte"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_count_words"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_ends_with"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_equals"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_equals_folded"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_find"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_starts_with"
+        },
+        {
+          "kind": "function",
+          "name": "count_byte"
+        },
+        {
+          "kind": "function",
+          "name": "count_words"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.text_utf8.v1",
+      "path": "library/std/text_utf8.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:471d10a104d9a3f8f60ff425965369d44d29fd36ea7b96762da9c82b8b4c9fe0",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "ScalarStep"
+        },
+        {
+          "kind": "record",
+          "name": "ValidateState"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_fold"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_step"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_validate"
+        },
+        {
+          "kind": "function",
+          "name": "first_error"
+        },
+        {
+          "kind": "function",
+          "name": "fold_scalar"
+        },
+        {
+          "kind": "function",
+          "name": "validate_step"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.text_view.v1",
+      "path": "library/std/text_view.mncs",
+      "profile": "0.10",
+      "source_identity": "sha256:dec9ee39f224b0064a593bbdc536d798d20d5248c3cb8cca37ef33dd7dc3735f",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "TextView"
+        },
+        {
+          "kind": "function",
+          "name": "empty"
+        },
+        {
+          "kind": "function",
+          "name": "end"
+        },
+        {
+          "kind": "function",
+          "name": "is_decodable"
+        },
+        {
+          "kind": "function",
+          "name": "is_empty"
+        },
+        {
+          "kind": "function",
+          "name": "matches16"
+        },
+        {
+          "kind": "function",
+          "name": "matches32"
+        },
+        {
+          "kind": "function",
+          "name": "span"
+        }
+      ]
+    },
+    {
+      "module": "mncs.std.token_set.v1",
+      "path": "library/std/token_set.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:c4e12abaff46b259ee7cda9efae1beeed2d0c36d0e89be48189767fc20dc29d3",
+      "symbols": [
+        {
+          "kind": "record",
+          "name": "Top"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_contains"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_dedup_count"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_first_free"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_forbid_any"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_prefer_hits"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_require_all"
+        },
+        {
+          "kind": "function",
+          "name": "candidate_top_index"
+        }
+      ]
+    }
+  ],
+  "profile_registry_identity": "sha256:cd2ae92c9b2544b5915485804f9a58205bb2a0dabfdc62b12bdf9f97de795907",
+  "profiles": [
+    {
+      "features": [
+        "scalar_core",
+        "pure_functions"
+      ],
+      "max_iteration_bound": 0,
+      "max_iteration_nesting": 0,
+      "max_iteration_work_product": 0,
+      "max_sequence_bound": 0,
+      "max_vector_lanes": 0,
+      "predecessor": null,
+      "spec_document": "spec/source-profile-0.1.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.1"
+    },
+    {
+      "features": [
+        "finite_types",
+        "match_expressions"
+      ],
+      "max_iteration_bound": 0,
+      "max_iteration_nesting": 0,
+      "max_iteration_work_product": 0,
+      "max_sequence_bound": 0,
+      "max_vector_lanes": 0,
+      "predecessor": "0.1",
+      "spec_document": "spec/source-profile-0.2.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.2"
+    },
+    {
+      "features": [
+        "experiment_bootstrap",
+        "acyclic_calls"
+      ],
+      "max_iteration_bound": 0,
+      "max_iteration_nesting": 0,
+      "max_iteration_work_product": 0,
+      "max_sequence_bound": 0,
+      "max_vector_lanes": 0,
+      "predecessor": "0.2",
+      "spec_document": "docs/source-profile-0.3.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.3"
+    },
+    {
+      "features": [
+        "bounded_iteration_1_32",
+        "scoped_iteration_identities_strict"
+      ],
+      "max_iteration_bound": 32,
+      "max_iteration_nesting": 1,
+      "max_iteration_work_product": 32,
+      "max_sequence_bound": 0,
+      "max_vector_lanes": 0,
+      "predecessor": "0.3",
+      "spec_document": "docs/source-profile-0.4.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.4"
+    },
+    {
+      "features": [
+        "records"
+      ],
+      "max_iteration_bound": 32,
+      "max_iteration_nesting": 1,
+      "max_iteration_work_product": 32,
+      "max_sequence_bound": 0,
+      "max_vector_lanes": 0,
+      "predecessor": "0.4",
+      "spec_document": "docs/source-profile-0.5.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.5"
+    },
+    {
+      "features": [
+        "finite_payloads",
+        "explicit_arithmetic_intent",
+        "bool_patterns"
+      ],
+      "max_iteration_bound": 32,
+      "max_iteration_nesting": 1,
+      "max_iteration_work_product": 32,
+      "max_sequence_bound": 0,
+      "max_vector_lanes": 0,
+      "predecessor": "0.5",
+      "spec_document": "docs/source-profile-0.6.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.6"
+    },
+    {
+      "features": [
+        "bounded_sequences_64",
+        "bytes",
+        "views",
+        "explicit_conversion"
+      ],
+      "max_iteration_bound": 32,
+      "max_iteration_nesting": 1,
+      "max_iteration_work_product": 64,
+      "max_sequence_bound": 64,
+      "max_vector_lanes": 0,
+      "predecessor": "0.6",
+      "spec_document": "docs/source-profile-0.7.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.7"
+    },
+    {
+      "features": [
+        "semantic_vectors",
+        "strict_select",
+        "host_effects"
+      ],
+      "max_iteration_bound": 32,
+      "max_iteration_nesting": 1,
+      "max_iteration_work_product": 64,
+      "max_sequence_bound": 64,
+      "max_vector_lanes": 64,
+      "predecessor": "0.7",
+      "spec_document": "docs/source-profile-0.8.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.8"
+    },
+    {
+      "features": [
+        "namespaces",
+        "import_aliases"
+      ],
+      "max_iteration_bound": 32,
+      "max_iteration_nesting": 1,
+      "max_iteration_work_product": 64,
+      "max_sequence_bound": 64,
+      "max_vector_lanes": 64,
+      "predecessor": "0.8",
+      "spec_document": "docs/source-profile-0.9.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.9"
+    },
+    {
+      "features": [
+        "explicit_generics",
+        "generic_specialization"
+      ],
+      "max_iteration_bound": 32,
+      "max_iteration_nesting": 1,
+      "max_iteration_work_product": 64,
+      "max_sequence_bound": 64,
+      "max_vector_lanes": 64,
+      "predecessor": "0.9",
+      "spec_document": "docs/source-profile-0.10.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.10"
+    },
+    {
+      "features": [
+        "two_level_nested_iteration"
+      ],
+      "max_iteration_bound": 32,
+      "max_iteration_nesting": 2,
+      "max_iteration_work_product": 4096,
+      "max_sequence_bound": 64,
+      "max_vector_lanes": 64,
+      "predecessor": "0.10",
+      "spec_document": "docs/source-profile-0.11.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.11"
+    },
+    {
+      "features": [
+        "binary64_arithmetic",
+        "binary64_conversion",
+        "trig_intrinsics"
+      ],
+      "max_iteration_bound": 32,
+      "max_iteration_nesting": 2,
+      "max_iteration_work_product": 4096,
+      "max_sequence_bound": 64,
+      "max_vector_lanes": 64,
+      "predecessor": "0.11",
+      "spec_document": "docs/source-profile-0.12.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.12"
+    },
+    {
+      "features": [
+        "bool_negation",
+        "bool_equality",
+        "scalar_int_match",
+        "sequential_iteration_reuse",
+        "contextual_next_field",
+        "repeat_sequence_literals",
+        "lexical_shadowing",
+        "raised_sequence_ceiling_1024",
+        "raised_iteration_ceiling_1024",
+        "structural_recursion"
+      ],
+      "max_iteration_bound": 1024,
+      "max_iteration_nesting": 2,
+      "max_iteration_work_product": 1048576,
+      "max_sequence_bound": 1024,
+      "max_vector_lanes": 64,
+      "predecessor": "0.12",
+      "spec_document": "docs/source-profile-0.13.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.13"
+    },
+    {
+      "features": [
+        "bulk_span_copy",
+        "checked_view_narrowing",
+        "checked_index_discharge"
+      ],
+      "max_iteration_bound": 1024,
+      "max_iteration_nesting": 2,
+      "max_iteration_work_product": 1048576,
+      "max_sequence_bound": 1024,
+      "max_vector_lanes": 64,
+      "predecessor": "0.13",
+      "spec_document": "docs/source-profile-0.14.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.14"
+    },
+    {
+      "features": [
+        "static_view_widening"
+      ],
+      "max_iteration_bound": 1024,
+      "max_iteration_nesting": 2,
+      "max_iteration_work_product": 1048576,
+      "max_sequence_bound": 1024,
+      "max_vector_lanes": 64,
+      "predecessor": "0.14",
+      "spec_document": "docs/source-profile-0.15.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.15"
+    },
+    {
+      "features": [
+        "fs_write_effect",
+        "fs_create_file",
+        "fs_positioned_write",
+        "fs_append",
+        "fs_mkdir",
+        "fs_delete",
+        "fs_atomic_rename",
+        "fs_sync_barrier"
+      ],
+      "max_iteration_bound": 1024,
+      "max_iteration_nesting": 2,
+      "max_iteration_work_product": 1048576,
+      "max_sequence_bound": 1024,
+      "max_vector_lanes": 64,
+      "predecessor": "0.15",
+      "spec_document": "docs/source-profile-0.16.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.16"
+    },
+    {
+      "features": [
+        "first_class_test_declarations",
+        "static_test_inventory"
+      ],
+      "max_iteration_bound": 1024,
+      "max_iteration_nesting": 2,
+      "max_iteration_work_product": 1048576,
+      "max_sequence_bound": 1024,
+      "max_vector_lanes": 64,
+      "predecessor": "0.16",
+      "spec_document": "docs/source-profile-0.17.md",
+      "status": "sealed",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.17"
+    },
+    {
+      "features": [
+        "structured_read_effect",
+        "structured_write_effect",
+        "nominal_artifact_codecs",
+        "atomic_artifact_publication"
+      ],
+      "max_iteration_bound": 1024,
+      "max_iteration_nesting": 2,
+      "max_iteration_work_product": 1048576,
+      "max_sequence_bound": 1024,
+      "max_vector_lanes": 64,
+      "predecessor": "0.17",
+      "spec_document": "docs/source-profile-0.18.md",
+      "status": "current",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.18"
+    }
+  ],
+  "projections": {
+    "capsule": true,
+    "delta": true,
+    "provenance": true,
+    "symbol": true,
+    "topic": true
+  },
+  "provenance": [
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-cli/tests/proof_demo.rs",
+      "source_identity": "sha256:94d2803566391f0720c98cfafeb02c03c549313c590b05038f378e8026eff676"
+    },
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-codegen/src/lib.rs",
+      "source_identity": "sha256:783872168c42416a5e66eec0261577d57dffb534f779e972ffc74c2fe1ff7a9b"
+    },
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-compiler/src/frontend.rs",
+      "source_identity": "sha256:2d3263a389ea8a543b2f315a6d77cae1ea02f526091c071a085e8e99e29ac19f"
+    },
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-compiler/src/lib.rs",
+      "source_identity": "sha256:c349be2aca66e6652d585bc965cf55d5d005881213248d41a55e1bf3bb127393"
+    },
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-compiler/src/proof_admission.rs",
+      "source_identity": "sha256:adc44fe587ccc90fc5d27023601e7a9f7af6eed7eee3ca49f19d841283a796d6"
+    },
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-compiler/src/resolution.rs",
+      "source_identity": "sha256:59a19becba40ee76ff2d8d6aee1ae939c05847ebd8007b11ba1f9c297526ec0f"
+    },
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-compiler/tests/executable_contracts.rs",
+      "source_identity": "sha256:4a2fbd8193751a6dd7f43e9458ffa7d7dc9343bf9bd9da8dc1f599f6c175e647"
+    },
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-compiler/tests/iteration_identity.rs",
+      "source_identity": "sha256:91c680fcde8e654be289c853511d70b8916a913ba5eb7ecd37bf806be49f136f"
+    },
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-compiler/tests/module_imports.rs",
+      "source_identity": "sha256:bef201e21005ec8697217d08057bb2ee43ad116be058f9028d57a33c6ceaef8b"
+    },
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-compiler/tests/projection_chains.rs",
+      "source_identity": "sha256:7182eaee49e3aa66fc6605756446dc9cf1cc862c49e4443ceada09948613fba2"
+    },
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-compiler/tests/stdlib_bundle.rs",
+      "source_identity": "sha256:e4daa467f4dafd19e820c8b6af5185585273e4574ecb5a81e654c96731984a1c"
+    },
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-compiler/tests/type_architecture.rs",
+      "source_identity": "sha256:b009fdf16e386d491699c7c610dd5c407bbea50995032cf627b84bd567b69293"
+    },
+    {
+      "kind": "compiler_source",
+      "path": "crates/mncs-conformance/tests/conformance.rs",
+      "source_identity": "sha256:2bd51e086efa0c5a4f60a56c70ff73f58c90605392a2e04459a1a6f861edb495"
+    },
+    {
+      "kind": "canonical_example",
+      "path": "examples/source/application-entry.mncs",
+      "source_identity": "sha256:323eb56ab3010bc614d747303fa5959d5e4ad5b34114907b10391559c5f52fb6"
+    },
+    {
+      "kind": "canonical_example",
+      "path": "examples/source/bounded-min.mncs",
+      "source_identity": "sha256:a40ef04b6eeb82aa79d0d3ad8d07fdceab34ecb0cb6d2a9994292ef332fe7ed1"
+    },
+    {
+      "kind": "canonical_example",
+      "path": "examples/source/cre3-retry-authority.mncs",
+      "source_identity": "sha256:2a523615014d98435d5339cfef5581ae78835641f287abc40c7f16cc7462dd9a"
+    },
+    {
+      "kind": "canonical_example",
+      "path": "examples/source/identity.mncs",
+      "source_identity": "sha256:da274a91b9adeeb34d3a0c19ede84475ca4e28d72df2bd068797d08c4b3f29f2"
+    },
+    {
+      "kind": "canonical_example",
+      "path": "examples/source/structured-artifact.mncs",
+      "source_identity": "sha256:da5c47990cf8722fb2eb3ee3e4c7943d988baac9da97a4af3285171c8ac09521"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/bounds.mncs",
+      "source_identity": "sha256:ed11a325208e0450ad196998c297f33ac2cae3f810ea29089f9cdd07ac6d0f62"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/bytes.mncs",
+      "source_identity": "sha256:02a87c9fe7c8c5f8eee9e177c5090bd57614ad6a05b84a339ebab5b90f61f337"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/contracts.mncs",
+      "source_identity": "sha256:343902e73e4a6b0bb07e078906da2ed1e5f3c1b1a11971245ab347e0875938cb"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/geometry.mncs",
+      "source_identity": "sha256:6ea8f9a6a160a707048fef415b3a4e5d07b7f72b1e01914e84cfbe08fbddb0ca"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/identity.mncs",
+      "source_identity": "sha256:0348822874eab9bfa496024809b36983e1a00e8241357a753dc79148faa528d2"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/image.mncs",
+      "source_identity": "sha256:cc53b671cfd4eda6275ed5d07610e776a132a00e59e9288e980d65750ae36138"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/lineage.mncs",
+      "source_identity": "sha256:b26698131716bdbdc6baf34a4f33d7c0477a43c5641dba2a5c53f6477c6ae061"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/logic.mncs",
+      "source_identity": "sha256:3cc836943a01ff32ee3efd690f4b9de0c5757dd9718af33ed48ae924588ac32a"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/mask.mncs",
+      "source_identity": "sha256:8a979917d86ca80bf61d65bcf737f22c735ecb648fd9773765d4b5fabbaf70b7"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/numeric.mncs",
+      "source_identity": "sha256:567c2ed24d833a597670176b2c7be09cb73788aee6e860429a8eed24a01b863c"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/ordering.mncs",
+      "source_identity": "sha256:5773304071aab4adc80ada57aa00f8ea94949b74f9c1b32852d7571e4117f76d"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/partition.mncs",
+      "source_identity": "sha256:e942038c0143515c4a7877ba16e025b35a2a52270acdcea99b2fc6b56b6d8e9f"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/proof_admit.mncs",
+      "source_identity": "sha256:ccdff8991beeff8144669e3888b19b83a4ee0fa5e53c9c63bf5724160b9c7d58"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/proof_check.mncs",
+      "source_identity": "sha256:de683d8680f697a60c4c406c607d0bea501ffe703546e20a8c860bbeb26884c6"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/proof_dep.mncs",
+      "source_identity": "sha256:782f74d6354a824891c8c27bc4b855127508d7fded0cd21b567419e28ef3aa61"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/proof_term.mncs",
+      "source_identity": "sha256:158550265441cd2189bb40ded0118d9cb228027d41d4d64059d56b9b81be7c33"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/random.mncs",
+      "source_identity": "sha256:98c9628fbcb7942d9249e97486f9e42a77a04bc5a04af7882d812cc6311d78a4"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/result.mncs",
+      "source_identity": "sha256:37ab3f0187ee27fc334ebe1feae6d11eb38b495e4014da874634e65dbc34b9ad"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/sequences.mncs",
+      "source_identity": "sha256:ef8fc2bdb651071fdba8c9d8b3ec520db5dee5b2b27ad310c5ff727f1f23731c"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/status.mncs",
+      "source_identity": "sha256:7690a6d6bff4d74cb60fa930a87d078db8d31a0a7e7533a876ed7daa7cd52ff6"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/vector.mncs",
+      "source_identity": "sha256:8e4b72d710a6a928186c547cda613b77587ea73d77cbc0dfdcf3d5ff2bfb2259"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/version.mncs",
+      "source_identity": "sha256:686a9a08d0739b6e7c6fd43b3dda2fd3c74463deb293fccb634cb547d5272c3b"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/core/vision.mncs",
+      "source_identity": "sha256:41f8b1a80caf3f61b18979bf874b8508388a9c37459e86de2ad7ca20c38d6227"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/family/coherence.mncs",
+      "source_identity": "sha256:7f9230b52c6ae95732006287527991f859534c34e7591fc53a0b13127cd017cf"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/family/journal.mncs",
+      "source_identity": "sha256:a9cfa0e10dfbeccce0b83ebfbcdf6f0dba5faea157bff74f0cb74183fb1c22c9"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/family/rfc_status.mncs",
+      "source_identity": "sha256:bd8afffcd37a1381ebdfc733074924776a959b0fcefce54684498c4fbfca1594"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/jit/binding.mncs",
+      "source_identity": "sha256:9517c094badc3c60bbd7fd0f236b3d5a23d26f5c479b2c317dc45751f121cbd0"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/jit/depends.mncs",
+      "source_identity": "sha256:4a07aaed3e0385fca8d17f6999876cabefcb72cd26d28b4a39f32edfcf0f10ac"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/jit/lifecycle.mncs",
+      "source_identity": "sha256:f4656413e1bc5f19950407749b6cc21f68c1d98d7e753a4317be6aaa9bf0e622"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/jit/plan.mncs",
+      "source_identity": "sha256:6c5e71ce936f72157876c35f7a82f8f3f22258f1c13bc94a17513507b54213ef"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/jit/profile.mncs",
+      "source_identity": "sha256:366038a748de23925abfc39a4d6c0dc89eef9cb5b5c4ac58d145d8d2e39c3415"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/jit/proof.mncs",
+      "source_identity": "sha256:9df360436fc3f1d85ac5506232ab6755295f736b472643736829d965bca3ea19"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/jit/session.mncs",
+      "source_identity": "sha256:731c0e25ee0c66885810aeec9674aab87e2070048a87219eafbbed670f01f5c5"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/jit/types.mncs",
+      "source_identity": "sha256:2017f25e2c0df0a00e651fc330459d56967c4b82e29886a992cda950fdc27fb5"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/ansi.mncs",
+      "source_identity": "sha256:634e6acece32a5875e448a8b03c06cecb602a5326950c0f81b60fb928ae37e53"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/application.mncs",
+      "source_identity": "sha256:d10591c3f9ec3e5b4c72bdef0ae9e0e2a0fcf1f120acc6379491c8528088b0e0"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/channel.mncs",
+      "source_identity": "sha256:b8f76368658b8add78e2c0df7baab89bde173ac2b3b669422c93e5f777165b31"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/chunk.mncs",
+      "source_identity": "sha256:70e505eec17a7cc10c8e8fb4cf549a412758527570a85040dac739595b658311"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/clock.mncs",
+      "source_identity": "sha256:a825fe196cc3569576e2cadd2106b1b298be562df4582c5d6b9440221e0773b6"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/encoding.mncs",
+      "source_identity": "sha256:86c3cab77708b87dc2d01ff484416ebf815ef6c0c3b0776fde99745f3b8eb9c5"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/fixed.mncs",
+      "source_identity": "sha256:62bc1be04c3af5f6413362799dab3bb652f6c741a32f3cb46162b9e2eefa9899"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/json.mncs",
+      "source_identity": "sha256:bbf08cfd0b220b5ed50aa3276cdd099efb518820f187841b5a5f2dd51418506c"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/json_cursor.mncs",
+      "source_identity": "sha256:3ac6292bbff6f7c531aca51b1c83b5674540397a76cced1a47026da7ad71e36e"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/json_emit.mncs",
+      "source_identity": "sha256:509b80aa679dfadffcb526d96aa4da28fb612bc75976dc955b62be9222dd84dd"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/json_projection.mncs",
+      "source_identity": "sha256:d6927c358ec88d62c4d0d93ca063d32dc6bbe431c76dac98ca789eb606f6925b"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/json_stream.mncs",
+      "source_identity": "sha256:fa5f414698be449b0336949733d901e61bdb3ca99c50bac232c543e6a5cdc707"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/platform.mncs",
+      "source_identity": "sha256:bc07d20cc2790928877c618dd046644265d82c84bea50f9ef174508f3627702e"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/process.mncs",
+      "source_identity": "sha256:60d13b8850304578e9443f3779bb046226e389f732acc8efd8ed7ae9c9026b85"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/relation.mncs",
+      "source_identity": "sha256:f0fcd04818e5286f7a696927922b0bc16e849dc88a128a1be58454d1fb528971"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/scope.mncs",
+      "source_identity": "sha256:cff2b5ce6cc05c2bcaea9779f61bc4d77d79644250532d25aabe6936a6aad873"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/sha256.mncs",
+      "source_identity": "sha256:9065c75f7b3e3ea81f4786ff587b0e47da1eed82b70fe9d166340b695fffff6c"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/simd.mncs",
+      "source_identity": "sha256:c50c38f9c5d92c7f63ed5287ef1394df9c498ee14cab22f3a76b499b55b785d1"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/sort.mncs",
+      "source_identity": "sha256:9fb698dbd9c40abe2bb963afd157c27ab0bf04dd1fcfb7656549e31069f0f08e"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/store.mncs",
+      "source_identity": "sha256:e968d2293dd8af808c063ab790f2af890e19fc1d48e772835220c1d4db9696d7"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/task.mncs",
+      "source_identity": "sha256:169d17cb48d9c818f5e11eae79d9c74d8a2f3b5e477469762eb2ea3e0b0c6ce8"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/text_map.mncs",
+      "source_identity": "sha256:e30c79a0316b0a7b723241d2a6385ccf5fdb65150e766c25079591d87234276d"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/text_scan.mncs",
+      "source_identity": "sha256:9d09428028957c4f1002bc86024e6c2b672ec895241484a3e0a46183f3f865a9"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/text_utf8.mncs",
+      "source_identity": "sha256:471d10a104d9a3f8f60ff425965369d44d29fd36ea7b96762da9c82b8b4c9fe0"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/text_view.mncs",
+      "source_identity": "sha256:dec9ee39f224b0064a593bbdc536d798d20d5248c3cb8cca37ef33dd7dc3735f"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/token_set.mncs",
+      "source_identity": "sha256:c4e12abaff46b259ee7cda9efae1beeed2d0c36d0e89be48189767fc20dc29d3"
+    },
+    {
+      "kind": "profile_registry",
+      "path": "spec/source-profile-registry.json",
+      "source_identity": "sha256:cd2ae92c9b2544b5915485804f9a58205bb2a0dabfdc62b12bdf9f97de795907"
+    }
+  ],
+  "schema_version": "mncs.language-capabilities/1",
+  "topics": [
+    {
+      "description": "Use statically bounded sequences, vectors, and builders so capacity is explicit.",
+      "guidance": [
+        "Prefer the generic bounded builder over width-specific application helpers."
+      ],
+      "id": "bounded collections",
+      "modules": [
+        "mncs.core.sequences.v1",
+        "mncs.core.vector.v1"
+      ],
+      "profiles": [
+        "0.1"
+      ]
+    },
+    {
+      "description": "Declare and preserve capability/effect authority at the source boundary.",
+      "guidance": [
+        "An effect declaration is part of the semantic contract, not host-side metadata."
+      ],
+      "id": "effects",
+      "modules": [
+        "mncs.core.proof_admit.v1",
+        "mncs.std.application.v1"
+      ],
+      "profiles": [
+        "0.6",
+        "0.18"
+      ]
+    },
+    {
+      "description": "Read, write, and publish typed artifacts through the structured artifact effects.",
+      "guidance": [
+        "Keep persistent schema identities separate from implementation filenames."
+      ],
+      "id": "structured artifacts",
+      "modules": [
+        "mncs.std.store.v1"
+      ],
+      "profiles": [
+        "0.18"
+      ]
+    },
+    {
+      "description": "Bind source, content, revision, evidence, and artifact identities explicitly.",
+      "guidance": [
+        "Prefer identity-bearing records over ambient host state."
+      ],
+      "id": "identity",
+      "modules": [
+        "mncs.core.identity.v1",
+        "mncs.core.version.v1"
+      ],
+      "profiles": [
+        "0.1"
+      ]
+    },
+    {
+      "description": "Select a language profile from the authoritative source-profile registry.",
+      "guidance": [
+        "Use the current profile unless a compatibility boundary explicitly requires an older profile."
+      ],
+      "id": "profiles",
+      "modules": [],
+      "profiles": [
+        "0.18"
+      ]
+    }
+  ]
+}
