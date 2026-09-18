@@ -30,7 +30,12 @@ use serde::{Deserialize, Serialize};
 pub mod scope;
 pub use scope::{ScopeRun, ScopedOutput, TaskScope, WorkItem};
 pub mod process;
+pub mod provider;
 pub mod structured;
+pub use provider::{
+    decode_identity, encode_identity, AdmittedProvider, ProviderDescriptor, ProviderFacts,
+    ProviderRegistry, PROVIDER_DESCRIPTOR_SCHEMA_VERSION,
+};
 
 /// Machine-readable embed failure. `code` is stable for host matching.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -393,6 +398,17 @@ impl Session {
         arguments: Vec<ExecutionValue>,
         options: &CallOptions,
     ) -> CallOutput {
+        self.call_with_runtime(module, function, arguments, options, None)
+    }
+
+    fn call_with_runtime(
+        &self,
+        module: &str,
+        function: &str,
+        arguments: Vec<ExecutionValue>,
+        options: &CallOptions,
+        provider_runtime: Option<&dyn mncs_model::ProviderRuntime>,
+    ) -> CallOutput {
         let step_budget = if options.step_budget == 0 {
             8_192
         } else {
@@ -417,11 +433,14 @@ impl Session {
             host_grants: Vec::new(),
             call_depth_budget: None,
         };
-        if !grants.is_empty() {
+        if !grants.is_empty() || provider_runtime.is_some() {
             request = request.with_host_grants(&grants);
             request.policy.effects = EffectExecutionPolicy::Realize;
         }
-        let observation = self.inner.execute(&request);
+        let observation = provider_runtime.map_or_else(
+            || self.inner.execute(&request),
+            |provider_runtime| self.inner.execute_with_provider(&request, provider_runtime),
+        );
         let status = match observation.status {
             ExecutionStatus::Returned => "returned",
             ExecutionStatus::InvalidRequest => "invalid_request",
@@ -441,6 +460,21 @@ impl Session {
             backend: self.backend_name().to_owned(),
             reused_session: self.reused(),
         }
+    }
+
+    /// Execute one named entrypoint with a generic admitted provider
+    /// registry. The consumer still supplies a concrete typed argument and
+    /// receives the expected nominal result; provider selection never enters
+    /// this API as a string or a family-specific branch.
+    pub fn call_with_provider(
+        &self,
+        module: &str,
+        function: &str,
+        arguments: Vec<ExecutionValue>,
+        options: &CallOptions,
+        provider_runtime: &dyn mncs_model::ProviderRuntime,
+    ) -> CallOutput {
+        self.call_with_runtime(module, function, arguments, options, Some(provider_runtime))
     }
 
     /// Execute typed calls in order while retaining one verified session.
@@ -519,6 +553,50 @@ impl Session {
         )
         .map_err(|error| EmbedError::new("bad_typed_arguments", error))?;
         Ok(self.call(module, function, arguments, options))
+    }
+
+    /// Name-oriented typed call through a generic admitted provider
+    /// registry. Interface identity is checked before argument resolution,
+    /// exactly as on [`Self::call_typed_json`].
+    pub fn call_typed_json_with_provider(
+        &self,
+        module: &str,
+        function: &str,
+        args_json: &str,
+        options: &CallOptions,
+        provider_runtime: &dyn mncs_model::ProviderRuntime,
+    ) -> Result<CallOutput, EmbedError> {
+        if let Some(expected) = options.expected_interface_identity.as_deref() {
+            let Some(actual) = self.interface_identity() else {
+                return Err(EmbedError::new(
+                    "stale_interface",
+                    "artifact has no language-owned interface identity; regenerate the host binding",
+                ));
+            };
+            if expected != actual {
+                return Err(EmbedError::new(
+                    "stale_interface",
+                    format!(
+                        "interface identity mismatch: expected {expected}, loaded {actual}; regenerate the host binding"
+                    ),
+                ));
+            }
+        }
+        let values: Vec<HostExecutionValue> = serde_json::from_str(args_json).map_err(|error| {
+            EmbedError::new(
+                "bad_typed_arguments",
+                format!("typed argument JSON rejected: {error}"),
+            )
+        })?;
+        let arguments = mncs_codegen::resolve_typed_arguments_for_artifact(
+            self.inner.artifact(),
+            module,
+            function,
+            &options.type_arguments,
+            &values,
+        )
+        .map_err(|error| EmbedError::new("bad_typed_arguments", error))?;
+        Ok(self.call_with_provider(module, function, arguments, options, provider_runtime))
     }
 }
 

@@ -1361,6 +1361,34 @@ pub struct ExecutionEffectEvent {
     pub provenance: Option<String>,
 }
 
+/// Result of a generic typed provider invocation.  The language/runtime owns
+/// only this transport-neutral shape; provider identity, interface, revision,
+/// and inventory admission are established by the implementation of
+/// [`ProviderRuntime`].  Provider-specific request/result contracts remain in
+/// the provider family library.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderCall {
+    pub value: ExecutionValue,
+    /// Effects realized by the admitted provider are carried through the
+    /// consumer session so the evidence lineage remains one native session.
+    pub effects: Vec<ExecutionEffectEvent>,
+}
+
+/// Generic same-session provider boundary.  This is intentionally narrower
+/// than first-class callable values: a consumer supplies one admitted
+/// provider identity and one already-typed argument, and receives the
+/// expected nominal result.  No provider name or family policy appears in the
+/// language model.
+pub trait ProviderRuntime: Send + Sync {
+    fn invoke(
+        &self,
+        provider_identity: &[u8],
+        argument: ExecutionValue,
+        expected: &BodyType,
+        step_budget: u64,
+    ) -> Result<ProviderCall, String>;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionResult {
     pub schema_version: String,
@@ -3478,6 +3506,28 @@ impl<'a> BodyExecutionSession<'a> {
             None,
             None,
             Vec::new(),
+            None,
+        )
+    }
+
+    /// Execute with a host-supplied generic provider registry. Provider
+    /// admission remains outside the semantic model; this method only makes
+    /// the already-admitted typed boundary available to `provider_call`.
+    pub fn execute_with_provider(
+        &self,
+        request: &ExecutionRequest,
+        provider_runtime: &dyn ProviderRuntime,
+    ) -> ExecutionResult {
+        execute_inner(
+            self,
+            request,
+            matches!(request.policy.effects, EffectExecutionPolicy::Record),
+            0,
+            None,
+            None,
+            None,
+            Vec::new(),
+            Some(provider_runtime),
         )
     }
 }
@@ -3511,6 +3561,7 @@ pub fn execute_observed(
         None,
         None,
         Vec::new(),
+        None,
     );
     if recorder.enabled() {
         let root_frame = recorder.root_frame.clone();
@@ -3536,6 +3587,7 @@ fn execute_inner(
     parent_frame: Option<SemanticId>,
     call_operation: Option<SemanticId>,
     argument_sources: Vec<Option<SemanticId>>,
+    provider_runtime: Option<&dyn ProviderRuntime>,
 ) -> ExecutionResult {
     let program = session.program;
     if request.schema_version != EXECUTION_REQUEST_SCHEMA_VERSION {
@@ -3757,6 +3809,7 @@ fn execute_inner(
                 frame_id.as_ref(),
                 observer.as_deref_mut(),
                 &input_sources,
+                provider_runtime,
             ) {
                 if let (Some(recorder), Some(frame)) = (observer.as_deref_mut(), frame_id.as_ref())
                 {
@@ -3958,6 +4011,7 @@ fn execute_operation(
     frame: Option<&SemanticId>,
     mut observer: Option<&mut ObservationRecorder>,
     input_sources: &[Option<SemanticId>],
+    provider_runtime: Option<&dyn ProviderRuntime>,
 ) -> Option<ExecutionResult> {
     let program = session.program;
     match &operation.kind {
@@ -5365,6 +5419,7 @@ fn execute_operation(
                 frame.cloned(),
                 Some(identity.clone()),
                 input_sources.to_vec(),
+                provider_runtime,
             );
             if let (Some(recorder), Some(parent)) = (observer.as_deref_mut(), frame) {
                 if let Some(child) = recorder.child_frame(parent, identity) {
@@ -5458,17 +5513,33 @@ fn execute_operation(
                 );
                 return Some(result.clone());
             }
-            let Some(grant) = request
-                .host_grants
-                .iter()
-                .find(|grant| grant.capability == *capability)
-            else {
-                result.fail(
-                    ExecutionStatus::InvalidRequest,
-                    Some(identity.clone()),
-                    format!("no host grant for capability {capability:?}; declared authority was not fulfilled"),
-                );
-                return Some(result.clone());
+            // Provider admission is a distinct authority from ordinary host
+            // grants. Once the caller supplies an admitted provider
+            // registry, the provider-call capability is fulfilled by that
+            // identity-keyed registry; it must not be forgeable by adding a
+            // string-only host grant. Other host operations retain the
+            // ordinary explicit-grant requirement.
+            let admitted_provider_grant = HostGrant {
+                capability: capability.clone(),
+                locator: "admitted-provider".to_owned(),
+                bytes: Vec::new(),
+            };
+            let grant = if operation_id == "provider_call" && provider_runtime.is_some() {
+                &admitted_provider_grant
+            } else {
+                let Some(grant) = request
+                    .host_grants
+                    .iter()
+                    .find(|grant| grant.capability == *capability)
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        format!("no host grant for capability {capability:?}; declared authority was not fulfilled"),
+                    );
+                    return Some(result.clone());
+                };
+                grant
             };
             if grant.bytes.len() > HOST_GRANT_MAX_BYTES {
                 result.fail(
@@ -5634,7 +5705,114 @@ fn execute_operation(
                     }
                 }
             }
-            if operation_id == "structured_read" {
+            if operation_id == "provider_call" {
+                let Some(result_type) = operation.results.first().map(|value| &value.ty) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "provider_call has no result binding".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let provider_identity =
+                    match structured_view_operand(operation, &values, 0, 32, "provider identity") {
+                        Ok(provider_identity) if provider_identity.len() == 32 => provider_identity,
+                        Ok(_) => {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                Some(identity.clone()),
+                                "provider identity must be exactly 32 bytes".to_owned(),
+                            );
+                            return Some(result.clone());
+                        }
+                        Err(reason) => {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                Some(identity.clone()),
+                                reason,
+                            );
+                            return Some(result.clone());
+                        }
+                    };
+                let Some(argument_binding) = operation.operands.get(1) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "provider_call request operand is missing".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let Some(argument) = values.get(argument_binding).cloned() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "provider_call request value is unavailable".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let Some(provider_runtime) = provider_runtime else {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        Some(identity.clone()),
+                        "provider_call requires an admitted provider runtime".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let remaining = request.step_budget.saturating_sub(result.steps);
+                if remaining == 0 {
+                    result.fail(
+                        ExecutionStatus::BudgetExhausted,
+                        Some(identity.clone()),
+                        "execution step budget exhausted before provider_call".to_owned(),
+                    );
+                    return Some(result.clone());
+                }
+                let invocation = match provider_runtime.invoke(
+                    &provider_identity,
+                    argument,
+                    result_type,
+                    remaining,
+                ) {
+                    Ok(invocation) => invocation,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            format!("provider_call refused: {reason}"),
+                        );
+                        return Some(result.clone());
+                    }
+                };
+                if !value_matches_type(program, &invocation.value, result_type) {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "admitted provider returned a value outside the declared result type"
+                            .to_owned(),
+                    );
+                    return Some(result.clone());
+                }
+                values.insert(operation.results[0].id.clone(), invocation.value);
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "provider_call".to_owned(),
+                    target: format!(
+                        "mncs:provider:{}",
+                        provider_identity
+                            .iter()
+                            .map(|byte| format!("{byte:02x}"))
+                            .collect::<String>()
+                    ),
+                    capability: capability.clone(),
+                    provenance: None,
+                });
+                result.effects.extend(invocation.effects);
+                return None;
+            }
+            if matches!(
+                operation_id.as_str(),
+                "structured_read" | "structured_read_identity"
+            ) {
                 let Some(result_type) = operation.results.first().map(|value| &value.ty) else {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
@@ -5677,13 +5855,49 @@ fn execute_operation(
                         return Some(result.clone());
                     }
                 };
-                match crate::structured::structured_read_value(
-                    program,
-                    result_type,
-                    grant,
-                    &path,
-                    &schema,
-                ) {
+                let extension_policy = if operation_id == "structured_read_identity" {
+                    match structured_view_operand(
+                        operation,
+                        &values,
+                        2,
+                        256,
+                        "identity extension policy",
+                    ) {
+                        Ok(policy) => Some(policy),
+                        Err(reason) => {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                Some(identity.clone()),
+                                reason,
+                            );
+                            return Some(result.clone());
+                        }
+                    }
+                } else {
+                    None
+                };
+                let read = extension_policy.as_deref().map_or_else(
+                    || {
+                        crate::structured::structured_read_value(
+                            program,
+                            result_type,
+                            grant,
+                            &path,
+                            &schema,
+                        )
+                    },
+                    |policy| {
+                        crate::structured::structured_read_identity_value(
+                            program,
+                            result_type,
+                            grant,
+                            &path,
+                            &schema,
+                            policy,
+                        )
+                    },
+                );
+                match read {
                     Ok((value, effect)) => {
                         values.insert(operation.results[0].id.clone(), value);
                         result.effects.push(ExecutionEffectEvent {
@@ -6388,7 +6602,7 @@ fn aggregate_shape_note(
     crate::value_contract::first_aggregate_mismatch(program, value, ty, path)
 }
 
-fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) -> bool {
+pub(crate) fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) -> bool {
     match (value, ty) {
         (ExecutionValue::Integer { value, ty: actual }, BodyType::Integer(expected)) => {
             actual == expected && in_range(*value, *expected)

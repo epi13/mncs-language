@@ -23,8 +23,9 @@ use mncs_compiler::{
 use mncs_embed::{
     process::{run_bounded, ProcessRequest, MAX_CAPTURE_BYTES, MAX_DEADLINE_MS},
     structured::StructuredDocument,
-    Artifact as EmbedArtifact, BatchCall as EmbedBatchCall, CallOptions as EmbedCallOptions,
-    Grant as EmbedGrant, Session as EmbedSession,
+    AdmittedProvider, Artifact as EmbedArtifact, BatchCall as EmbedBatchCall,
+    CallOptions as EmbedCallOptions, Grant as EmbedGrant, ProviderDescriptor, ProviderFacts,
+    ProviderRegistry, Session as EmbedSession,
 };
 use mncs_model::{
     compare_body_and_ssa, compare_execution, execute_observed, execute_ssa, execute_with_policy,
@@ -444,6 +445,8 @@ struct NativeApplicationOptions {
     process_grants: Vec<(String, String)>,
     structured_grants: Vec<String>,
     fs_grants: Vec<(String, String)>,
+    provider_grants: Vec<(String, String)>,
+    admitted_providers: Vec<PathBuf>,
     step_budget: u64,
     interface_identity: Option<String>,
 }
@@ -541,6 +544,38 @@ where
                     }
                 }
             }
+            "--grant-provider" => {
+                let value = match next(&mut index, "--grant-provider") {
+                    Ok(value) => value,
+                    Err(code) => return code,
+                };
+                match value.split_once('=') {
+                    Some((capability, locator))
+                        if !capability.is_empty() && !locator.is_empty() =>
+                    {
+                        options
+                            .provider_grants
+                            .push((capability.to_owned(), locator.to_owned()));
+                    }
+                    _ => {
+                        return native_application_usage(
+                            "--grant-provider requires capability=locator",
+                        )
+                    }
+                }
+            }
+            "--admit-provider" => {
+                let value = match next(&mut index, "--admit-provider") {
+                    Ok(value) if !value.is_empty() => value,
+                    Ok(_) => {
+                        return native_application_usage(
+                            "--admit-provider requires a descriptor path",
+                        )
+                    }
+                    Err(code) => return code,
+                };
+                options.admitted_providers.push(PathBuf::from(value));
+            }
             "--step-budget" => {
                 let value = match next(&mut index, "--step-budget") {
                     Ok(value) => value,
@@ -579,7 +614,7 @@ where
 fn native_application_usage(message: &str) -> ExitCode {
     eprintln!("error: {message}");
     eprintln!(
-        "usage: mncs run-app DESCRIPTOR [--library ROOT ...] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path] [--step-budget N] [--interface-identity ID] [-- APP_ARG ...]"
+        "usage: mncs run-app DESCRIPTOR [--library ROOT ...] [--admit-provider DESCRIPTOR --grant-provider capability=locator ...] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path] [--step-budget N] [--interface-identity ID] [-- APP_ARG ...]"
     );
     ExitCode::from(2)
 }
@@ -652,6 +687,179 @@ fn descriptor_relative(base: &Path, path: &str) -> PathBuf {
     }
 }
 
+fn read_provider_descriptor(path: &Path) -> Result<ProviderDescriptor, String> {
+    let bytes = fs::read(path)
+        .map_err(|error| format!("unable to read provider descriptor {path:?}: {error}"))?;
+    if bytes.len() > 64 * 1024 {
+        return Err("provider descriptor exceeds the 65536-byte bound".to_owned());
+    }
+    let descriptor: ProviderDescriptor = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("provider descriptor is invalid JSON: {error}"))?;
+    descriptor.validate().map_err(|error| error.to_string())?;
+    Ok(descriptor)
+}
+
+fn provider_identity_from_output(
+    session: &EmbedSession,
+    descriptor: &ProviderDescriptor,
+    function: &str,
+    label: &str,
+) -> Result<String, String> {
+    let mut options = EmbedCallOptions::budgeted(16_384);
+    options.expected_interface_identity = Some(descriptor.interface_identity.clone());
+    let output = session.call(&descriptor.module, function, Vec::new(), &options);
+    if output.status != "returned" {
+        return Err(format!(
+            "provider {label} identity entrypoint returned {}: {}",
+            output.status,
+            output
+                .failure_reason
+                .unwrap_or_else(|| "no failure detail".to_owned())
+        ));
+    }
+    let Some(ExecutionValue::Sequence { values }) = output.returned.first() else {
+        return Err(format!(
+            "provider {label} identity entrypoint returned no byte view"
+        ));
+    };
+    if values.len() != 32 {
+        return Err(format!(
+            "provider {label} identity entrypoint returned {} bytes, expected 32",
+            values.len()
+        ));
+    }
+    let bytes = values
+        .iter()
+        .map(|value| match value {
+            ExecutionValue::Byte { value } => u8::try_from(*value)
+                .map_err(|_| format!("provider {label} identity contains a non-byte")),
+            _ => Err(format!("provider {label} identity contains a non-byte")),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(mncs_embed::encode_identity(&bytes))
+}
+
+fn admit_provider_descriptors(
+    options: &NativeApplicationOptions,
+) -> Result<ProviderRegistry, String> {
+    let mut registry = ProviderRegistry::new();
+    for descriptor_path in &options.admitted_providers {
+        let descriptor = read_provider_descriptor(descriptor_path)?;
+        let descriptor_dir = descriptor_path.parent().unwrap_or_else(|| Path::new("."));
+        let source_path = descriptor_relative(descriptor_dir, &descriptor.source);
+        let source_bytes = fs::read(&source_path).map_err(|error| {
+            format!("unable to read admitted provider source {source_path:?}: {error}")
+        })?;
+        let source = String::from_utf8(source_bytes.clone())
+            .map_err(|_| format!("admitted provider source {source_path:?} is not UTF-8"))?;
+        let declared_header = source.lines().find(|line| {
+            let trimmed = line.trim_start();
+            !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*")
+        });
+        if !declared_header.is_some_and(|line| {
+            line.trim_start()
+                .starts_with(&format!("mncs {}", descriptor.profile))
+        }) {
+            return Err(format!(
+                "provider {} source profile does not match its descriptor",
+                descriptor.provider_identity
+            ));
+        }
+        let mut libraries = options.libraries.clone();
+        libraries.extend(
+            descriptor
+                .libraries
+                .iter()
+                .map(|path| descriptor_relative(descriptor_dir, path)),
+        );
+        let source_path_text = source_path.to_string_lossy().into_owned();
+        let session = open_native_session(&source_path_text, &libraries)?;
+        let actual_interface = session
+            .interface_identity()
+            .ok_or_else(|| "admitted provider artifact has no interface identity".to_owned())?;
+        if actual_interface != descriptor.interface_identity {
+            return Err(format!(
+                "provider interface identity mismatch: descriptor {}, artifact {}",
+                descriptor.interface_identity, actual_interface
+            ));
+        }
+        let actual_source = mncs_model::sha256_hex(&source_bytes);
+        if actual_source != descriptor.source_identity {
+            return Err(format!(
+                "provider source identity mismatch: descriptor {}, admitted source {}",
+                descriptor.source_identity, actual_source
+            ));
+        }
+        for (key, label) in [
+            ("provider", "provider"),
+            ("interface", "interface"),
+            ("revision", "revision"),
+            ("inventory", "inventory"),
+        ] {
+            let function = descriptor
+                .identity_entrypoints
+                .get(key)
+                .expect("descriptor validation checked identity entrypoint");
+            let actual = provider_identity_from_output(&session, &descriptor, function, label)?;
+            let expected = match key {
+                "provider" => &descriptor.provider_identity,
+                "interface" => &descriptor.interface_identity,
+                "revision" => &descriptor.revision_identity,
+                "inventory" => &descriptor.inventory_identity,
+                _ => unreachable!(),
+            };
+            if &actual != expected {
+                return Err(format!(
+                    "provider {label} identity mismatch: descriptor {expected}, admitted {actual}"
+                ));
+            }
+        }
+        let grants = descriptor
+            .required_capabilities
+            .iter()
+            .map(|capability| {
+                let Some((_, locator)) = options
+                    .provider_grants
+                    .iter()
+                    .find(|(candidate, _)| candidate == capability)
+                else {
+                    return Err(format!(
+                        "provider {} requires explicit --grant-provider {}=...",
+                        descriptor.provider_identity, capability
+                    ));
+                };
+                Ok(EmbedGrant {
+                    capability: capability.clone(),
+                    locator: locator.clone(),
+                    bytes: Vec::new(),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let facts = ProviderFacts {
+            descriptor_identity: descriptor.descriptor_identity.clone(),
+            provider_identity: descriptor.provider_identity.clone(),
+            interface_identity: descriptor.interface_identity.clone(),
+            source_identity: descriptor.source_identity.clone(),
+            revision_identity: descriptor.revision_identity.clone(),
+            inventory_identity: descriptor.inventory_identity.clone(),
+            artifact_identity: session.artifact_identity().to_owned(),
+            artifact_sha256: session.digest().to_owned(),
+        };
+        let admitted = AdmittedProvider::new(
+            session,
+            facts,
+            descriptor.module,
+            descriptor.entry_function,
+            grants,
+        )
+        .map_err(|error| error.to_string())?;
+        registry
+            .admit(admitted)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(registry)
+}
+
 fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
     let descriptor_path = options
         .descriptor_path
@@ -676,7 +884,11 @@ fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
     let missing_capabilities = descriptor
         .required_capabilities
         .iter()
-        .filter(|capability| !granted_capabilities.contains(capability.as_str()))
+        .filter(|capability| {
+            !granted_capabilities.contains(capability.as_str())
+                && !(capability.as_str() == "provider_admission"
+                    && !options.admitted_providers.is_empty())
+        })
         .cloned()
         .collect::<Vec<_>>();
     if !missing_capabilities.is_empty() {
@@ -715,6 +927,13 @@ fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
         Ok(session) => session,
         Err(error) => {
             eprintln!("error: native application could not be admitted: {error}");
+            return ExitCode::from(4);
+        }
+    };
+    let provider_registry = match admit_provider_descriptors(options) {
+        Ok(registry) => registry,
+        Err(error) => {
+            eprintln!("error: provider admission failed: {error}");
             return ExitCode::from(4);
         }
     };
@@ -776,12 +995,22 @@ fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
                 bytes: Vec::new(),
             }),
     );
-    let output = match session.call_typed_json(
-        &descriptor.module,
-        &descriptor.entry_function,
-        &args_json,
-        &call_options,
-    ) {
+    let output = match if provider_registry.admitted_count() > 0 {
+        session.call_typed_json_with_provider(
+            &descriptor.module,
+            &descriptor.entry_function,
+            &args_json,
+            &call_options,
+            &provider_registry,
+        )
+    } else {
+        session.call_typed_json(
+            &descriptor.module,
+            &descriptor.entry_function,
+            &args_json,
+            &call_options,
+        )
+    } {
         Ok(output) => output,
         Err(error) => {
             eprintln!("error: native application typed entry call failed: {error}");

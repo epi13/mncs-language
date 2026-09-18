@@ -1740,6 +1740,24 @@ fn execute_research_bytecode_payload(
     validate_artifact: bool,
     session: Option<&SsaExecutionSession>,
 ) -> BackendExecutionResult {
+    execute_research_bytecode_payload_with_provider(
+        artifact,
+        payload,
+        request,
+        validate_artifact,
+        session,
+        None,
+    )
+}
+
+fn execute_research_bytecode_payload_with_provider(
+    artifact: &BackendArtifact,
+    payload: &ResearchBytecodePayload,
+    request: &ExecutionRequest,
+    validate_artifact: bool,
+    session: Option<&SsaExecutionSession>,
+    provider_runtime: Option<&dyn mncs_model::ProviderRuntime>,
+) -> BackendExecutionResult {
     let mut result = BackendExecutionResult {
         schema_version: BACKEND_EXECUTION_RESULT_SCHEMA_VERSION.to_owned(),
         status: ExecutionStatus::InvalidRequest,
@@ -1753,7 +1771,10 @@ fn execute_research_bytecode_payload(
         failure: None,
     };
     let observation = if let Some(session) = session {
-        session.execute(request)
+        provider_runtime.map_or_else(
+            || session.execute(request),
+            |provider_runtime| session.execute_with_provider(request, provider_runtime),
+        )
     } else if validate_artifact {
         execute_ssa_module(&payload.program, &payload.ssa, request)
     } else {
@@ -2331,6 +2352,29 @@ impl OwnedExecutionSession {
             return execute_portable_wasm_decoded(&self.artifact, module, request);
         }
         execute_backend(&self.artifact, request)
+    }
+
+    /// Execute one research-bytecode application with a generic admitted
+    /// provider runtime. Non-research backends retain their existing explicit
+    /// unsupported behavior for host calls; the provider mechanism itself is
+    /// not specialized to any family.
+    pub fn execute_with_provider(
+        &self,
+        request: &ExecutionRequest,
+        provider_runtime: &dyn mncs_model::ProviderRuntime,
+    ) -> BackendExecutionResult {
+        if let Some((payload, session)) = self.research.as_ref() {
+            mncs_model::record_counter("reused_execution");
+            return execute_research_bytecode_payload_with_provider(
+                &self.artifact,
+                payload,
+                request,
+                false,
+                Some(session),
+                Some(provider_runtime),
+            );
+        }
+        self.execute(request)
     }
 }
 

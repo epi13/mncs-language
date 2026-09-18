@@ -80,6 +80,36 @@ pub fn structured_read_value(
     path: &[u8],
     schema: &[u8],
 ) -> Result<(ExecutionValue, StructuredEffect), StructuredFail> {
+    structured_read_value_with_policy(program, expected, grant, path, schema, None)
+}
+
+/// Read an identity-bearing external contract.  The ordinary structured
+/// reader intentionally remains a projection decoder: it may accept a richer
+/// wire document when a consumer only needs the fields declared by its
+/// nominal type.  Canonical identity establishment must use this entrypoint.
+/// It accepts only fields declared non-semantic by the contract owner and
+/// refuses every other extension before a typed value can be used to derive
+/// identity.
+pub fn structured_read_identity_value(
+    program: &Program,
+    expected: &BodyType,
+    grant: &HostGrant,
+    path: &[u8],
+    schema: &[u8],
+    extension_policy: &[u8],
+) -> Result<(ExecutionValue, StructuredEffect), StructuredFail> {
+    let policy = parse_identity_extension_policy(extension_policy)?;
+    structured_read_value_with_policy(program, expected, grant, path, schema, Some(&policy))
+}
+
+fn structured_read_value_with_policy(
+    program: &Program,
+    expected: &BodyType,
+    grant: &HostGrant,
+    path: &[u8],
+    schema: &[u8],
+    extension_policy: Option<&BTreeSet<String>>,
+) -> Result<(ExecutionValue, StructuredEffect), StructuredFail> {
     let schema = schema_label(schema)?;
     let artifact_path = resolve_artifact_path(grant, path, false)?;
     let mut file = open_nofollow(&artifact_path.target, false, false).map_err(|error| {
@@ -112,7 +142,7 @@ pub fn structured_read_value(
         )));
     }
 
-    let value = decode_document(program, expected, &bytes, &schema)?;
+    let value = decode_document(program, expected, &bytes, &schema, extension_policy)?;
     let digest = sha256_hex(&bytes);
     Ok((
         value,
@@ -125,6 +155,44 @@ pub fn structured_read_value(
             ),
         },
     ))
+}
+
+/// The policy is deliberately a small, deterministic transport value rather
+/// than a runtime-owned schema registry.  Commons (or another contract
+/// owner) supplies a comma-separated list of field names that it has
+/// explicitly classified as non-semantic.  An empty view means no extension
+/// fields are admitted.  Names are validated here so malformed policy data
+/// cannot widen the admission boundary.
+fn parse_identity_extension_policy(policy: &[u8]) -> Result<BTreeSet<String>, StructuredFail> {
+    if policy.len() > 256 {
+        return Err(StructuredFail::invalid(
+            "identity extension policy exceeds the 256-byte bound",
+        ));
+    }
+    if policy.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let text = String::from_utf8(policy.to_vec())
+        .map_err(|_| StructuredFail::invalid("identity extension policy is not UTF-8"))?;
+    let mut names = BTreeSet::new();
+    for name in text.split(',') {
+        if name.is_empty()
+            || name.len() > 64
+            || name
+                .bytes()
+                .any(|byte| byte == 0 || byte.is_ascii_whitespace())
+        {
+            return Err(StructuredFail::invalid(
+                "identity extension policy contains an invalid field name",
+            ));
+        }
+        if !names.insert(name.to_owned()) {
+            return Err(StructuredFail::invalid(
+                "identity extension policy contains a duplicate field name",
+            ));
+        }
+    }
+    Ok(names)
 }
 
 /// Encode one already-typed value into the generic external artifact
@@ -346,6 +414,7 @@ fn decode_document(
     expected: &BodyType,
     bytes: &[u8],
     schema: &str,
+    extension_policy: Option<&BTreeSet<String>>,
 ) -> Result<ExecutionValue, StructuredFail> {
     let json: JsonValue = serde_json::from_slice(bytes).map_err(|error| {
         StructuredFail::invalid(format!("structured artifact is not valid JSON: {error}"))
@@ -380,7 +449,35 @@ fn decode_document(
                 "structured artifact schema_version {actual_schema:?} does not match requested {schema:?}"
             )));
         }
-        return decode_typed_value(program, expected, &JsonValue::Object(envelope), 0, true);
+        // Some owner-defined external contracts (including the Commons
+        // VerificationPlan) make the boundary schema label part of the
+        // nominal record as well.  It is still the single top-level wire
+        // field; retain it for those records instead of making ingress lose
+        // a declared semantic field before identity-safe validation.
+        if let BodyType::Record { identity, .. } = expected {
+            if find_record(program, identity)
+                .map(|record| {
+                    record
+                        .fields
+                        .iter()
+                        .any(|field| field.name == "schema_version")
+                })
+                .unwrap_or(false)
+            {
+                envelope.insert(
+                    "schema_version".to_owned(),
+                    JsonValue::String(actual_schema),
+                );
+            }
+        }
+        return decode_typed_value(
+            program,
+            expected,
+            &JsonValue::Object(envelope),
+            0,
+            true,
+            extension_policy,
+        );
     }
     let actual_schema = envelope
         .get("schema_version")
@@ -420,7 +517,7 @@ fn decode_document(
             "structured artifact value_digest does not match the encoded value",
         ));
     }
-    decode_typed_value(program, expected, value, 0, false)
+    decode_typed_value(program, expected, value, 0, false, extension_policy)
 }
 
 fn enforce_json_bounds(value: &JsonValue) -> Result<(), StructuredFail> {
@@ -480,6 +577,7 @@ fn decode_typed_value(
     value: &JsonValue,
     depth: usize,
     external: bool,
+    extension_policy: Option<&BTreeSet<String>>,
 ) -> Result<ExecutionValue, StructuredFail> {
     if depth > STRUCTURED_MAX_DEPTH {
         return Err(StructuredFail::invalid(
@@ -540,7 +638,15 @@ fn decode_typed_value(
             })
         }
         BodyType::Sequence { element, bound } => {
-            let values = decode_sequence(program, element, bound, value, depth, external)?;
+            let values = decode_sequence(
+                program,
+                element,
+                bound,
+                value,
+                depth,
+                external,
+                extension_policy,
+            )?;
             Ok(ExecutionValue::Sequence {
                 values: values.into(),
             })
@@ -562,6 +668,7 @@ fn decode_typed_value(
                     item,
                     depth + 1,
                     external,
+                    extension_policy,
                 )?);
             }
             Ok(ExecutionValue::Vector {
@@ -588,10 +695,10 @@ fn decode_typed_value(
             })
         }
         BodyType::Finite { identity, .. } => {
-            decode_finite(program, identity, value, depth, external)
+            decode_finite(program, identity, value, depth, external, extension_policy)
         }
         BodyType::Record { identity, .. } => {
-            decode_record(program, identity, value, depth, external)
+            decode_record(program, identity, value, depth, external, extension_policy)
         }
         BodyType::Named(name) => Err(StructuredFail::invalid(format!(
             "structured decoder refuses unresolved named type {name:?}"
@@ -609,6 +716,7 @@ fn decode_sequence(
     value: &JsonValue,
     depth: usize,
     external: bool,
+    extension_policy: Option<&BTreeSet<String>>,
 ) -> Result<Vec<ExecutionValue>, StructuredFail> {
     let mut byte_string = None;
     let items: Vec<JsonValue> = if *element == BodyType::Byte {
@@ -642,6 +750,7 @@ fn decode_sequence(
                 item,
                 depth + 1,
                 external,
+                extension_policy,
             )?);
         }
         values
@@ -704,6 +813,7 @@ fn decode_record(
     value: &JsonValue,
     depth: usize,
     external: bool,
+    extension_policy: Option<&BTreeSet<String>>,
 ) -> Result<ExecutionValue, StructuredFail> {
     let record = find_record(program, identity)?;
     let JsonValue::Object(fields) = value else {
@@ -718,12 +828,22 @@ fn decode_record(
         .map(|field| field.name.clone())
         .collect::<BTreeSet<_>>();
     let actual_names = fields.keys().cloned().collect::<BTreeSet<_>>();
+    let unknown_names = actual_names
+        .difference(&expected_names)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let unknown_allowed = extension_policy
+        .map(|policy| unknown_names.is_subset(policy))
+        .unwrap_or(false);
     if (!external && actual_names != expected_names)
         || (external && !actual_names.is_superset(&expected_names))
+        || (external && extension_policy.is_some() && !unknown_allowed)
     {
         return Err(StructuredFail::invalid(format!(
-            "typed record {} fields do not exactly match its contract",
-            record.name
+            "typed record {} fields do not exactly match its contract (missing: {:?}; unknown: {:?})",
+            record.name,
+            expected_names.difference(&actual_names).collect::<Vec<_>>(),
+            unknown_names.iter().collect::<Vec<_>>()
         )));
     }
     let mut decoded = Vec::with_capacity(record.fields.len());
@@ -739,6 +859,7 @@ fn decode_record(
             fields.get(&field.name).expect("field set checked"),
             depth + 1,
             external,
+            extension_policy,
         )?;
         decoded.push((field.name.clone(), field_value));
     }
@@ -755,6 +876,7 @@ fn decode_finite(
     value: &JsonValue,
     depth: usize,
     external: bool,
+    extension_policy: Option<&BTreeSet<String>>,
 ) -> Result<ExecutionValue, StructuredFail> {
     let finite = find_finite(program, identity)?;
     if external {
@@ -826,6 +948,7 @@ fn decode_finite(
                 .expect("payload set checked"),
             depth + 1,
             external,
+            extension_policy,
         )?;
         decoded.push((field.name.clone(), field_value));
     }
@@ -1507,6 +1630,105 @@ mod tests {
             structured_read_value(&program, &expected, &grant, b"artifact.json", b"fixture/1")
                 .expect("read external document");
         assert_eq!(decoded, original);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn schema_version_field_is_preserved_for_owner_defined_external_record() {
+        let (mut program, expected) = program();
+        program.record_types[0].fields.insert(
+            0,
+            RecordField {
+                name: "schema_version".to_owned(),
+                field_type: "[byte; up_to 64]".to_owned(),
+            },
+        );
+        let root = tempfile_path("structured-schema-field");
+        std::fs::create_dir_all(&root).expect("root");
+        let grant = HostGrant {
+            capability: "artifact".to_owned(),
+            locator: root.to_string_lossy().into_owned(),
+            bytes: Vec::new(),
+        };
+        std::fs::write(
+            root.join("artifact.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": "fixture/1",
+                "count": 7,
+                "name": "native"
+            }))
+            .expect("external record"),
+        )
+        .expect("write external record");
+        let (decoded, _) =
+            structured_read_value(&program, &expected, &grant, b"artifact.json", b"fixture/1")
+                .expect("schema field must remain available to the nominal record");
+        let ExecutionValue::Record { fields, .. } = decoded else {
+            panic!("expected a record")
+        };
+        assert!(fields.iter().any(|(name, _)| name == "schema_version"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn identity_ingress_refuses_unknown_extensions_and_accepts_declared_nonsemantic() {
+        let (program, expected) = program();
+        let root = tempfile_path("structured-identity-extension");
+        std::fs::create_dir_all(&root).expect("root");
+        let grant = HostGrant {
+            capability: "artifact".to_owned(),
+            locator: root.to_string_lossy().into_owned(),
+            bytes: Vec::new(),
+        };
+        let path = root.join("artifact.json");
+        let mut document = serde_json::json!({
+            "schema_version": "fixture/1",
+            "count": 7,
+            "name": "native"
+        });
+        document["unknown_semantic_extension"] = serde_json::json!({"meaning": "must-not-drop"});
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&document).expect("unknown extension"),
+        )
+        .expect("write unknown extension");
+        let error = structured_read_identity_value(
+            &program,
+            &expected,
+            &grant,
+            b"artifact.json",
+            b"fixture/1",
+            b"presentation_extension,diagnostic_annotations",
+        )
+        .expect_err("identity-bearing ingress must refuse unknown fields");
+        assert!(matches!(error, StructuredFail::InvalidRequest(_)));
+
+        document["presentation_extension"] = serde_json::json!({"theme": "dark"});
+        document
+            .as_object_mut()
+            .expect("object")
+            .remove("unknown_semantic_extension");
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&document).expect("declared extension"),
+        )
+        .expect("write declared extension");
+        let (decoded, _) = structured_read_identity_value(
+            &program,
+            &expected,
+            &grant,
+            b"artifact.json",
+            b"fixture/1",
+            b"presentation_extension,diagnostic_annotations",
+        )
+        .expect("declared non-semantic extension is accepted");
+        assert_eq!(
+            decoded,
+            value(match &expected {
+                BodyType::Record { identity, .. } => identity.clone(),
+                _ => unreachable!(),
+            })
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
