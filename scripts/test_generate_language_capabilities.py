@@ -21,9 +21,15 @@ def main() -> None:
     assert value["current_profile"] == "0.18"
     assert value["library_modules"]
     assert value["examples"]
+    assert any(module["imports"] for module in value["library_modules"])
+    assert any(module["effects"] for module in value["library_modules"])
+    assert any(item["kind"] == "projection_generator" for item in value["provenance"])
     assert value["projections"] == {
         "capsule": True,
         "delta": True,
+        "effects": True,
+        "module_dependencies": True,
+        "profile_compatibility": True,
         "provenance": True,
         "symbol": True,
         "topic": True,

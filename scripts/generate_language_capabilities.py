@@ -46,12 +46,38 @@ def source_facts(path: Path) -> dict[str, object]:
         for match in re.finditer(pattern, text, re.MULTILINE):
             declarations.append({"kind": kind, "name": match.group(1)})
     declarations.sort(key=lambda item: (item["name"], item["kind"]))
+    imports = sorted(
+        {
+            match.group(1).split(" as ", 1)[0].strip()
+            for match in re.finditer(r"^\s*use\s+([^;]+);", text, re.MULTILINE)
+        }
+    )
+    capabilities = sorted(
+        set(re.findall(r"^\s*capability\s+([A-Za-z_][A-Za-z0-9_]*)\b", text, re.MULTILINE))
+    )
+    effects = [
+        {
+            "capability": match.group(2),
+            "effect": match.group(1),
+            "authorized_by": match.group(2),
+        }
+        for match in re.finditer(
+            r"^\s*effect\s+([A-Za-z_][A-Za-z0-9_]*)\s+authorized_by\s+([A-Za-z_][A-Za-z0-9_]*)",
+            text,
+            re.MULTILINE,
+        )
+    ]
+    effects.sort(key=lambda item: (item["effect"], item["capability"], item["authorized_by"]))
     return {
         "module": module.group(1) if module else None,
         "profile": profile.group(1) if profile else None,
         "path": path.relative_to(ROOT).as_posix(),
         "source_identity": digest_file(path),
         "symbols": declarations,
+        "exports": [item["name"] for item in declarations],
+        "imports": imports,
+        "capabilities": capabilities,
+        "effects": effects,
     }
 
 
@@ -147,6 +173,13 @@ def build_index() -> dict[str, object]:
             "source_identity": digest_file(REGISTRY),
         }
     ]
+    provenance.append(
+        {
+            "path": "scripts/generate_language_capabilities.py",
+            "kind": "projection_generator",
+            "source_identity": digest_file(ROOT / "scripts/generate_language_capabilities.py"),
+        }
+    )
     provenance.extend(
         {"path": item["path"], "kind": "library_module", "source_identity": item["source_identity"]}
         for item in library
@@ -182,6 +215,9 @@ def build_index() -> dict[str, object]:
             "symbol": True,
             "delta": True,
             "provenance": True,
+            "module_dependencies": True,
+            "effects": True,
+            "profile_compatibility": True,
         },
         "capsule": {
             "profile": current["version"],

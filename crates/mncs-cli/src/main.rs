@@ -1784,6 +1784,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
         Ok(source) => source,
         Err(code) => return code,
     };
+    let source_sha256 = mncs_model::sha256_hex(source.as_bytes());
     // The filesystem path is transport/provenance metadata.  Keep it out of
     // the semantic source envelope so inventory identity stays stable when a
     // repository moves between worktrees or CI directories.
@@ -1945,6 +1946,33 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
         }
     };
     let call_options = EmbedCallOptions::budgeted(options.step_budget);
+    let selected_test_identities: Vec<String> = selected
+        .iter()
+        .map(|test| test.test_case_identity.0.clone())
+        .collect();
+    // Inventory identity is a compiler-owned semantic projection, not a
+    // digest of transport metadata such as the source path or envelope
+    // label.  Keep the projection identical to the compatibility adapter:
+    // subject identity, subject fingerprint, and the ordered compiler test
+    // case identities are sufficient to bind exact selection.
+    let inventory_identity_material = (
+        inventory.subject_identity.0.as_str(),
+        inventory.subject_fingerprint.as_str(),
+        inventory
+            .tests
+            .iter()
+            .map(|test| test.test_case_identity.0.as_str())
+            .collect::<Vec<_>>(),
+    );
+    let inventory_identity = mncs_model::sha256_hex(
+        &serde_json::to_vec(&inventory_identity_material).unwrap_or_default(),
+    );
+    let run_identity = mncs_model::sha256_hex(
+        &serde_json::to_vec(&(source_path, &inventory_identity, &selected_test_identities))
+            .unwrap_or_default(),
+    );
+    let experiment_run_identity = format!("mncs:language:experiment-run:{run_identity}");
+    let mut request_artifacts = Vec::new();
     let empty = session.call("mncs.test.suite", "empty", Vec::new(), &call_options);
     let mut suite_value = match returned_value(&empty) {
         Some(value) => value.clone(),
@@ -1967,7 +1995,32 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
     let batch_outputs = session.call_batch(&batch_calls);
     let mut test_reports = Vec::with_capacity(selected.len());
     let mut transport_failure = None;
-    for (test, output) in selected.iter().zip(batch_outputs) {
+    for (index, (test, output)) in selected.iter().zip(batch_outputs).enumerate() {
+        let request = serde_json::json!({
+            "schema_version": "0.1",
+            "target": {"module": test.module, "function": test.name},
+            "arguments": [],
+            "step_budget": options.step_budget
+        });
+        let request_artifact = if let Some(directory) = &options.artifacts_path {
+            let request_bytes = serde_json::to_vec_pretty(&request).unwrap_or_default();
+            let request_sha256 = mncs_model::sha256_hex(&request_bytes);
+            let relative = format!("requests/{index:03}-{}.json", &request_sha256[..16]);
+            let path = directory.join(&relative);
+            if let Err(error) = write_native_test_file(&path, &request_bytes) {
+                eprintln!("error: unable to write native test request artifact {path:?}: {error}");
+                return ExitCode::from(3);
+            }
+            let artifact = serde_json::json!({
+                "path": relative,
+                "kind": "execution-request",
+                "sha256": request_sha256
+            });
+            request_artifacts.push(artifact.clone());
+            Some(artifact)
+        } else {
+            None
+        };
         let Some(native_value) = returned_value(&output) else {
             transport_failure = Some(format!(
                 "native test {} did not return a TestResult (status {})",
@@ -2008,6 +2061,14 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             .get("status")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("infrastructure_failure");
+        let execution_digest = mncs_model::sha256_hex(
+            format!("{experiment_run_identity}:{}", test.test_case_identity.0).as_bytes(),
+        );
+        let execution_identity = format!("{experiment_run_identity}:execution:{execution_digest}");
+        let observation_digest =
+            mncs_model::sha256_hex(format!("{execution_identity}:{status}:{verdict}").as_bytes());
+        let observation_identity =
+            format!("{experiment_run_identity}:observation:{observation_digest}");
         let observed = session.call(
             "mncs.test.suite",
             "observe",
@@ -2022,12 +2083,14 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
                 test.test_case_identity.0, observed.status
             ));
         }
-        test_reports.push(serde_json::json!({
+        let mut test_report = serde_json::json!({
             "id": test.test_case_identity.0,
             "entry": test.name,
             "kind": "unit",
+            "source": source_path,
             "verdict": verdict,
             "status": status,
+            "request": request,
             "semantic": {
                 "declaration_identity": test.declaration_identity,
                 "test_case_identity": test.test_case_identity,
@@ -2040,10 +2103,25 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
                 "subject_fingerprint": test.subject_fingerprint
             },
             "source_span": test.source_span,
+            "execution_lineage": {
+                "test_case_identity": test.test_case_identity,
+                "declaration_identity": test.declaration_identity,
+                "function_identity": test.function_identity,
+                "module": test.module,
+                "subject_identity": test.subject_identity,
+                "execution_identity": execution_identity,
+                "observation_identity": observation_identity,
+                "source": {"path": source_path, "sha256": source_sha256, "span": test.source_span},
+                "request": {"schema_version": "0.1", "sha256": request_artifact.as_ref().and_then(|artifact| artifact.get("sha256")), "artifact": request_artifact}
+            },
             "native_result": native_result,
             "projection": projection,
             "execution": output
-        }));
+        });
+        if let Some(artifact) = request_artifact {
+            test_report["request_artifact_ref"] = artifact;
+        }
+        test_reports.push(test_report);
     }
     let suite_summary = native_suite_value(&suite_value);
     let suite_projection_output = session.call(
@@ -2085,36 +2163,21 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
     } else {
         "changed_item"
     };
-    let selected_test_identities: Vec<String> = selected
-        .iter()
-        .map(|test| test.test_case_identity.0.clone())
-        .collect();
-    // Inventory identity is a compiler-owned semantic projection, not a
-    // digest of transport metadata such as the source path or envelope
-    // label.  Keep the projection identical to the compatibility adapter:
-    // subject identity, subject fingerprint, and the ordered compiler test
-    // case identities are sufficient to bind exact selection.
-    let inventory_identity_material = (
-        inventory.subject_identity.0.as_str(),
-        inventory.subject_fingerprint.as_str(),
-        inventory
-            .tests
-            .iter()
-            .map(|test| test.test_case_identity.0.as_str())
-            .collect::<Vec<_>>(),
-    );
-    let inventory_identity = mncs_model::sha256_hex(
-        &serde_json::to_vec(&inventory_identity_material).unwrap_or_default(),
-    );
-    let run_identity = mncs_model::sha256_hex(
-        &serde_json::to_vec(&(source_path, &inventory_identity, &selected_test_identities))
-            .unwrap_or_default(),
-    );
     let mut result = serde_json::json!({
         "schema_version": "mncs.test-result/1",
+        "protocol_version": 1,
+        "id": "mncs-test",
+        "provider": "mncs-test",
         "verdict": verdict,
         "classification": classification,
         "failure_class": if transport_failure.is_some() { "infrastructure" } else { "none" },
+        "exit_code": 0,
+        "run_id": run_identity,
+        "scope": {
+            "source": source_path,
+            "module": inventory.tests.first().map(|test| test.module.clone()),
+            "discovery": "compiler-inventory"
+        },
         "tests": test_reports,
         "summary": {
             "authority": "native_suite",
@@ -2158,8 +2221,14 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
         },
         "provenance": {
             "runner": {"name": "mncs.test.runner", "language": "mncs", "host": "mncs-toolchain"},
-            "source": source_path,
+            "source": {"path": source_path, "sha256": source_sha256},
             "inventory_identity": inventory_identity
+        },
+        "artifacts": request_artifacts,
+        "reproduction": {
+            "command": format!("mncs test {source_path}"),
+            "run_id": run_identity,
+            "step_budget": options.step_budget
         }
     });
     if let Some(message) = transport_failure {
@@ -2169,13 +2238,15 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
     if let Some(plan) = verification_plan {
         result["selection"]["verification_plan"] = plan;
     }
-    let exit = match verdict {
-        "PASS" => ExitCode::SUCCESS,
-        "FAIL" => ExitCode::from(1),
-        "UNKNOWN" if options.allow_unsupported => ExitCode::SUCCESS,
-        "UNKNOWN" => ExitCode::from(6),
-        _ => ExitCode::from(3),
+    let exit_code = match verdict {
+        "PASS" => 0,
+        "FAIL" => 1,
+        "UNKNOWN" if options.allow_unsupported => 0,
+        "UNKNOWN" => 6,
+        _ => 3,
     };
+    result["exit_code"] = serde_json::Value::from(exit_code);
+    let exit = ExitCode::from(exit_code);
     finish_native_test_output(&result, options, exit)
 }
 
@@ -2289,6 +2360,7 @@ fn native_test_value(value: &ExecutionValue) -> serde_json::Value {
             .unwrap_or(serde_json::Value::Null)
     };
     serde_json::json!({
+        "authority": "native_suite",
         "verdict": verdict,
         "verdict_code": verdict_code,
         "failure_kind": failure_kind,
