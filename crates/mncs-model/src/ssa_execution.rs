@@ -18,8 +18,8 @@ use crate::identity::{function_id, program_id};
 use crate::{
     execute_with_policy, BodyType, EvidenceReceipt, EvidenceReceiptOutcome, ExecutionCorpus,
     ExecutionFailure, ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionValue,
-    IntegerType, Program, SemanticId, SsaBlock, SsaFunction, SsaInstruction, SsaInstructionKind,
-    SsaModule, SsaTerminator, MAX_EXECUTION_BUDGET,
+    HostGrant, IntegerType, Program, SemanticId, SsaBlock, SsaFunction, SsaInstruction,
+    SsaInstructionKind, SsaModule, SsaTerminator, MAX_EXECUTION_BUDGET,
 };
 
 pub const SSA_EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
@@ -194,7 +194,7 @@ pub fn execute_ssa_module(
     module: &SsaModule,
     request: &crate::ExecutionRequest,
 ) -> SsaExecutionResult {
-    execute_ssa_module_with_validation(program, module, request, true, None, None, None, 0)
+    execute_ssa_module_with_validation(program, module, request, true, None, None, None, 0, None)
 }
 
 /// Interpret an SSA module after its immutable program/module validation has
@@ -207,7 +207,7 @@ pub fn execute_ssa_module_prevalidated(
     module: &SsaModule,
     request: &crate::ExecutionRequest,
 ) -> SsaExecutionResult {
-    execute_ssa_module_with_validation(program, module, request, false, None, None, None, 0)
+    execute_ssa_module_with_validation(program, module, request, false, None, None, None, 0, None)
 }
 
 /// Reusable immutable execution preparation for a bounded stateful session.
@@ -339,6 +339,32 @@ impl SsaExecutionSession {
             )),
             None,
             0,
+            None,
+        )
+    }
+
+    /// Execute with a host-supplied generic provider registry. Provider
+    /// admission remains outside the SSA model; the registry is only made
+    /// available to the explicit `provider_call` operation.
+    pub fn execute_with_provider(
+        &self,
+        request: &crate::ExecutionRequest,
+        provider_runtime: &dyn crate::ProviderRuntime,
+    ) -> SsaExecutionResult {
+        execute_ssa_module_with_validation(
+            &self.program,
+            &self.module,
+            request,
+            false,
+            Some(&self.block_indices),
+            Some((
+                &self.program_identity,
+                &self.program_fingerprint,
+                &self.module_fingerprint,
+            )),
+            None,
+            0,
+            Some(provider_runtime),
         )
     }
 
@@ -380,6 +406,7 @@ impl SsaExecutionSession {
             )),
             Some(arguments),
             0,
+            None,
         )
     }
 }
@@ -394,6 +421,7 @@ fn execute_ssa_module_with_validation(
     cached_identity: Option<(&SemanticId, &String, &String)>,
     owned_arguments: Option<Vec<ExecutionValue>>,
     call_depth: u64,
+    provider_runtime: Option<&dyn crate::ProviderRuntime>,
 ) -> SsaExecutionResult {
     if request.schema_version != crate::EXECUTION_REQUEST_SCHEMA_VERSION {
         return SsaExecutionResult::invalid(
@@ -627,6 +655,7 @@ fn execute_ssa_module_with_validation(
                 block_cache,
                 resolved_cache,
                 call_depth,
+                provider_runtime,
             ) {
                 return result;
             }
@@ -840,6 +869,7 @@ fn execute_instruction(
     block_cache: Option<&BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>>,
     cached_identity: Option<(&SemanticId, &String, &String)>,
     call_depth: u64,
+    provider_runtime: Option<&dyn crate::ProviderRuntime>,
 ) -> bool {
     match &instruction.kind {
         SsaInstructionKind::Constant { value, ty } => {
@@ -2323,6 +2353,7 @@ fn execute_instruction(
                 nested_cache,
                 None,
                 call_depth + 1,
+                provider_runtime,
             );
             let trace_offset = result.steps;
             result.steps = result.steps.saturating_add(nested.steps);
@@ -2415,17 +2446,33 @@ fn execute_instruction(
                 result.fail(ExecutionStatus::Unsupported, instruction_identity(instruction), "host call requires the explicit realize policy with a matching grant; no external access was performed");
                 return true;
             }
-            let Some(grant) = request
-                .host_grants
-                .iter()
-                .find(|grant| grant.capability == *capability)
-            else {
-                result.fail(
-                    ExecutionStatus::InvalidRequest,
-                    instruction_identity(instruction),
-                    format!("no host grant for capability {capability:?}; declared authority was not fulfilled"),
-                );
-                return true;
+            // Provider admission is a distinct authority from ordinary host
+            // grants. Once the caller supplies an admitted provider
+            // registry, the provider-call capability is fulfilled by that
+            // identity-keyed registry; it must not be forgeable by adding a
+            // string-only host grant. Other host operations retain the
+            // ordinary explicit-grant requirement.
+            let admitted_provider_grant = HostGrant {
+                capability: capability.clone(),
+                locator: "admitted-provider".to_owned(),
+                bytes: Vec::new(),
+            };
+            let grant = if operation == "provider_call" && provider_runtime.is_some() {
+                &admitted_provider_grant
+            } else {
+                let Some(grant) = request
+                    .host_grants
+                    .iter()
+                    .find(|grant| grant.capability == *capability)
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        format!("no host grant for capability {capability:?}; declared authority was not fulfilled"),
+                    );
+                    return true;
+                };
+                grant
             };
             if grant.bytes.len() > crate::execution::HOST_GRANT_MAX_BYTES {
                 result.fail(
@@ -2593,7 +2640,120 @@ fn execute_instruction(
                     }
                 }
             }
-            if operation == "structured_read" {
+            if operation == "provider_call" {
+                let Some(output) = instruction.outputs.first() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "provider_call has no result binding",
+                    );
+                    return true;
+                };
+                let provider_identity = match crate::execution::structured_view_operand_ssa(
+                    &instruction.inputs,
+                    values,
+                    0,
+                    32,
+                    "provider identity",
+                ) {
+                    Ok(provider_identity) if provider_identity.len() == 32 => provider_identity,
+                    Ok(_) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            "provider identity must be exactly 32 bytes",
+                        );
+                        return true;
+                    }
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                };
+                let Some(argument_input) = instruction.inputs.get(1) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "provider_call request operand is missing",
+                    );
+                    return true;
+                };
+                let Some(argument) = values.get(argument_input).cloned() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "provider_call request value is unavailable",
+                    );
+                    return true;
+                };
+                let Some(provider_runtime) = provider_runtime else {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        instruction_identity(instruction),
+                        "provider_call requires an admitted provider runtime",
+                    );
+                    return true;
+                };
+                let remaining = request.step_budget.saturating_sub(result.steps);
+                if remaining == 0 {
+                    result.fail(
+                        ExecutionStatus::BudgetExhausted,
+                        instruction_identity(instruction),
+                        "execution step budget exhausted before provider_call",
+                    );
+                    return true;
+                }
+                let invocation = match provider_runtime.invoke(
+                    &provider_identity,
+                    argument,
+                    &output.ty,
+                    remaining,
+                ) {
+                    Ok(invocation) => invocation,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            format!("provider_call refused: {reason}"),
+                        );
+                        return true;
+                    }
+                };
+                if !crate::execution::value_matches_type(program, &invocation.value, &output.ty) {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "admitted provider returned a value outside the declared result type",
+                    );
+                    return true;
+                }
+                values.insert(output.identity.clone(), invocation.value);
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "provider_call".to_owned(),
+                    target: format!(
+                        "mncs:provider:{}",
+                        provider_identity
+                            .iter()
+                            .map(|byte| format!("{byte:02x}"))
+                            .collect::<String>()
+                    ),
+                    capability: capability.clone(),
+                    provenance: None,
+                });
+                result.effects.extend(invocation.effects);
+                return false;
+            }
+            if matches!(
+                operation.as_str(),
+                "structured_read" | "structured_read_identity"
+            ) {
                 let Some(output) = instruction.outputs.first() else {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
@@ -2636,9 +2796,40 @@ fn execute_instruction(
                         return true;
                     }
                 };
-                match crate::structured::structured_read_value(
-                    program, &output.ty, grant, &path, &schema,
-                ) {
+                let extension_policy = if operation == "structured_read_identity" {
+                    match crate::execution::structured_view_operand_ssa(
+                        &instruction.inputs,
+                        values,
+                        2,
+                        256,
+                        "identity extension policy",
+                    ) {
+                        Ok(policy) => Some(policy),
+                        Err(reason) => {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                instruction_identity(instruction),
+                                reason,
+                            );
+                            return true;
+                        }
+                    }
+                } else {
+                    None
+                };
+                let read = extension_policy.as_deref().map_or_else(
+                    || {
+                        crate::structured::structured_read_value(
+                            program, &output.ty, grant, &path, &schema,
+                        )
+                    },
+                    |policy| {
+                        crate::structured::structured_read_identity_value(
+                            program, &output.ty, grant, &path, &schema, policy,
+                        )
+                    },
+                );
+                match read {
                     Ok((value, effect)) => {
                         values.insert(output.identity.clone(), value);
                         result.effects.push(ExecutionEffectEvent {

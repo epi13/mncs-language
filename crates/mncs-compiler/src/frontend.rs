@@ -3628,6 +3628,24 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             calls_in_expr(path, calls);
             calls_in_expr(schema, calls);
         }
+        AstExpr::StructuredReadIdentity {
+            path,
+            schema,
+            extension_policy,
+            ..
+        } => {
+            calls_in_expr(path, calls);
+            calls_in_expr(schema, calls);
+            calls_in_expr(extension_policy, calls);
+        }
+        AstExpr::ProviderCall {
+            provider_identity,
+            request,
+            ..
+        } => {
+            calls_in_expr(provider_identity, calls);
+            calls_in_expr(request, calls);
+        }
         AstExpr::StructuredWrite {
             path,
             schema,
@@ -6422,6 +6440,149 @@ impl<'a> BodyBuilder<'a> {
         Some(ResolvedBinding::plain(id, result_ty))
     }
 
+    /// Elaborate identity-safe contract ingress. The generic codec remains
+    /// permissive for projection reads; this operation is the explicit
+    /// canonical boundary and therefore carries the owner-declared bounded
+    /// extension policy as its third byte-view operand.
+    fn elaborate_structured_read_identity(
+        &mut self,
+        path: &AstExpr,
+        schema: &AstExpr,
+        extension_policy: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let Some(result_ty) = expected.cloned() else {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE295",
+                "structured_read_identity requires an expected concrete result type",
+                span,
+            ));
+            return None;
+        };
+        if result_ty.has_unresolved_named() || result_ty.contains_generic_parameter() {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE295",
+                "structured_read_identity requires a resolved nominal or bounded concrete result type",
+                span,
+            ));
+            return None;
+        }
+        let capability = self.check_host_authority(
+            "structured_read_identity",
+            "MNE296",
+            "MNE297",
+            span,
+            diagnostics,
+        )?;
+        let path_binding = self.elaborate_structured_view(
+            path,
+            "structured_read_identity path",
+            1024,
+            "MNE298",
+            env,
+            diagnostics,
+        )?;
+        let schema_binding = self.elaborate_structured_view(
+            schema,
+            "structured_read_identity schema",
+            64,
+            "MNE299",
+            env,
+            diagnostics,
+        )?;
+        let policy_binding = self.elaborate_structured_view(
+            extension_policy,
+            "structured_read_identity extension policy",
+            256,
+            "MNE300",
+            env,
+            diagnostics,
+        )?;
+        let id = self.new_value("structured_read_identity");
+        self.push_operation(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: "structured_read_identity".to_owned(),
+            },
+            operands: vec![path_binding.id, schema_binding.id, policy_binding.id],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
+    /// Elaborate the constrained typed provider boundary. Provider selection
+    /// and admission are host/runtime concerns; source only carries the
+    /// exact provider identity and a typed protocol request, and the
+    /// enclosing function declares the provider-call capability.
+    fn elaborate_provider_call(
+        &mut self,
+        provider_identity: &AstExpr,
+        request: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let Some(result_ty) = expected.cloned() else {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE301",
+                "provider_call requires an expected concrete result type",
+                span,
+            ));
+            return None;
+        };
+        if result_ty.has_unresolved_named() || result_ty.contains_generic_parameter() {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE301",
+                "provider_call requires a resolved nominal or bounded concrete result type",
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority("provider_call", "MNE302", "MNE303", span, diagnostics)?;
+        let provider_binding = self.elaborate_structured_view(
+            provider_identity,
+            "provider_call identity",
+            32,
+            "MNE304",
+            env,
+            diagnostics,
+        )?;
+        let request_binding = self.elaborate_expr(request, None, env, diagnostics)?;
+        let id = self.new_value("provider_call");
+        self.push_operation(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: "provider_call".to_owned(),
+            },
+            operands: vec![provider_binding.id, request_binding.id],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
     /// Elaborate the generic deterministic artifact encoder.  The result is
     /// the published byte count, so record-only execution can validate the
     /// exact document without performing a filesystem mutation.
@@ -8823,6 +8984,32 @@ impl<'a> BodyBuilder<'a> {
             AstExpr::StructuredRead { path, schema, span } => {
                 self.elaborate_structured_read(path, schema, *span, expected, env, diagnostics)
             }
+            AstExpr::StructuredReadIdentity {
+                path,
+                schema,
+                extension_policy,
+                span,
+            } => self.elaborate_structured_read_identity(
+                path,
+                schema,
+                extension_policy,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
+            AstExpr::ProviderCall {
+                provider_identity,
+                request,
+                span,
+            } => self.elaborate_provider_call(
+                provider_identity,
+                request,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
             AstExpr::StructuredWrite {
                 path,
                 schema,

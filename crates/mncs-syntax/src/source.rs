@@ -698,6 +698,25 @@ pub enum AstExpr {
         schema: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Identity-safe generic contract ingress
+    /// `structured_read_identity(path, schema, extension_policy)` (Profile
+    /// 0.18). The policy is a contract-owner supplied bounded byte view whose
+    /// comma-separated field names are explicitly non-semantic.
+    StructuredReadIdentity {
+        path: Box<AstExpr>,
+        schema: Box<AstExpr>,
+        extension_policy: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Generic same-session typed provider invocation
+    /// `provider_call(provider_identity, request)` (Profile 0.18). The
+    /// provider identity is an exact 32-byte value; the request/result
+    /// contracts are supplied by the linked provider protocol.
+    ProviderCall {
+        provider_identity: Box<AstExpr>,
+        request: Box<AstExpr>,
+        span: SourceSpan,
+    },
     /// Generic deterministic bounded artifact publication
     /// `structured_write(path, schema, value)` (Profile 0.18). The typed
     /// value is encoded by the runtime's linked contract and published under
@@ -897,6 +916,8 @@ impl AstExpr {
             | Self::StructuredDigest { span, .. }
             | Self::ProcessRun { span, .. }
             | Self::StructuredRead { span, .. }
+            | Self::StructuredReadIdentity { span, .. }
+            | Self::ProviderCall { span, .. }
             | Self::StructuredWrite { span, .. }
             | Self::HostWrite { span, .. }
             | Self::Ed25519Verify { span, .. }
@@ -3513,6 +3534,63 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
+            ("structured_read_identity", 3) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_18) {
+                    self.error(
+                        "MNP221",
+                        "structured_read_identity requires source profile 0.18 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(path), Some(schema), Some(extension_policy)) =
+                    (iter.next(), iter.next(), iter.next())
+                else {
+                    return None;
+                };
+                Some(AstExpr::StructuredReadIdentity {
+                    path: Box::new(path),
+                    schema: Box::new(schema),
+                    extension_policy: Box::new(extension_policy),
+                    span,
+                })
+            }
+            ("structured_read_identity", _) => {
+                self.error(
+                    "MNP222",
+                    "structured_read_identity takes exactly a path, schema, and extension-policy byte-view argument",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("provider_call", 2) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_18) {
+                    self.error(
+                        "MNP223",
+                        "provider_call requires source profile 0.18 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(provider_identity), Some(request)) = (iter.next(), iter.next()) else {
+                    return None;
+                };
+                Some(AstExpr::ProviderCall {
+                    provider_identity: Box::new(provider_identity),
+                    request: Box::new(request),
+                    span,
+                })
+            }
+            ("provider_call", _) => {
+                self.error(
+                    "MNP224",
+                    "provider_call takes exactly a provider identity and typed request argument",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
             ("structured_write", 3) => {
                 if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_18) {
                     self.error(
@@ -5320,6 +5398,8 @@ fn is_profile08_intrinsic(name: &str) -> bool {
             | "structured_digest"
             | "process_run"
             | "structured_read"
+            | "structured_read_identity"
+            | "provider_call"
             | "structured_write"
             | "ed25519_verify"
             | "vector"

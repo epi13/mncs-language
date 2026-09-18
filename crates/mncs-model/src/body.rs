@@ -1120,6 +1120,8 @@ pub fn host_call_effect_kind(operation: &str) -> &'static str {
         "structured_digest" => "structured_digest",
         "process_run" => "process_run",
         "structured_read" => "structured_read",
+        "structured_read_identity" => "structured_read",
+        "provider_call" => "provider_call",
         "structured_write" => "structured_write",
         "ed25519_verify" => "ed25519_verify",
         "blob_append" => "host_write",
@@ -1144,6 +1146,8 @@ pub fn host_call_arity(operation: &str) -> Option<usize> {
             Some(1)
         }
         "fs_create_file" | "fs_append_bytes_at" | "fs_rename_at" | "structured_read" => Some(2),
+        "structured_read_identity" => Some(3),
+        "provider_call" => Some(2),
         "structured_write" => Some(3),
         "ed25519_verify" | "fs_read_bytes_at" | "fs_write_bytes_at" => Some(3),
         _ => None,
