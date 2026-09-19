@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mncs.language-inventory/1",
+  "title": "Compiler-owned MNCS language inventory",
+  "type": "object",
+  "required": ["schema_version", "current_profile", "profiles", "syntax_features", "type_forms", "intrinsics", "effects", "capabilities", "compiler_operations", "declaration_kinds", "source_identity", "inventory_identity"],
+  "properties": {
+    "schema_version": {"const": "mncs.language-inventory/1"},
+    "current_profile": {"type": "string"},
+    "profiles": {"type": "array"},
+    "syntax_features": {"type": "array", "items": {"type": "string"}},
+    "type_forms": {"type": "array", "items": {"type": "object"}},
+    "intrinsics": {"type": "array", "items": {"$ref": "#/$defs/intrinsic"}},
+    "effects": {"type": "array", "items": {"type": "string"}},
+    "capabilities": {"type": "array", "items": {"type": "string"}},
+    "compiler_operations": {"type": "array", "items": {"type": "object"}},
+    "declaration_kinds": {"type": "array", "items": {"type": "object"}},
+    "source_identity": {"pattern": "^sha256:[0-9a-f]{64}$"},
+    "inventory_identity": {"pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "intrinsic": {
+      "type": "object",
+      "required": ["name", "kind", "introduced_profile", "effects"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+        "kind": {"type": "string"},
+        "arity": {"type": ["integer", "null"], "minimum": 0},
+        "introduced_profile": {"type": "string"},
+        "effects": {"type": "array", "items": {"type": "string"}},
+        "capability_kind": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

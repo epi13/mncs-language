@@ -1,0 +1,534 @@
+{
+  "deltas": [
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [
+          "mncs.example/applications/1",
+          "mncs.example/bounded-collections/1",
+          "mncs.example/effects/1",
+          "mncs.example/identity/1",
+          "mncs.example/structured-artifacts/1"
+        ],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [
+          "clock_grant",
+          "crypto_grant",
+          "declared_effect_capability",
+          "filesystem_root_grant",
+          "process_grant",
+          "structured_artifact_grant",
+          "write_grant"
+        ],
+        "removed": []
+      },
+      "current_content_identity": "sha256:0ac75de24aaec4af4f92224821ae3f6b9dd0528b503e49b73035cc56b50f67e2",
+      "effects": {
+        "added": [
+          "clock_read",
+          "ed25519_verify",
+          "fs_list",
+          "fs_read",
+          "fs_write",
+          "host_read",
+          "host_write",
+          "process_run",
+          "provider_call",
+          "sha256_digest",
+          "structured_digest",
+          "structured_read",
+          "structured_write"
+        ],
+        "removed": []
+      },
+      "exports": {
+        "added": [
+          "mncs.core.geometry.v1::contains_any",
+          "mncs.core.geometry.v1::first_point",
+          "mncs.core.geometry.v1::union",
+          "mncs.core.sequences.v1::all_true",
+          "mncs.core.sequences.v1::any_nonzero",
+          "mncs.core.sequences.v1::any_true",
+          "mncs.core.sequences.v1::contains",
+          "mncs.core.sequences.v1::contains_byte",
+          "mncs.core.sequences.v1::count",
+          "mncs.core.sequences.v1::count_nonzero",
+          "mncs.core.sequences.v1::count_true",
+          "mncs.core.sequences.v1::equals",
+          "mncs.core.sequences.v1::equals_byte_view",
+          "mncs.core.sequences.v1::equals_bytes",
+          "mncs.core.sequences.v1::first_of_generic",
+          "mncs.core.sequences.v1::is_sorted",
+          "mncs.core.sequences.v1::last_of_generic",
+          "mncs.core.sequences.v1::max",
+          "mncs.core.sequences.v1::min",
+          "mncs.core.sequences.v1::sum",
+          "mncs.core.status.v1::summarize",
+          "mncs.core.status.v1::summarize_prefix",
+          "mncs.family.coherence.v01::aggregate_statuses",
+          "mncs.std.chunk.v1::continue_line_generic",
+          "mncs.std.chunk.v1::find_newline_generic",
+          "mncs.std.chunk.v1::line_length_generic",
+          "mncs.std.chunk.v1::next_line_generic",
+          "mncs.std.encoding.v1::read_u16_le_generic",
+          "mncs.std.encoding.v1::read_u32_le_generic",
+          "mncs.std.json_emit.v1::key",
+          "mncs.std.json_emit.v1::put_quoted",
+          "mncs.std.json_emit.v1::str_value",
+          "mncs.std.sort.v1::dedup_sorted_count",
+          "mncs.std.sort.v1::insert_step",
+          "mncs.std.sort.v1::is_sorted",
+          "mncs.std.sort.v1::sort_up",
+          "mncs.std.text_map.v1::lookup16",
+          "mncs.std.text_map.v1::lookup32",
+          "mncs.std.text_scan.v1::compare",
+          "mncs.std.text_scan.v1::contains",
+          "mncs.std.text_scan.v1::ends_with",
+          "mncs.std.text_scan.v1::equals",
+          "mncs.std.text_scan.v1::equals_folded",
+          "mncs.std.text_scan.v1::find",
+          "mncs.std.text_scan.v1::starts_with",
+          "mncs.std.text_scan.v1::window_equal",
+          "mncs.std.text_utf8.v1::step_scalar_generic",
+          "mncs.std.text_utf8.v1::validate_generic",
+          "mncs.std.token_set.v1::contains",
+          "mncs.std.token_set.v1::dedup_count",
+          "mncs.std.token_set.v1::first_free_or_duplicate",
+          "mncs.std.token_set.v1::forbid_any",
+          "mncs.std.token_set.v1::is_first_occurrence",
+          "mncs.std.token_set.v1::prefer_hits",
+          "mncs.std.token_set.v1::require_all",
+          "mncs.std.token_set.v1::top_index"
+        ],
+        "removed": []
+      },
+      "intrinsics": {
+        "added": [
+          "checked_index",
+          "copy_span",
+          "cos",
+          "extract_lane",
+          "mask_all",
+          "mask_and",
+          "mask_any",
+          "mask_none",
+          "mask_not",
+          "mask_or",
+          "mask_xor",
+          "neg",
+          "reduce_max",
+          "reduce_min",
+          "reduce_sum_checked",
+          "reduce_sum_wrap",
+          "replace",
+          "replace_lane",
+          "select",
+          "sin",
+          "splat",
+          "vec_add_checked",
+          "vec_add_sat",
+          "vec_add_wrap",
+          "vec_and",
+          "vec_eq",
+          "vec_ge",
+          "vec_gt",
+          "vec_le",
+          "vec_lt",
+          "vec_max",
+          "vec_min",
+          "vec_mul_checked",
+          "vec_mul_sat",
+          "vec_mul_wrap",
+          "vec_ne",
+          "vec_or",
+          "vec_shl",
+          "vec_shr",
+          "vec_sub_checked",
+          "vec_sub_sat",
+          "vec_sub_wrap",
+          "vec_xor",
+          "vector"
+        ],
+        "changed": [],
+        "removed": [
+          "elaborate_bool_match",
+          "elaborate_bounded_iteration",
+          "elaborate_checked_index",
+          "elaborate_clock_read",
+          "elaborate_crypto_view",
+          "elaborate_ed25519_verify",
+          "elaborate_expr",
+          "elaborate_expr_inner",
+          "elaborate_float_intrinsic",
+          "elaborate_fs_append_bytes_at",
+          "elaborate_fs_create_file",
+          "elaborate_fs_entry_at",
+          "elaborate_fs_index",
+          "elaborate_fs_index_mutation",
+          "elaborate_fs_mkdir",
+          "elaborate_fs_name_view",
+          "elaborate_fs_nullary",
+          "elaborate_fs_read_bytes_at",
+          "elaborate_fs_rename_at",
+          "elaborate_fs_write_bytes_at",
+          "elaborate_full",
+          "elaborate_function",
+          "elaborate_host_read",
+          "elaborate_host_write",
+          "elaborate_import_closure",
+          "elaborate_linked_module_with_source_map",
+          "elaborate_process_run",
+          "elaborate_program",
+          "elaborate_program_with_resolutions",
+          "elaborate_program_with_resolver",
+          "elaborate_program_with_resolver_and_modules",
+          "elaborate_program_with_resolver_and_modules_and_seeds",
+          "elaborate_program_with_resolver_and_modules_and_seeds_with_map",
+          "elaborate_provider_call",
+          "elaborate_scalar_match",
+          "elaborate_sequence_copy",
+          "elaborate_sha256_digest",
+          "elaborate_statement",
+          "elaborate_statements",
+          "elaborate_structured_digest",
+          "elaborate_structured_read",
+          "elaborate_structured_read_identity",
+          "elaborate_structured_view",
+          "elaborate_structured_write",
+          "elaborate_vector_intrinsic"
+        ]
+      },
+      "modules": {
+        "added": [],
+        "changed": [
+          "mncs.core.bounds.v1",
+          "mncs.core.bytes.v1",
+          "mncs.core.contracts.v1",
+          "mncs.core.geometry.v1",
+          "mncs.core.identity.v1",
+          "mncs.core.image.v1",
+          "mncs.core.lineage.v1",
+          "mncs.core.logic.v1",
+          "mncs.core.mask.v1",
+          "mncs.core.numeric.v1",
+          "mncs.core.ordering.v1",
+          "mncs.core.partition.v1",
+          "mncs.core.proof_admit.v1",
+          "mncs.core.proof_check.v1",
+          "mncs.core.proof_dep.v2",
+          "mncs.core.proof_term.v1",
+          "mncs.core.random.v1",
+          "mncs.core.result.v1",
+          "mncs.core.sequences.v1",
+          "mncs.core.status.v1",
+          "mncs.core.vector.v1",
+          "mncs.core.version.v1",
+          "mncs.core.vision.v1",
+          "mncs.family.coherence.v01",
+          "mncs.family.journal.v1",
+          "mncs.family.rfc_status.v1",
+          "mncs.jit.binding.v1",
+          "mncs.jit.depends.v1",
+          "mncs.jit.lifecycle.v1",
+          "mncs.jit.plan.v1",
+          "mncs.jit.profile.v1",
+          "mncs.jit.proof.v1",
+          "mncs.jit.session.v1",
+          "mncs.jit.types.v1",
+          "mncs.std.ansi.v1",
+          "mncs.std.application.v1",
+          "mncs.std.channel.v1",
+          "mncs.std.chunk.v1",
+          "mncs.std.clock.v1",
+          "mncs.std.encoding.v1",
+          "mncs.std.fixed.v1",
+          "mncs.std.json.v1",
+          "mncs.std.json_cursor.v1",
+          "mncs.std.json_emit.v1",
+          "mncs.std.json_projection.v1",
+          "mncs.std.json_stream.v1",
+          "mncs.std.platform.v1",
+          "mncs.std.process.v1",
+          "mncs.std.relation.v1",
+          "mncs.std.scope.v1",
+          "mncs.std.sha256.v1",
+          "mncs.std.simd.v1",
+          "mncs.std.sort.v1",
+          "mncs.std.store.v1",
+          "mncs.std.task.v1",
+          "mncs.std.text_map.v1",
+          "mncs.std.text_scan.v1",
+          "mncs.std.text_utf8.v1",
+          "mncs.std.text_view.v1",
+          "mncs.std.token_set.v1"
+        ],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:92695962f91daaed076f0613dc2d984c78deb4914a2c7d8fd79914ded8127294",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      }
+    },
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [],
+        "removed": []
+      },
+      "current_content_identity": "sha256:cba2a5142a13163ab1852bb8d22ff2db522353cdf3d6358374c6c5416f176c39",
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "exports": {
+        "added": [],
+        "removed": []
+      },
+      "intrinsics": {
+        "added": [],
+        "changed": [
+          "mask_all",
+          "mask_and",
+          "mask_any",
+          "mask_none",
+          "mask_not",
+          "mask_or",
+          "mask_xor",
+          "reduce_max",
+          "reduce_min",
+          "reduce_sum_checked",
+          "reduce_sum_wrap",
+          "vec_add_checked",
+          "vec_add_sat",
+          "vec_add_wrap",
+          "vec_and",
+          "vec_eq",
+          "vec_ge",
+          "vec_gt",
+          "vec_le",
+          "vec_lt",
+          "vec_max",
+          "vec_min",
+          "vec_mul_checked",
+          "vec_mul_sat",
+          "vec_mul_wrap",
+          "vec_ne",
+          "vec_or",
+          "vec_shl",
+          "vec_shr",
+          "vec_sub_checked",
+          "vec_sub_sat",
+          "vec_sub_wrap",
+          "vec_xor",
+          "vector"
+        ],
+        "removed": []
+      },
+      "modules": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:0ac75de24aaec4af4f92224821ae3f6b9dd0528b503e49b73035cc56b50f67e2",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      }
+    },
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [
+          "mncs.example/applications/1",
+          "mncs.example/bounded-collections/1",
+          "mncs.example/effects/1",
+          "mncs.example/identity/1",
+          "mncs.example/structured-artifacts/1"
+        ],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [],
+        "removed": []
+      },
+      "current_content_identity": "sha256:2291921d3aad0ce743bc568fe2b7a89ef1ce71113b0a52c08b91e043c5fb3785",
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "exports": {
+        "added": [],
+        "removed": []
+      },
+      "intrinsics": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "modules": {
+        "added": [],
+        "changed": [
+          "mncs.core.bounds.v1",
+          "mncs.core.bytes.v1",
+          "mncs.core.contracts.v1",
+          "mncs.core.geometry.v1",
+          "mncs.core.identity.v1",
+          "mncs.core.image.v1",
+          "mncs.core.lineage.v1",
+          "mncs.core.logic.v1",
+          "mncs.core.mask.v1",
+          "mncs.core.numeric.v1",
+          "mncs.core.ordering.v1",
+          "mncs.core.partition.v1",
+          "mncs.core.proof_admit.v1",
+          "mncs.core.proof_check.v1",
+          "mncs.core.proof_dep.v2",
+          "mncs.core.proof_term.v1",
+          "mncs.core.random.v1",
+          "mncs.core.result.v1",
+          "mncs.core.sequences.v1",
+          "mncs.core.status.v1",
+          "mncs.core.vector.v1",
+          "mncs.core.version.v1",
+          "mncs.core.vision.v1",
+          "mncs.family.coherence.v01",
+          "mncs.family.journal.v1",
+          "mncs.family.rfc_status.v1",
+          "mncs.jit.binding.v1",
+          "mncs.jit.depends.v1",
+          "mncs.jit.lifecycle.v1",
+          "mncs.jit.plan.v1",
+          "mncs.jit.profile.v1",
+          "mncs.jit.proof.v1",
+          "mncs.jit.session.v1",
+          "mncs.jit.types.v1",
+          "mncs.std.ansi.v1",
+          "mncs.std.application.v1",
+          "mncs.std.channel.v1",
+          "mncs.std.chunk.v1",
+          "mncs.std.clock.v1",
+          "mncs.std.encoding.v1",
+          "mncs.std.fixed.v1",
+          "mncs.std.json.v1",
+          "mncs.std.json_cursor.v1",
+          "mncs.std.json_emit.v1",
+          "mncs.std.json_projection.v1",
+          "mncs.std.json_stream.v1",
+          "mncs.std.platform.v1",
+          "mncs.std.process.v1",
+          "mncs.std.relation.v1",
+          "mncs.std.scope.v1",
+          "mncs.std.sha256.v1",
+          "mncs.std.simd.v1",
+          "mncs.std.sort.v1",
+          "mncs.std.store.v1",
+          "mncs.std.task.v1",
+          "mncs.std.text_map.v1",
+          "mncs.std.text_scan.v1",
+          "mncs.std.text_utf8.v1",
+          "mncs.std.text_view.v1",
+          "mncs.std.token_set.v1"
+        ],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:cba2a5142a13163ab1852bb8d22ff2db522353cdf3d6358374c6c5416f176c39",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      }
+    },
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [
+          "mncs.example/applications/1",
+          "mncs.example/bounded-collections/1",
+          "mncs.example/effects/1",
+          "mncs.example/identity/1",
+          "mncs.example/structured-artifacts/1"
+        ],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [],
+        "removed": []
+      },
+      "current_content_identity": "sha256:1746d9027e327118b2777326149536376bee8d041ce3d6444ad90254aebc877f",
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "exports": {
+        "added": [],
+        "removed": []
+      },
+      "intrinsics": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "modules": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:2291921d3aad0ce743bc568fe2b7a89ef1ce71113b0a52c08b91e043c5fb3785",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      }
+    },
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [],
+        "removed": []
+      },
+      "current_content_identity": "sha256:8dab5b8f673a2d79d27f1f90eebb14500483e9942cd1b06b105458bf96385294",
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "exports": {
+        "added": [],
+        "removed": []
+      },
+      "from_profile": "0.18",
+      "intrinsics": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "modules": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:1746d9027e327118b2777326149536376bee8d041ce3d6444ad90254aebc877f",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "to_profile": "0.18"
+    }
+  ],
+  "history_identity": "sha256:c3586244ec7d50c21f9cb2d33c4b618d33acc4b5049d03cb41ae2c516a966aee",
+  "retention": 8,
+  "schema_version": "mncs.language-capability-deltas/1"
+}

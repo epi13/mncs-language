@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mncs.declaration-inventory/1",
+  "title": "Compiler-owned MNCS declaration and callable inventory",
+  "type": "object",
+  "required": ["schema_version", "scope", "module", "source_artifact_identity", "source_profile", "subject_identity", "subject_fingerprint", "declarations", "callables", "inventory_identity"],
+  "properties": {
+    "schema_version": {"const": "mncs.declaration-inventory/1"},
+    "scope": {"type": "string"},
+    "module": {"type": "string"},
+    "source_artifact_identity": {"type": "string"},
+    "source_profile": {"type": "string"},
+    "subject_identity": {"type": "string"},
+    "subject_fingerprint": {"type": "string"},
+    "declarations": {"type": "array", "items": {"type": "object"}},
+    "callables": {"type": "array", "items": {"$ref": "#/$defs/callable"}},
+    "inventory_identity": {"pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "callable": {
+      "type": "object",
+      "required": ["declaration_identity", "callable_identity", "callable_kind", "module", "name", "qualified_name", "source_span", "profile", "generic_params", "inputs", "outputs", "effects", "capabilities", "exported"],
+      "properties": {
+        "declaration_identity": {"type": "string"},
+        "callable_identity": {"type": "string"},
+        "callable_kind": {"type": "string"},
+        "module": {"type": "string"},
+        "name": {"type": "string"},
+        "qualified_name": {"type": "string"},
+        "source_span": {"type": "object"},
+        "profile": {"type": "string"},
+        "generic_params": {"type": "array"},
+        "inputs": {"type": "array"},
+        "outputs": {"type": "array"},
+        "effects": {"type": "array"},
+        "capabilities": {"type": "array", "items": {"type": "string"}},
+        "exported": {"type": "boolean"},
+        "test_case_identity": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

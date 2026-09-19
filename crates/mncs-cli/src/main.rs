@@ -17,8 +17,9 @@ use mncs_codegen::{
 };
 use mncs_compiler::{
     bundle::{collect_library_modules, StdlibBundle},
-    native_node_profile, reference_compiler_architecture, ModuleResolution,
-    ModuleResolutionOutcome, ModuleResolver, ReferenceCompiler, SourceFrontEndResult,
+    declaration_inventory, declaration_inventory_from_ast, language_inventory, native_node_profile,
+    reference_compiler_architecture, ModuleResolution, ModuleResolutionOutcome, ModuleResolver,
+    ReferenceCompiler, SourceFrontEndResult,
 };
 use mncs_embed::{
     process::{run_bounded, ProcessRequest, MAX_CAPTURE_BYTES, MAX_DEADLINE_MS},
@@ -107,6 +108,8 @@ fn run_cli() -> ExitCode {
             }
             validate(&path)
         }
+        "language-inventory" => language_inventory_command(args),
+        "declaration-inventory" => declaration_inventory_command(args),
         "test-inventory" => test_inventory_command(args),
         "test" => test_command(args),
         "call" => call_command(args),
@@ -216,6 +219,106 @@ struct TestInventoryCommandReport {
     source: String,
     inventory: Option<mncs_compiler::TestInventory>,
     diagnostics: Vec<mncs_syntax::SourceDiagnostic>,
+}
+
+#[derive(Debug, Serialize)]
+struct DeclarationInventoryCommandReport {
+    schema_version: &'static str,
+    valid: bool,
+    source: String,
+    inventory: Option<mncs_compiler::DeclarationInventory>,
+    diagnostics: Vec<mncs_syntax::SourceDiagnostic>,
+}
+
+/// Emit the compiler's generic language/toolchain facts.  The data comes
+/// from the compiler and syntax registries; no source tree scan is involved.
+fn language_inventory_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    if args.into_iter().next().is_some() {
+        eprintln!("error: language-inventory does not accept arguments");
+        return ExitCode::from(2);
+    }
+    if print_json(&language_inventory()) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(2)
+    }
+}
+
+/// Emit a generic module declaration/callable inventory.  Test declarations
+/// are represented as ordinary typed callables with an additional stable test
+/// case identity; no provider dispatch policy is embedded here.
+fn declaration_inventory_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(source_path) = args.next() else {
+        eprintln!("error: declaration-inventory requires an MNCS source path");
+        print_usage();
+        return ExitCode::from(2);
+    };
+    let syntax_only = match args.next().as_deref() {
+        None => false,
+        Some("--syntax-only") => true,
+        Some(_) => {
+            eprintln!(
+                "error: declaration-inventory accepts only --syntax-only after the source path"
+            );
+            return ExitCode::from(2);
+        }
+    };
+    let source = match read_source(&source_path) {
+        Ok(source) => source,
+        Err(code) => return code,
+    };
+    let envelope =
+        SourceEnvelope::inline(SourceArtifactKind::Program, "declaration-inventory", source);
+    if syntax_only {
+        let parsed = mncs_syntax::parse(&envelope);
+        let valid = parsed.ast.is_some()
+            && parsed
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != mncs_syntax::DiagnosticSeverity::Error);
+        let report = DeclarationInventoryCommandReport {
+            schema_version: mncs_compiler::DECLARATION_INVENTORY_SCHEMA_VERSION,
+            valid,
+            source: source_path,
+            inventory: parsed
+                .ast
+                .as_ref()
+                .and_then(|ast| declaration_inventory_from_ast(&envelope, ast)),
+            diagnostics: parsed.diagnostics,
+        };
+        if !print_json(&report) {
+            return ExitCode::from(2);
+        }
+        return if valid {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
+    }
+    let resolver = FileModuleResolver::with_libraries(&source_path);
+    let front_end = ReferenceCompiler::default().front_end_with_resolver(envelope, &resolver);
+    let valid = front_end.is_valid();
+    let report = DeclarationInventoryCommandReport {
+        schema_version: mncs_compiler::DECLARATION_INVENTORY_SCHEMA_VERSION,
+        valid,
+        source: source_path,
+        inventory: declaration_inventory(&front_end),
+        diagnostics: front_end.diagnostics,
+    };
+    if !print_json(&report) {
+        ExitCode::from(2)
+    } else if valid {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 /// Emit the compiler-owned structural inventory of first-class source tests.
@@ -7051,6 +7154,8 @@ fn print_usage() {
     eprintln!();
     eprintln!("Usage:");
     eprintln!("  mncs validate <manifest.json>");
+    eprintln!("  mncs language-inventory");
+    eprintln!("  mncs declaration-inventory <program.mncs> [--syntax-only]");
     eprintln!("  mncs test-inventory <program.mncs>");
     eprintln!("  mncs test <program.mncs> [--library ROOT ...] [--filter SELECTOR ...] [--test-identity ID ... | --verification-plan FILE] [--step-budget N] [--result FILE] [--check-result FILE] [--artifacts DIR] [--format json|text]");
     eprintln!("  mncs call <program.mncs> --module MODULE --function FUNCTION --args FILE [--library ROOT ...] [--step-budget N] [--result FILE] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path]");

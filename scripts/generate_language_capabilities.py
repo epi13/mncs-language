@@ -10,13 +10,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "spec/source-profile-registry.json"
 OUTPUT = ROOT / "docs/language-capabilities.json"
+DELTA_OUTPUT = ROOT / "docs/language-capability-deltas.json"
 
 
 def digest_bytes(value: bytes) -> str:
@@ -31,72 +34,126 @@ def read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def source_facts(path: Path) -> dict[str, object]:
-    text = path.read_text(encoding="utf-8")
-    profile = re.search(r"^mncs\s+([^;]+);", text, re.MULTILINE)
-    module = re.search(r"^module\s+([^;]+);", text, re.MULTILINE)
-    declarations: list[dict[str, str]] = []
-    patterns = (
-        ("record", r"^record\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{"),
-        ("enum", r"^enum\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{"),
-        ("type", r"^type\s+([A-Za-z_][A-Za-z0-9_]*)\b"),
-        ("function", r"^fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\("),
+def compiler_binary() -> Path:
+    candidates = []
+    if value := os.environ.get("MNCS_LANGUAGE_BINARY"):
+        candidates.append(Path(value))
+    candidates.extend(
+        [
+            ROOT / "target/debug/mncs",
+            ROOT / "target/release/mncs",
+        ]
     )
-    for kind, pattern in patterns:
-        for match in re.finditer(pattern, text, re.MULTILINE):
-            declarations.append({"kind": kind, "name": match.group(1)})
-    declarations.sort(key=lambda item: (item["name"], item["kind"]))
-    imports = sorted(
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    raise RuntimeError(
+        "compiler-owned language inventory requires a built mncs binary; "
+        "set MNCS_LANGUAGE_BINARY or build target/debug/mncs"
+    )
+
+
+def compiler_command(binary: Path, *arguments: str) -> dict[str, object]:
+    environment = os.environ.copy()
+    library_root = str(ROOT / "library")
+    configured = environment.get("MNCS_LIBRARY_PATH")
+    environment["MNCS_LIBRARY_PATH"] = (
+        f"{library_root}:{configured}" if configured else library_root
+    )
+    result = subprocess.run(
+        [str(binary), *arguments],
+        cwd=ROOT,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        document = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            f"compiler inventory command emitted invalid JSON: {result.stderr.strip()}"
+        ) from error
+    if result.returncode != 0:
+        diagnostics = document.get("diagnostics", []) if isinstance(document, dict) else []
+        raise RuntimeError(
+            f"compiler inventory command failed for {arguments!r}: "
+            f"{diagnostics or result.stderr.strip()}"
+        )
+    return document
+
+
+def compiler_language_inventory(binary: Path) -> dict[str, object]:
+    document = compiler_command(binary, "language-inventory")
+    if document.get("schema_version") != "mncs.language-inventory/1":
+        raise RuntimeError("compiler returned an unexpected language inventory schema")
+    return document
+
+
+def source_facts(path: Path, binary: Path) -> dict[str, object]:
+    report = compiler_command(binary, "declaration-inventory", str(path), "--syntax-only")
+    inventory = report.get("inventory")
+    if not report.get("valid") or not isinstance(inventory, dict):
+        raise RuntimeError(f"compiler could not inventory {path}: {report.get('diagnostics')}")
+    declarations = inventory.get("declarations", [])
+    callables = inventory.get("callables", [])
+    symbols = [
         {
-            match.group(1).split(" as ", 1)[0].strip()
-            for match in re.finditer(r"^\s*use\s+([^;]+);", text, re.MULTILINE)
+            "kind": declaration.get("kind"),
+            "name": declaration.get("name"),
+            "identity": declaration.get("identity"),
         }
+        for declaration in declarations
+        if declaration.get("kind") != "module"
+    ]
+    imports = sorted(
+        declaration["name"]
+        for declaration in declarations
+        if declaration.get("kind") == "import"
     )
     capabilities = sorted(
-        set(re.findall(r"^\s*capability\s+([A-Za-z_][A-Za-z0-9_]*)\b", text, re.MULTILINE))
-    )
-    effects = [
         {
-            "capability": match.group(2),
-            "effect": match.group(1),
-            "authorized_by": match.group(2),
+            capability
+            for callable_ in callables
+            for capability in callable_.get("capabilities", [])
         }
-        for match in re.finditer(
-            r"^\s*effect\s+([A-Za-z_][A-Za-z0-9_]*)\s+authorized_by\s+([A-Za-z_][A-Za-z0-9_]*)",
-            text,
-            re.MULTILINE,
-        )
-    ]
-    effects.sort(key=lambda item: (item["effect"], item["capability"], item["authorized_by"]))
+    )
+    effects = sorted(
+        {
+            (
+                effect.get("kind"),
+                effect.get("target"),
+                effect.get("capability"),
+            )
+            for callable_ in callables
+            for effect in callable_.get("effects", [])
+        }
+    )
     return {
-        "module": module.group(1) if module else None,
-        "profile": profile.group(1) if profile else None,
+        "module": inventory.get("module"),
+        "profile": inventory.get("source_profile"),
         "path": path.relative_to(ROOT).as_posix(),
+        # Projection provenance is file-addressed so Doctor can verify
+        # freshness without reimplementing compiler identity derivation.
         "source_identity": digest_file(path),
-        "symbols": declarations,
-        "exports": [item["name"] for item in declarations],
+        "compiler_source_identity": inventory.get("source_artifact_identity"),
+        "inventory_identity": inventory.get("inventory_identity"),
+        "symbols": symbols,
+        "exports": sorted(
+            declaration["name"]
+            for declaration in declarations
+            if declaration.get("exported") and declaration.get("kind") != "module"
+        ),
         "imports": imports,
         "capabilities": capabilities,
-        "effects": effects,
+        "effects": [
+            {"effect": kind, "target": target, "capability": capability}
+            for kind, target, capability in effects
+        ],
     }
 
 
-def compiler_intrinsics() -> list[dict[str, str]]:
-    facts: list[dict[str, str]] = []
-    for path in sorted((ROOT / "crates").rglob("*.rs")):
-        text = path.read_text(encoding="utf-8", errors="replace")
-        for name in sorted(set(re.findall(r"\b(elaborate_[A-Za-z0-9_]+)\b", text))):
-            facts.append(
-                {
-                    "name": name,
-                    "source": path.relative_to(ROOT).as_posix(),
-                    "source_identity": digest_file(path),
-                }
-            )
-    return facts
-
-
-def canonical_examples() -> list[dict[str, object]]:
+def canonical_examples(binary: Path) -> list[dict[str, object]]:
     candidates = [
         ("bounded-collections", "examples/source/bounded-min.mncs", "bounded collections"),
         ("identity", "examples/source/identity.mncs", "identity"),
@@ -108,15 +165,16 @@ def canonical_examples() -> list[dict[str, object]]:
     for identity, relative, topic in candidates:
         path = ROOT / relative
         if path.is_file():
+            inventory = source_facts(path, binary)
             examples.append(
                 {
                     "identity": f"mncs.example/{identity}/1",
                     "path": relative,
-                    "profile": re.search(
-                        r"^mncs\s+([^;]+);", path.read_text(encoding="utf-8"), re.MULTILINE
-                    ).group(1),
+                    "profile": inventory["profile"],
                     "topics": [topic],
-                    "source_identity": digest_file(path),
+                    "source_identity": inventory["source_identity"],
+                    "compiler_source_identity": inventory["compiler_source_identity"],
+                    "inventory_identity": inventory["inventory_identity"],
                     "verification": "examples/source and compiler test suites",
                 }
             )
@@ -162,15 +220,29 @@ CURATED_TOPICS = [
 ]
 
 
-def build_index() -> dict[str, object]:
+def build_index(binary: Path) -> dict[str, object]:
     profiles = read_json(REGISTRY)
     current = next(item for item in profiles if item["status"] == "current")
-    library = [source_facts(path) for path in sorted((ROOT / "library").rglob("*.mncs"))]
+    compiler_facts = compiler_language_inventory(binary)
+    library_paths = sorted((ROOT / "library").rglob("*.mncs"))
+    worker_count = max(
+        1,
+        min(
+            len(library_paths),
+            int(os.environ.get("MNCS_INVENTORY_WORKERS", "4")),
+        ),
+    )
+    # Compiler calls are independent; map preserves path order so the
+    # resulting projection remains byte-stable while large modules can be
+    # inventoried without turning refreshes into a serial crawl.
+    with ThreadPoolExecutor(max_workers=worker_count) as workers:
+        library = list(workers.map(lambda path: source_facts(path, binary), library_paths))
     provenance = [
         {
-            "path": REGISTRY.relative_to(ROOT).as_posix(),
-            "kind": "profile_registry",
-            "source_identity": digest_file(REGISTRY),
+            "path": "compiler:language-inventory",
+            "kind": "compiler_language_inventory",
+            "source_identity": compiler_facts["source_identity"],
+            "inventory_identity": compiler_facts["inventory_identity"],
         }
     ]
     provenance.append(
@@ -184,14 +256,10 @@ def build_index() -> dict[str, object]:
         {"path": item["path"], "kind": "library_module", "source_identity": item["source_identity"]}
         for item in library
     )
-    examples = canonical_examples()
+    examples = canonical_examples(binary)
     provenance.extend(
         {"path": item["path"], "kind": "canonical_example", "source_identity": item["source_identity"]}
         for item in examples
-    )
-    provenance.extend(
-        {"path": item["source"], "kind": "compiler_source", "source_identity": item["source_identity"]}
-        for item in compiler_intrinsics()
     )
     # De-duplicate compiler files and keep the projection deterministic.
     provenance = sorted(
@@ -203,9 +271,11 @@ def build_index() -> dict[str, object]:
         "language": "MNCS",
         "current_profile": current["version"],
         "profile_registry_identity": digest_file(REGISTRY),
+        "compiler_inventory_identity": compiler_facts["inventory_identity"],
+        "compiler_inventory": compiler_facts,
         "profiles": profiles,
         "library_modules": library,
-        "intrinsics": compiler_intrinsics(),
+        "intrinsics": compiler_facts["intrinsics"],
         "topics": CURATED_TOPICS,
         "examples": examples,
         "provenance": provenance,
@@ -221,9 +291,9 @@ def build_index() -> dict[str, object]:
         },
         "capsule": {
             "profile": current["version"],
-            "syntax": ["module", "use", "record", "enum", "fn", "bounded sequences", "effects"],
-            "types": ["nominal records", "finite enums", "bounded sequences", "views", "byte arrays"],
-            "effects": ["declared capabilities", "structured_read", "structured_write", "artifact publication"],
+            "syntax": compiler_facts["syntax_features"],
+            "types": [item["name"] for item in compiler_facts["type_forms"]],
+            "effects": compiler_facts["effects"],
             "standard_library_namespaces": ["mncs.core", "mncs.family", "mncs.jit", "mncs.std"],
             "evolution": "source facts evolve in place; persistent contracts carry explicit identities",
         },
@@ -233,9 +303,104 @@ def build_index() -> dict[str, object]:
     return index
 
 
+def _by_key(items: list[dict[str, object]], key: str) -> dict[str, dict[str, object]]:
+    return {str(item[key]): item for item in items if key in item}
+
+
+def _set_delta(before: set[str], after: set[str]) -> dict[str, list[str]]:
+    return {"added": sorted(after - before), "removed": sorted(before - after)}
+
+
+def build_delta(before: dict[str, object], after: dict[str, object]) -> dict[str, object]:
+    before_modules = _by_key(before.get("library_modules", []), "module")
+    after_modules = _by_key(after.get("library_modules", []), "module")
+    module_changes = _set_delta(set(before_modules), set(after_modules))
+    module_changes["changed"] = sorted(
+        module
+        for module in set(before_modules) & set(after_modules)
+        if before_modules[module].get("inventory_identity")
+        != after_modules[module].get("inventory_identity")
+    )
+    before_profiles = _by_key(before.get("profiles", []), "version")
+    after_profiles = _by_key(after.get("profiles", []), "version")
+    profile_changes = _set_delta(set(before_profiles), set(after_profiles))
+    profile_changes["changed"] = sorted(
+        profile
+        for profile in set(before_profiles) & set(after_profiles)
+        if before_profiles[profile] != after_profiles[profile]
+    )
+    before_intrinsics = _by_key(before.get("intrinsics", []), "name")
+    after_intrinsics = _by_key(after.get("intrinsics", []), "name")
+    intrinsic_changes = _set_delta(set(before_intrinsics), set(after_intrinsics))
+    intrinsic_changes["changed"] = sorted(
+        name
+        for name in set(before_intrinsics) & set(after_intrinsics)
+        if before_intrinsics[name] != after_intrinsics[name]
+    )
+    before_exports = {
+        f"{item.get('module')}::{export}"
+        for item in before.get("library_modules", [])
+        for export in item.get("exports", [])
+    }
+    after_exports = {
+        f"{item.get('module')}::{export}"
+        for item in after.get("library_modules", [])
+        for export in item.get("exports", [])
+    }
+    before_effects = set(before.get("compiler_inventory", {}).get("effects", []))
+    after_effects = set(after.get("compiler_inventory", {}).get("effects", []))
+    before_capabilities = set(before.get("compiler_inventory", {}).get("capabilities", []))
+    after_capabilities = set(after.get("compiler_inventory", {}).get("capabilities", []))
+    before_examples = _by_key(before.get("examples", []), "identity")
+    after_examples = _by_key(after.get("examples", []), "identity")
+    example_changes = _set_delta(set(before_examples), set(after_examples))
+    example_changes["changed"] = sorted(
+        identity
+        for identity in set(before_examples) & set(after_examples)
+        if before_examples[identity] != after_examples[identity]
+    )
+    return {
+        "previous_content_identity": before.get("content_identity"),
+        "current_content_identity": after.get("content_identity"),
+        "from_profile": before.get("current_profile"),
+        "to_profile": after.get("current_profile"),
+        "profiles": profile_changes,
+        "modules": module_changes,
+        "exports": _set_delta(before_exports, after_exports),
+        "intrinsics": intrinsic_changes,
+        "effects": _set_delta(before_effects, after_effects),
+        "capabilities": _set_delta(before_capabilities, after_capabilities),
+        "canonical_examples": example_changes,
+    }
+
+
+def write_language_delta(before: dict[str, object] | None, after: dict[str, object]) -> None:
+    history = read_json(DELTA_OUTPUT) if DELTA_OUTPUT.is_file() else {
+        "schema_version": "mncs.language-capability-deltas/1",
+        "retention": 8,
+        "deltas": [],
+    }
+    if before and before.get("content_identity") != after.get("content_identity"):
+        history["deltas"] = [
+            *history.get("deltas", []),
+            build_delta(before, after),
+        ][-int(history.get("retention", 8)) :]
+    canonical = json.dumps(
+        {key: value for key, value in history.items() if key != "history_identity"},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    history["history_identity"] = digest_bytes(canonical)
+    DELTA_OUTPUT.write_text(json.dumps(history, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def main() -> None:
+    binary = compiler_binary()
+    before = read_json(OUTPUT) if OUTPUT.is_file() else None
+    index = build_index(binary)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(json.dumps(build_index(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    OUTPUT.write_text(json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_language_delta(before, index)
     print(OUTPUT)
 
 

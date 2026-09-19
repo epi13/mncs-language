@@ -6,6 +6,7 @@
 
 pub mod bundle;
 mod frontend;
+pub mod inventory;
 pub mod proof_admission;
 mod resolution;
 pub mod source_map;
@@ -18,6 +19,12 @@ pub use frontend::{
     specialize_program_with_host_seeds, ModuleResolution, ModuleResolutionOutcome, ModuleResolver,
     NullResolver, SourceFrontEndResult, SourceStudyOutput, TestInventory, TestInventoryEntry,
     TEST_INVENTORY_SCHEMA_VERSION,
+};
+pub use inventory::{
+    declaration_inventory, declaration_inventory_from_ast, declaration_inventory_from_syntax,
+    language_inventory, CallableInventoryEntry, CompilerOperation, DeclarationInventory,
+    DeclarationInventoryEntry, DeclarationKind, InventoryIntrinsic, LanguageInventory, TypeForm,
+    DECLARATION_INVENTORY_SCHEMA_VERSION, LANGUAGE_INVENTORY_SCHEMA_VERSION,
 };
 pub use proof_admission::{
     admission_library_roots, admit_artifact, authorize_reuse, lower_with_proofs, AdmissionError,
