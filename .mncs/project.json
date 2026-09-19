@@ -1,0 +1,31 @@
+{
+  "schema_version": "mncs-family.repository-manifest/v0alpha1",
+  "repository": "mncs-language",
+  "revision": 1,
+  "manifest_location": "in-repository",
+  "authority": {
+    "note": "mncs-language owns MNCS language, compiler, standard-library, backend, and capability truth; host code remains compiler/runtime/bootstrap or explicit tooling boundary."
+  },
+  "organization": {
+    "layout": "mncs.repository-layout/1",
+    "surfaces": [
+      {"path": "library/", "class": "canonical", "authority": "mncs-language"},
+      {"path": "crates/", "class": "host-boundary", "note": "Compiler, runtime, backend, bootstrap, and transport implementation."},
+      {"path": "examples/", "class": "canonical", "note": "Executable probes and conformance programs."},
+      {"path": "docs/language-capabilities.json", "class": "generated", "authority": "mncs-language"},
+      {"path": "scripts/generate_language_capabilities.py", "class": "host-boundary", "note": "Deterministic projection adapter over compiler-owned inventories."}
+    ]
+  },
+  "contracts": {
+    "provides": [
+      {"contract": "capability-index", "version": "1", "kind": "generated-language-projection", "stability": "experimental", "fingerprint_sources": ["docs/language-capabilities.json", "docs/language-capability-deltas.json"]},
+      {"contract": "compiler-inventory", "version": "1", "kind": "compiler-introspection-interface", "stability": "experimental", "fingerprint_sources": ["crates/mncs-compiler/src/inventory.rs", "spec/declaration-inventory-v1.schema.json"]},
+      {"contract": "core-standard-library", "version": "1", "kind": "mncs-library", "stability": "experimental", "fingerprint_sources": ["library/core/", "library/std/"]}
+    ],
+    "consumes": [],
+    "tests": [
+      {"test": "language-tests", "covers": ["capability-index", "compiler-inventory", "core-standard-library"], "obligation": "self", "command": {"argv": ["cargo", "test", "--workspace"]}},
+      {"test": "capability-index-generation", "covers": ["capability-index"], "obligation": "self", "command": {"argv": ["python3", "scripts/test_generate_language_capabilities.py"]}}
+    ]
+  }
+}
