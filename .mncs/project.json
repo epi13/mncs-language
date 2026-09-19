@@ -1,7 +1,7 @@
 {
   "schema_version": "mncs-family.repository-manifest/v0alpha1",
   "repository": "mncs-language",
-  "revision": 3,
+  "revision": 4,
   "manifest_location": "in-repository",
   "authority": {
     "note": "mncs-language owns MNCS language, compiler, standard-library, backend, and capability truth; host code remains compiler/runtime/bootstrap or explicit tooling boundary."
@@ -11,8 +11,8 @@
     "surfaces": [
       {"path": "library/", "class": "canonical", "authority": "mncs-language", "classification": {"authority": "canonical", "lifecycle": "active", "boundary_kind": "none", "semantic_role": "canonical-semantic"}},
       {"path": "crates/", "class": "canonical", "authority": "mncs-language", "note": "Canonical compiler/runtime implementation with a compiler-bootstrap host boundary; not all Rust code is an external semantic boundary.", "classification": {"authority": "canonical", "lifecycle": "active", "boundary_kind": "compiler-bootstrap", "semantic_role": "host-bootstrap"}},
-      {"path": "examples/", "class": "canonical", "note": "Executable probes and conformance programs."},
-      {"path": "docs/language-capabilities.json", "class": "generated", "authority": "mncs-language"},
+      {"path": "examples/", "class": "canonical", "note": "Executable probes and conformance programs.", "classification": {"authority": "reference", "lifecycle": "active", "boundary_kind": "none", "semantic_role": "reference"}},
+      {"path": "docs/language-capabilities.json", "class": "generated", "authority": "mncs-language", "classification": {"authority": "none", "lifecycle": "generated", "boundary_kind": "none", "semantic_role": "generated"}},
       {"path": "scripts/generate_language_capabilities.py", "class": "migration-shadow", "note": "Deterministic projection adapter over compiler-owned inventories.", "classification": {"authority": "none", "lifecycle": "temporary", "boundary_kind": "filesystem", "semantic_role": "temporary-host-semantic"}}
     ]
   },
