@@ -7,6 +7,11 @@ MNCS first, pressure routed upstream, evidence honest.
 
 ## 1. MNCS-language is the implementation default
 
+At agent entry, obtain bounded family context when Language Service is
+available, then query the current capability index and Commons pressure view
+before repository-wide search. The packet is a projection; this repository
+remains the authority for language semantics and capability content.
+
 New implementation code is written in MNCS source (`.mncs`) wherever
 technically possible: `library/` for reusable capability, `examples/` for
 probes and conformance programs, `pressure/`-style experiment corpora where
