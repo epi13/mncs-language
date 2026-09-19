@@ -1,7 +1,7 @@
 {
   "schema_version": "mncs-family.repository-manifest/v0alpha1",
   "repository": "mncs-language",
-  "revision": 1,
+  "revision": 3,
   "manifest_location": "in-repository",
   "authority": {
     "note": "mncs-language owns MNCS language, compiler, standard-library, backend, and capability truth; host code remains compiler/runtime/bootstrap or explicit tooling boundary."
@@ -9,11 +9,11 @@
   "organization": {
     "layout": "mncs.repository-layout/1",
     "surfaces": [
-      {"path": "library/", "class": "canonical", "authority": "mncs-language"},
-      {"path": "crates/", "class": "host-boundary", "note": "Compiler, runtime, backend, bootstrap, and transport implementation."},
+      {"path": "library/", "class": "canonical", "authority": "mncs-language", "classification": {"authority": "canonical", "lifecycle": "active", "boundary_kind": "none", "semantic_role": "canonical-semantic"}},
+      {"path": "crates/", "class": "canonical", "authority": "mncs-language", "note": "Canonical compiler/runtime implementation with a compiler-bootstrap host boundary; not all Rust code is an external semantic boundary.", "classification": {"authority": "canonical", "lifecycle": "active", "boundary_kind": "compiler-bootstrap", "semantic_role": "host-bootstrap"}},
       {"path": "examples/", "class": "canonical", "note": "Executable probes and conformance programs."},
       {"path": "docs/language-capabilities.json", "class": "generated", "authority": "mncs-language"},
-      {"path": "scripts/generate_language_capabilities.py", "class": "host-boundary", "note": "Deterministic projection adapter over compiler-owned inventories."}
+      {"path": "scripts/generate_language_capabilities.py", "class": "migration-shadow", "note": "Deterministic projection adapter over compiler-owned inventories.", "classification": {"authority": "none", "lifecycle": "temporary", "boundary_kind": "filesystem", "semantic_role": "temporary-host-semantic"}}
     ]
   },
   "contracts": {
@@ -21,6 +21,10 @@
       {"contract": "capability-index", "version": "1", "kind": "generated-language-projection", "stability": "experimental", "fingerprint_sources": ["docs/language-capabilities.json", "docs/language-capability-deltas.json"]},
       {"contract": "compiler-inventory", "version": "1", "kind": "compiler-introspection-interface", "stability": "experimental", "fingerprint_sources": ["crates/mncs-compiler/src/inventory.rs", "spec/declaration-inventory-v1.schema.json"]},
       {"contract": "core-standard-library", "version": "1", "kind": "mncs-library", "stability": "experimental", "fingerprint_sources": ["library/core/", "library/std/"]}
+      ,{"contract": "compiler-runtime", "version": "1", "kind": "compiler-runtime", "stability": "experimental", "fingerprint_sources": ["crates/mncs-compiler/", "crates/mncs-embed/", "crates/mncs-cli/src/main.rs"]}
+      ,{"contract": "source-profile", "version": "0.18", "kind": "language-profile", "stability": "experimental", "fingerprint_sources": ["crates/mncs-syntax/src/profile.rs"]}
+      ,{"contract": "semantic-identity", "version": "1", "kind": "identity-artifact", "stability": "experimental", "fingerprint_sources": ["crates/mncs-model/src/identity.rs"]}
+      ,{"contract": "cli-toolchain", "version": "1", "kind": "compiler-cli", "stability": "experimental", "fingerprint_sources": ["crates/mncs-cli/src/main.rs"]}
     ],
     "consumes": [],
     "tests": [

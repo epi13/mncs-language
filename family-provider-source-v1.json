@@ -8,7 +8,7 @@
   "providers": [
     {
       "contract_identity": "mncs.compiler.test-inventory/1",
-      "contract_revision": "0.17",
+      "contract_revision": "0.18",
       "exported_identity": "mncs-language:test-inventory",
       "evidence": "crates/mncs-cli/src/main.rs"
     },

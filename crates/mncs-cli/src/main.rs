@@ -22,6 +22,7 @@ use mncs_compiler::{
     ReferenceCompiler, SourceFrontEndResult,
 };
 use mncs_embed::{
+    cache::{CompiledArtifactCache, CompiledArtifactCacheKey},
     process::{run_bounded, ProcessRequest, MAX_CAPTURE_BYTES, MAX_DEADLINE_MS},
     structured::StructuredDocument,
     AdmittedProvider, Artifact as EmbedArtifact, BatchCall as EmbedBatchCall,
@@ -412,6 +413,8 @@ struct NativeCallOptions {
     /// fs_* effects. The called application chooses the operation; the
     /// launcher only transports the operator-granted root.
     fs_grants: Vec<(String, String)>,
+    cache_dir: Option<PathBuf>,
+    cache_enabled: bool,
 }
 
 fn call_command<I>(args: I) -> ExitCode
@@ -420,11 +423,17 @@ where
 {
     let mut options = NativeCallOptions {
         step_budget: 200_000,
+        cache_enabled: true,
         ..NativeCallOptions::default()
     };
     let mut args = args.into_iter();
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            "--cache-dir" => match args.next() {
+                Some(value) if !value.is_empty() => options.cache_dir = Some(PathBuf::from(value)),
+                _ => return native_call_usage("--cache-dir requires a non-empty path"),
+            },
+            "--no-cache" => options.cache_enabled = false,
             "--source" => options.source_path = args.next(),
             "--library" => match args.next() {
                 Some(value) if !value.is_empty() => options.libraries.push(PathBuf::from(value)),
@@ -552,6 +561,8 @@ struct NativeApplicationOptions {
     admitted_providers: Vec<PathBuf>,
     step_budget: u64,
     interface_identity: Option<String>,
+    cache_dir: Option<PathBuf>,
+    cache_enabled: bool,
 }
 
 /// New canonical form: `mncs run-app DESCRIPTOR [launcher options] [-- app
@@ -572,6 +583,7 @@ where
     let mut options = NativeApplicationOptions {
         descriptor_path: Some(PathBuf::from(first)),
         step_budget: 200_000,
+        cache_enabled: true,
         ..NativeApplicationOptions::default()
     };
     let mut index = 1;
@@ -596,6 +608,12 @@ where
             })
         };
         match argument.as_str() {
+            "--cache-dir" => match next(&mut index, "--cache-dir") {
+                Ok(value) if !value.is_empty() => options.cache_dir = Some(PathBuf::from(value)),
+                Ok(_) => return native_application_usage("--cache-dir requires a non-empty path"),
+                Err(code) => return code,
+            },
+            "--no-cache" => options.cache_enabled = false,
             "--library" => match next(&mut index, "--library") {
                 Ok(value) if !value.is_empty() => options.libraries.push(PathBuf::from(value)),
                 Ok(_) => return native_application_usage("--library requires a non-empty path"),
@@ -717,7 +735,7 @@ where
 fn native_application_usage(message: &str) -> ExitCode {
     eprintln!("error: {message}");
     eprintln!(
-        "usage: mncs run-app DESCRIPTOR [--library ROOT ...] [--admit-provider DESCRIPTOR --grant-provider capability=locator ...] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path] [--step-budget N] [--interface-identity ID] [-- APP_ARG ...]"
+        "usage: mncs run-app DESCRIPTOR [--cache-dir PATH|--no-cache] [--library ROOT ...] [--admit-provider DESCRIPTOR --grant-provider capability=locator ...] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path] [--step-budget N] [--interface-identity ID] [-- APP_ARG ...]"
     );
     ExitCode::from(2)
 }
@@ -844,6 +862,8 @@ fn provider_identity_from_output(
 
 fn admit_provider_descriptors(
     options: &NativeApplicationOptions,
+    cache: Option<&CompiledArtifactCache>,
+    grant_identity: &str,
 ) -> Result<ProviderRegistry, String> {
     let mut registry = ProviderRegistry::new();
     for descriptor_path in &options.admitted_providers {
@@ -876,7 +896,14 @@ fn admit_provider_descriptors(
                 .map(|path| descriptor_relative(descriptor_dir, path)),
         );
         let source_path_text = source_path.to_string_lossy().into_owned();
-        let session = open_native_session(&source_path_text, &libraries)?;
+        let session = open_native_session(
+            &source_path_text,
+            &libraries,
+            &descriptor.profile,
+            Some(&descriptor.interface_identity),
+            cache,
+            grant_identity,
+        )?;
         let actual_interface = session
             .interface_identity()
             .ok_or_else(|| "admitted provider artifact has no interface identity".to_owned())?;
@@ -1026,20 +1053,34 @@ fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
             .iter()
             .map(|path| descriptor_relative(descriptor_dir, path)),
     );
-    let session = match open_native_session(&source_path_text, &libraries) {
+    let cache = native_application_cache(options, descriptor_dir);
+    let grant_identity = native_grant_identity(options);
+    let expected_interface = options
+        .interface_identity
+        .clone()
+        .or(descriptor.interface_identity.clone());
+    let session = match open_native_session(
+        &source_path_text,
+        &libraries,
+        &descriptor.profile,
+        expected_interface.as_deref(),
+        cache.as_ref(),
+        &grant_identity,
+    ) {
         Ok(session) => session,
         Err(error) => {
             eprintln!("error: native application could not be admitted: {error}");
             return ExitCode::from(4);
         }
     };
-    let provider_registry = match admit_provider_descriptors(options) {
-        Ok(registry) => registry,
-        Err(error) => {
-            eprintln!("error: provider admission failed: {error}");
-            return ExitCode::from(4);
-        }
-    };
+    let provider_registry =
+        match admit_provider_descriptors(options, cache.as_ref(), &grant_identity) {
+            Ok(registry) => registry,
+            Err(error) => {
+                eprintln!("error: provider admission failed: {error}");
+                return ExitCode::from(4);
+            }
+        };
     let context = match application_context_host_value(
         &descriptor.application_identity,
         &options.application_arguments,
@@ -1059,10 +1100,7 @@ fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
         }
     };
     let mut call_options = EmbedCallOptions::budgeted(options.step_budget);
-    call_options.expected_interface_identity = options
-        .interface_identity
-        .clone()
-        .or(descriptor.interface_identity.clone());
+    call_options.expected_interface_identity = expected_interface;
     call_options.grants.extend(
         options
             .process_grants
@@ -1318,12 +1356,82 @@ fn application_exit_from_output(
     Ok((bytes("stdout")?, bytes("stderr")?, exit_code))
 }
 
-fn open_native_session(source_path: &str, libraries: &[PathBuf]) -> Result<EmbedSession, String> {
-    let source = read_source(source_path).map_err(|_| format!("unable to read {source_path:?}"))?;
+fn open_native_session(
+    source_path: &str,
+    libraries: &[PathBuf],
+    profile: &str,
+    interface_identity: Option<&str>,
+    cache: Option<&CompiledArtifactCache>,
+    grant_identity: &str,
+) -> Result<EmbedSession, String> {
+    let source_bytes = fs::read(source_path)
+        .map_err(|error| format!("unable to read {source_path:?}: {error}"))?;
+    let source = String::from_utf8(source_bytes.clone())
+        .map_err(|error| format!("native application source is not UTF-8: {error}"))?;
+    let compiler = ReferenceCompiler::default();
+    let inventory = language_inventory();
+    let source_locator = fs::canonicalize(source_path)
+        .unwrap_or_else(|_| PathBuf::from(source_path))
+        .to_string_lossy()
+        .into_owned();
+    let library_identity = library_content_identity(libraries)?;
+    let profile_identity = format!(
+        "sha256:{}",
+        mncs_model::sha256_hex(
+            serde_json::to_vec(&(profile, mncs_compiler::REFERENCE_LANGUAGE_PROFILE))
+                .map_err(|error| format!("profile identity serialization failed: {error}"))?
+                .as_slice(),
+        )
+    );
+    let compiler_identity = compiler.identity.identity.0.clone();
+    let backend_identity = format!(
+        "{}:{}",
+        mncs_codegen::RESEARCH_BYTECODE_BACKEND_NAME,
+        mncs_codegen::RESEARCH_BYTECODE_BACKEND_VERSION
+    );
+    let key = CompiledArtifactCacheKey::new(
+        format!("sha256:{}", mncs_model::sha256_hex(&source_bytes)),
+        source_locator,
+        library_identity,
+        compiler_identity,
+        inventory.inventory_identity,
+        profile_identity,
+        backend_identity,
+        grant_identity,
+        interface_identity.map(str::to_owned),
+    );
+    if let Some(cache) = cache {
+        match cache.load(&key) {
+            Ok(Some(artifact)) => {
+                if env::var_os("MNCS_NATIVE_CACHE_TRACE").is_some() {
+                    eprintln!(
+                        "mncs-native-cache status=hit key={} artifact={} root={}",
+                        key.identity().map_err(|error| error.to_string())?,
+                        artifact.artifact_identity(),
+                        cache.root().display(),
+                    );
+                }
+                return EmbedSession::open(artifact).map_err(|error| error.to_string());
+            }
+            Ok(None) => {
+                if env::var_os("MNCS_NATIVE_CACHE_TRACE").is_some() {
+                    eprintln!(
+                        "mncs-native-cache status=miss key={} root={}",
+                        key.identity().map_err(|error| error.to_string())?,
+                        cache.root().display(),
+                    );
+                }
+            }
+            Err(error) => {
+                return Err(format!(
+                    "native application cache admission failed closed: {error}"
+                ));
+            }
+        }
+    }
     let envelope =
         SourceEnvelope::inline(SourceArtifactKind::Program, "native-application", source);
     let resolver = FileModuleResolver::with_explicit_libraries(source_path, libraries);
-    let compiler = ReferenceCompiler::default();
     let front_end = compiler.front_end_with_resolver(envelope, &resolver);
     if !front_end.is_valid() {
         return Err(format!(
@@ -1360,13 +1468,159 @@ fn open_native_session(source_path: &str, libraries: &[PathBuf]) -> Result<Embed
     let bytes = serde_json::to_vec(&backend)
         .map_err(|error| format!("native application artifact serialization failed: {error}"))?;
     let artifact = EmbedArtifact::from_json(&bytes).map_err(|error| error.to_string())?;
+    if let Some(cache) = cache {
+        cache.store(&key, &artifact).map_err(|error| {
+            format!("native application artifact cache publish failed: {error}")
+        })?;
+    }
     EmbedSession::open(artifact).map_err(|error| error.to_string())
+}
+
+fn native_application_cache(
+    options: &NativeApplicationOptions,
+    descriptor_dir: &Path,
+) -> Option<CompiledArtifactCache> {
+    if !options.cache_enabled {
+        return None;
+    }
+    let root = options
+        .cache_dir
+        .clone()
+        .or_else(|| env::var_os("MNCS_NATIVE_APPLICATION_CACHE_DIR").map(PathBuf::from))
+        .unwrap_or_else(|| descriptor_dir.join(".mncs/cache/native-applications"));
+    Some(CompiledArtifactCache::new(root))
+}
+
+fn native_call_cache(
+    options: &NativeCallOptions,
+    _source_path: &str,
+) -> Option<CompiledArtifactCache> {
+    if !options.cache_enabled {
+        return None;
+    }
+    let root = options
+        .cache_dir
+        .clone()
+        .or_else(|| env::var_os("MNCS_NATIVE_APPLICATION_CACHE_DIR").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from(".mncs/cache/native-applications"));
+    Some(CompiledArtifactCache::new(root))
+}
+
+fn source_profile(source: &str) -> Option<String> {
+    source.lines().find_map(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            return None;
+        }
+        let remainder = trimmed.strip_prefix("mncs ")?;
+        remainder
+            .trim_end_matches(';')
+            .split_whitespace()
+            .next()
+            .filter(|profile| !profile.is_empty())
+            .map(str::to_owned)
+    })
+}
+
+fn native_call_grant_identity(options: &NativeCallOptions) -> String {
+    let mut process = options.process_grants.clone();
+    process.sort();
+    let mut structured = options.structured_grants.clone();
+    structured.sort();
+    let mut filesystem = options.fs_grants.clone();
+    filesystem.sort();
+    let material = (process, structured, filesystem);
+    let bytes = serde_json::to_vec(&material).unwrap_or_default();
+    format!("sha256:{}", mncs_model::sha256_hex(&bytes))
+}
+
+fn native_grant_identity(options: &NativeApplicationOptions) -> String {
+    let mut process = options.process_grants.clone();
+    process.sort();
+    let mut structured = options.structured_grants.clone();
+    structured.sort();
+    let mut filesystem = options.fs_grants.clone();
+    filesystem.sort();
+    let mut providers = options.provider_grants.clone();
+    providers.sort();
+    let mut admitted = options
+        .admitted_providers
+        .iter()
+        .map(|path| {
+            let bytes = fs::read(path).unwrap_or_default();
+            (
+                path.to_string_lossy().into_owned(),
+                format!("sha256:{}", mncs_model::sha256_hex(&bytes)),
+            )
+        })
+        .collect::<Vec<_>>();
+    admitted.sort();
+    let material = (process, structured, filesystem, providers, admitted);
+    let bytes = serde_json::to_vec(&material).unwrap_or_default();
+    format!("sha256:{}", mncs_model::sha256_hex(&bytes))
+}
+
+fn library_content_identity(libraries: &[PathBuf]) -> Result<String, String> {
+    let mut entries = Vec::new();
+    for root in libraries {
+        let root = fs::canonicalize(root)
+            .map_err(|error| format!("library root {root:?} could not be resolved: {error}"))?;
+        if root.is_dir() {
+            collect_library_files(&root, &root, &mut entries)?;
+        } else {
+            let bytes = fs::read(&root)
+                .map_err(|error| format!("library file {root:?} could not be read: {error}"))?;
+            entries.push((
+                root.to_string_lossy().into_owned(),
+                format!("sha256:{}", mncs_model::sha256_hex(&bytes)),
+            ));
+        }
+    }
+    entries.sort();
+    let bytes = serde_json::to_vec(&entries)
+        .map_err(|error| format!("library identity serialization failed: {error}"))?;
+    Ok(format!("sha256:{}", mncs_model::sha256_hex(&bytes)))
+}
+
+fn collect_library_files(
+    root: &Path,
+    current: &Path,
+    entries: &mut Vec<(String, String)>,
+) -> Result<(), String> {
+    let mut children = fs::read_dir(current)
+        .map_err(|error| format!("library directory {current:?} could not be read: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("library directory entry could not be read: {error}"))?;
+    children.sort_by_key(|entry| entry.file_name());
+    for entry in children {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_library_files(root, &path, entries)?;
+        } else if path.is_file() {
+            let bytes = fs::read(&path)
+                .map_err(|error| format!("library file {path:?} could not be read: {error}"))?;
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned();
+            entries.push((
+                format!("{}:{relative}", root.to_string_lossy()),
+                format!("sha256:{}", mncs_model::sha256_hex(&bytes)),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn native_call_usage(message: &str) -> ExitCode {
     eprintln!("error: {message}");
     eprintln!(
-        "usage: mncs call SOURCE --module MODULE --function FUNCTION --args FILE [--library ROOT ...] [--step-budget N] [--result FILE] [--interface-identity ID] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path]"
+        "usage: mncs call SOURCE --module MODULE --function FUNCTION --args FILE [--cache-dir PATH|--no-cache] [--library ROOT ...] [--step-budget N] [--result FILE] [--interface-identity ID] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path]"
     );
     ExitCode::from(2)
 }
@@ -1393,80 +1647,28 @@ fn run_native_call(
         Ok(source) => source,
         Err(code) => return code,
     };
-    let envelope = SourceEnvelope::inline(SourceArtifactKind::Program, "native-call", source);
-    let resolver = FileModuleResolver::with_explicit_libraries(source_path, &options.libraries);
-    let compiler = ReferenceCompiler::default();
-    let front_end = compiler.front_end_with_resolver(envelope, &resolver);
-    if !front_end.is_valid() {
-        let report = serde_json::json!({
-            "schema_version": "mncs.application-call/1",
-            "status": "compile_failed",
-            "module": module,
-            "function": function,
-            "diagnostics": front_end.diagnostics
-        });
-        return finish_native_call_output(&report, options, ExitCode::from(4));
-    }
-    let Some(program) = front_end.program else {
-        eprintln!("error: compiler admitted no executable program");
-        return ExitCode::from(4);
-    };
-    let emit = [
-        ArtifactRepresentation::Semantic,
-        ArtifactRepresentation::Hir,
-        ArtifactRepresentation::Ssa,
-        ArtifactRepresentation::TargetLoweringPlan,
-        ArtifactRepresentation::BackendArtifact,
-    ]
-    .into_iter()
-    .collect();
-    let request = match compiler.request_for_program_with_backend(
-        &program,
-        emit,
-        mncs_codegen::RESEARCH_BYTECODE_BACKEND_NAME,
+    let profile = source_profile(&source)
+        .unwrap_or_else(|| mncs_compiler::REFERENCE_LANGUAGE_PROFILE.to_owned());
+    let cache = native_call_cache(options, source_path);
+    let grant_identity = native_call_grant_identity(options);
+    let session = match open_native_session(
+        source_path,
+        &options.libraries,
+        &profile,
+        options.expected_interface_identity.as_deref(),
+        cache.as_ref(),
+        &grant_identity,
     ) {
-        Ok(request) => request,
-        Err(diagnostic) => {
+        Ok(session) => session,
+        Err(error) => {
             let report = serde_json::json!({
                 "schema_version": "mncs.application-call/1",
                 "status": "compile_failed",
                 "module": module,
                 "function": function,
-                "diagnostics": format!("{diagnostic:?}")
+                "diagnostics": error
             });
             return finish_native_call_output(&report, options, ExitCode::from(4));
-        }
-    };
-    let compilation = compiler.compile(request, &program);
-    let Some(backend) = compilation.emissions.backend else {
-        let report = serde_json::json!({
-            "schema_version": "mncs.application-call/1",
-            "status": "compile_failed",
-            "module": module,
-            "function": function,
-            "diagnostics": compilation.diagnostics
-        });
-        return finish_native_call_output(&report, options, ExitCode::from(4));
-    };
-    let backend_bytes = match serde_json::to_vec(&backend) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            eprintln!("error: native application artifact serialization failed: {error}");
-            return ExitCode::from(3);
-        }
-    };
-    let artifact = match EmbedArtifact::from_json(&backend_bytes) {
-        Ok(artifact) => artifact,
-        Err(error) => {
-            eprintln!("error: native application artifact failed identity admission: {error}");
-            return ExitCode::from(3);
-        }
-    };
-    let session = match EmbedSession::open(artifact) {
-        Ok(session) => session,
-        Err(error) => {
-            eprintln!("error: native application session refused the artifact: {error}");
-            return ExitCode::from(3);
         }
     };
     let mut call_options = EmbedCallOptions::budgeted(options.step_budget);

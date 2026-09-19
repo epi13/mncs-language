@@ -29,6 +29,10 @@ use serde::{Deserialize, Serialize};
 
 pub mod scope;
 pub use scope::{ScopeRun, ScopedOutput, TaskScope, WorkItem};
+pub mod cache;
+pub use cache::{
+    CompiledArtifactCache, CompiledArtifactCacheKey, COMPILED_ARTIFACT_CACHE_SCHEMA_VERSION,
+};
 pub mod process;
 pub mod provider;
 pub mod structured;
