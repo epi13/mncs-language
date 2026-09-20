@@ -23,6 +23,18 @@
       "contract_revision": "1",
       "exported_identity": "mncs-language:semantic-impact",
       "evidence": "crates/mncs-cli/src/main.rs"
+    },
+    {
+      "contract_identity": "mncs.semantic-impact-classification/1",
+      "contract_revision": "1",
+      "exported_identity": "mncs-language:semantic-impact-classification",
+      "evidence": "crates/mncs-cli/src/main.rs"
+    },
+    {
+      "contract_identity": "mncs.cli-toolchain/1",
+      "contract_revision": "1",
+      "exported_identity": "mncs-language:cli-toolchain",
+      "evidence": "crates/mncs-cli/src/main.rs"
     }
   ]
 }

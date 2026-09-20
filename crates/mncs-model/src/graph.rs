@@ -98,6 +98,17 @@ pub struct SemanticImpact {
     pub direct_dependents: Vec<SemanticId>,
     pub test_identities: Vec<SemanticId>,
     pub risk_flags: Vec<ImpactRisk>,
+    /// Compiler-owned guarantee families that may be invalidated by the
+    /// selected semantic roots. This is not a RAVEL policy decision.
+    #[serde(default)]
+    pub guarantee_domains: Vec<GuaranteeDomain>,
+    /// Exact or conservative classification of the changed semantic surface.
+    /// `unknown` is retained when the current compiler model cannot establish
+    /// a narrower class.
+    #[serde(default)]
+    pub change_kinds: Vec<ImpactChangeKind>,
+    #[serde(default)]
+    pub classification_schema_version: String,
     pub complete: bool,
     pub max_depth: usize,
     pub max_nodes: usize,
@@ -123,6 +134,40 @@ pub enum ImpactRisk {
     Truncated,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuaranteeDomain {
+    Semantic,
+    ParserFrontEnd,
+    TypeSystem,
+    Compiler,
+    Runtime,
+    BackendPortability,
+    Integration,
+    FamilyContract,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactChangeKind {
+    PrivateImplementation,
+    PublicContract,
+    SharedType,
+    ParserSemantics,
+    TypeSystem,
+    EffectCapability,
+    Abi,
+    RuntimeSemantics,
+    BackendLowering,
+    LanguageProfile,
+    CanonicalFixture,
+    CrossRepositoryContract,
+    Unknown,
+}
+
+pub const SEMANTIC_IMPACT_CLASSIFICATION_SCHEMA_VERSION: &str =
+    "mncs.semantic-impact-classification/1";
+
 pub const SEMANTIC_IMPACT_SCHEMA_VERSION: &str = "mncs.semantic-impact/1";
 
 #[derive(Debug, Error)]
@@ -145,6 +190,106 @@ impl Program {
         let diff = diff_identities(&self.semantic_identities(), &after.semantic_identities());
         Ok(invalidate(&before_graph, &after_graph, &diff))
     }
+}
+
+fn classify_impact_roots(
+    roots: &[SemanticId],
+    known_roots: &BTreeSet<SemanticId>,
+    node_index: &BTreeMap<SemanticId, &GraphNode>,
+    truncated: bool,
+) -> (Vec<GuaranteeDomain>, Vec<ImpactChangeKind>) {
+    let mut domains = BTreeSet::new();
+    let mut kinds = BTreeSet::new();
+    for root in roots {
+        match node_index.get(root).map(|node| node.kind) {
+            Some(
+                IdentityKind::Body
+                | IdentityKind::Iteration
+                | IdentityKind::Block
+                | IdentityKind::Operation
+                | IdentityKind::Value,
+            ) => {
+                kinds.insert(ImpactChangeKind::PrivateImplementation);
+                domains.extend([
+                    GuaranteeDomain::Semantic,
+                    GuaranteeDomain::Compiler,
+                    GuaranteeDomain::Runtime,
+                ]);
+            }
+            Some(IdentityKind::Function) => {
+                // Visibility is not currently a first-class compiler fact;
+                // Contract roots carry public-contract meaning explicitly.
+                kinds.insert(ImpactChangeKind::PrivateImplementation);
+                domains.extend([
+                    GuaranteeDomain::Semantic,
+                    GuaranteeDomain::Compiler,
+                    GuaranteeDomain::Runtime,
+                ]);
+            }
+            Some(IdentityKind::Contract) => {
+                kinds.insert(ImpactChangeKind::PublicContract);
+                domains.extend([
+                    GuaranteeDomain::Semantic,
+                    GuaranteeDomain::Compiler,
+                    GuaranteeDomain::FamilyContract,
+                    GuaranteeDomain::Integration,
+                ]);
+            }
+            Some(
+                IdentityKind::FiniteType
+                | IdentityKind::FiniteVariant
+                | IdentityKind::RecordType
+                | IdentityKind::RecordField,
+            ) => {
+                kinds.insert(ImpactChangeKind::SharedType);
+                domains.extend([
+                    GuaranteeDomain::TypeSystem,
+                    GuaranteeDomain::Compiler,
+                    GuaranteeDomain::Runtime,
+                    GuaranteeDomain::BackendPortability,
+                ]);
+            }
+            Some(IdentityKind::Effect | IdentityKind::Capability) => {
+                kinds.insert(ImpactChangeKind::EffectCapability);
+                domains.extend([
+                    GuaranteeDomain::Semantic,
+                    GuaranteeDomain::Runtime,
+                    GuaranteeDomain::Integration,
+                ]);
+            }
+            Some(IdentityKind::Requirement | IdentityKind::Obligation) => {
+                kinds.insert(ImpactChangeKind::Abi);
+                domains.extend([
+                    GuaranteeDomain::Compiler,
+                    GuaranteeDomain::Runtime,
+                    GuaranteeDomain::BackendPortability,
+                ]);
+            }
+            Some(IdentityKind::Test | IdentityKind::TestCase | IdentityKind::Evidence) => {
+                kinds.insert(ImpactChangeKind::CanonicalFixture);
+                domains.insert(GuaranteeDomain::Semantic);
+            }
+            Some(IdentityKind::MachineIntent | IdentityKind::Realization | IdentityKind::Transformation) => {
+                kinds.insert(ImpactChangeKind::BackendLowering);
+                domains.extend([
+                    GuaranteeDomain::Compiler,
+                    GuaranteeDomain::BackendPortability,
+                ]);
+            }
+            Some(_) | None => {
+                kinds.insert(ImpactChangeKind::Unknown);
+                domains.extend([
+                    GuaranteeDomain::Compiler,
+                    GuaranteeDomain::Integration,
+                ]);
+            }
+        }
+    }
+    if roots.iter().any(|root| !known_roots.contains(root)) || truncated {
+        kinds.insert(ImpactChangeKind::Unknown);
+        domains.insert(GuaranteeDomain::Integration);
+    }
+    (domains.into_iter().collect(), kinds.into_iter().collect())
 }
 
 impl SemanticGraph {
@@ -324,6 +469,12 @@ impl SemanticGraph {
         if roots.iter().any(|root| !known_roots.contains(root)) {
             limitations.push("one or more requested roots are not current graph nodes".to_owned());
         }
+        let (guarantee_domains, change_kinds) = classify_impact_roots(
+            &roots,
+            &known_roots,
+            &node_index,
+            truncated,
+        );
         let graph_identity = self
             .canonical_json()
             .map(|json| sha256_hex(json.as_bytes()))
@@ -338,6 +489,9 @@ impl SemanticGraph {
             direct_dependents,
             test_identities,
             risk_flags: risk_flags.into_iter().collect(),
+            guarantee_domains,
+            change_kinds,
+            classification_schema_version: SEMANTIC_IMPACT_CLASSIFICATION_SCHEMA_VERSION.to_owned(),
             complete,
             max_depth,
             max_nodes,
@@ -1085,6 +1239,12 @@ mod tests {
         assert_eq!(impact.roots, vec![root]);
         assert!(!impact.test_identities.is_empty());
         assert!(impact.risk_flags.is_empty());
+        assert!(impact
+            .change_kinds
+            .contains(&super::ImpactChangeKind::PrivateImplementation));
+        assert!(impact
+            .guarantee_domains
+            .contains(&super::GuaranteeDomain::Semantic));
         assert!(impact.nodes.len() <= 8);
         assert!(impact
             .limitations
@@ -1114,6 +1274,12 @@ mod tests {
         assert!(!impact.complete);
         assert!(impact.risk_flags.contains(&super::ImpactRisk::Truncated));
         assert!(impact.risk_flags.contains(&super::ImpactRisk::SharedType));
+        assert!(impact
+            .change_kinds
+            .contains(&super::ImpactChangeKind::SharedType));
+        assert!(impact
+            .guarantee_domains
+            .contains(&super::GuaranteeDomain::BackendPortability));
     }
 
     #[test]

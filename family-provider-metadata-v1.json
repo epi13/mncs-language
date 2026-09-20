@@ -4,15 +4,21 @@
   "authority": {
     "kind": "language-owned-export-manifest",
     "module_identity": "mncs.cli.family-contracts.v1",
-    "interface_identity": "de9e217149e5514b43239b8735ec86eb8c6209d97ff95b67f7be505f0f76dad4",
+    "interface_identity": "b9b98361799ad11c477c99b11a7ce7fcef08dc98ab22002fa8005ba1b68ac9a5",
     "generator_version": "mncs-language-provider-facts/0.1",
-    "binding_content_identity": "311ceff997c669b07b44f57349efcfe115d75726672825d39c2440bcd115e153",
-    "provider_fact_identity": "602b4bf8cb32bd5d21d52f2049e7db6a1aa6246653a05ef2357793e32dcf9331",
+    "binding_content_identity": "0b52600ef2e3a2c097e19043944a41cf28a83cdc273e871d7cc0d49aa814443a",
+    "provider_fact_identity": "b400b654b72a6224db4a5bf9912062b773b3f49f8c18137f24bfaaa4f21f5944",
     "evidence_digests": {
-      "crates/mncs-cli/src/main.rs": "56448f0eba2696df6be0fe391dc40f279aab2a92540b7a8393f60167d6f03561"
+      "crates/mncs-cli/src/main.rs": "a6ec48978781b97d4200aa71ca3e7ead4f909ea7c3449be5e2bddc4748f2b576"
     }
   },
   "providers": [
+    {
+      "contract_identity": "mncs.cli-toolchain/1",
+      "contract_revision": "1",
+      "exported_identity": "mncs-language:cli-toolchain",
+      "evidence": "crates/mncs-cli/src/main.rs"
+    },
     {
       "contract_identity": "mncs.compiler.test-inventory/1",
       "contract_revision": "0.18",
@@ -23,6 +29,12 @@
       "contract_identity": "mncs.execution-observation/1",
       "contract_revision": "1",
       "exported_identity": "mncs-language:execution-observation",
+      "evidence": "crates/mncs-cli/src/main.rs"
+    },
+    {
+      "contract_identity": "mncs.semantic-impact-classification/1",
+      "contract_revision": "1",
+      "exported_identity": "mncs-language:semantic-impact-classification",
       "evidence": "crates/mncs-cli/src/main.rs"
     },
     {

@@ -77,6 +77,16 @@ fn trace_timing(stage: &str, cumulative_started: &Instant, stage_started: &mut I
     *stage_started = Instant::now();
 }
 
+fn trace_application_timing(stage: &str, started: &Instant) {
+    if env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!(
+            "mncs-timing stage={} elapsed_ms={}",
+            stage,
+            started.elapsed().as_millis(),
+        );
+    }
+}
+
 const CLI_WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 fn main() -> ExitCode {
@@ -991,6 +1001,7 @@ fn admit_provider_descriptors(
 }
 
 fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
+    let application_started = Instant::now();
     let descriptor_path = options
         .descriptor_path
         .as_deref()
@@ -1136,6 +1147,7 @@ fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
                 bytes: Vec::new(),
             }),
     );
+    let typed_execution_started = Instant::now();
     let output = match if provider_registry.admitted_count() > 0 {
         session.call_typed_json_with_provider(
             &descriptor.module,
@@ -1158,6 +1170,7 @@ fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
             return ExitCode::from(3);
         }
     };
+    trace_application_timing("native-app-typed-execution", &typed_execution_started);
     if output.status != "returned" {
         if let Some(reason) = output.failure_reason {
             eprintln!(
@@ -1174,6 +1187,7 @@ fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
             return ExitCode::from(3);
         }
     };
+    let publication_started = Instant::now();
     let mut stdout_handle = io::stdout().lock();
     if let Err(error) = stdout_handle.write_all(&stdout) {
         eprintln!("error: native application stdout publication failed: {error}");
@@ -1184,6 +1198,8 @@ fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
         eprintln!("error: native application stderr publication failed: {error}");
         return ExitCode::from(3);
     }
+    trace_application_timing("native-app-output-publication", &publication_started);
+    trace_application_timing("native-app-total", &application_started);
     if (0..=255).contains(&exit_code) {
         ExitCode::from(exit_code as u8)
     } else {
@@ -1364,6 +1380,7 @@ fn open_native_session(
     cache: Option<&CompiledArtifactCache>,
     grant_identity: &str,
 ) -> Result<EmbedSession, String> {
+    let admission_started = Instant::now();
     let source_bytes = fs::read(source_path)
         .map_err(|error| format!("unable to read {source_path:?}: {error}"))?;
     let source = String::from_utf8(source_bytes.clone())
@@ -1401,6 +1418,7 @@ fn open_native_session(
         interface_identity.map(str::to_owned),
     );
     if let Some(cache) = cache {
+        let cache_lookup_started = Instant::now();
         match cache.load(&key) {
             Ok(Some(artifact)) => {
                 if env::var_os("MNCS_NATIVE_CACHE_TRACE").is_some() {
@@ -1411,7 +1429,12 @@ fn open_native_session(
                         cache.root().display(),
                     );
                 }
-                return EmbedSession::open(artifact).map_err(|error| error.to_string());
+                trace_application_timing("native-app-cache-hit-load", &cache_lookup_started);
+                let session_started = Instant::now();
+                let session = EmbedSession::open(artifact).map_err(|error| error.to_string());
+                trace_application_timing("native-app-session-open", &session_started);
+                trace_application_timing("native-app-admission-total", &admission_started);
+                return session;
             }
             Ok(None) => {
                 if env::var_os("MNCS_NATIVE_CACHE_TRACE").is_some() {
@@ -1421,6 +1444,7 @@ fn open_native_session(
                         cache.root().display(),
                     );
                 }
+                trace_application_timing("native-app-cache-miss-lookup", &cache_lookup_started);
             }
             Err(error) => {
                 return Err(format!(
@@ -1469,11 +1493,17 @@ fn open_native_session(
         .map_err(|error| format!("native application artifact serialization failed: {error}"))?;
     let artifact = EmbedArtifact::from_json(&bytes).map_err(|error| error.to_string())?;
     if let Some(cache) = cache {
+        let publish_started = Instant::now();
         cache.store(&key, &artifact).map_err(|error| {
             format!("native application artifact cache publish failed: {error}")
         })?;
+        trace_application_timing("native-app-cache-publish", &publish_started);
     }
-    EmbedSession::open(artifact).map_err(|error| error.to_string())
+    let session_started = Instant::now();
+    let session = EmbedSession::open(artifact).map_err(|error| error.to_string());
+    trace_application_timing("native-app-session-open", &session_started);
+    trace_application_timing("native-app-admission-total", &admission_started);
+    session
 }
 
 fn native_application_cache(

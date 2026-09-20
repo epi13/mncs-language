@@ -6,6 +6,10 @@
   "authority": {
     "note": "mncs-language owns MNCS language, compiler, standard-library, backend, and capability truth; host code remains compiler/runtime/bootstrap or explicit tooling boundary."
   },
+  "verification": {
+    "schema_version": "mncs-family.verification-obligation-inventory/v1",
+    "obligation_inventory": ".mncs/verification-obligations.json"
+  },
   "organization": {
     "layout": "mncs.repository-layout/1",
     "surfaces": [
