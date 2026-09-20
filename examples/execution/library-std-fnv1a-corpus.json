@@ -1,0 +1,59 @@
+{
+  "schema_version": "0.1",
+  "name": "library-std-fnv1a",
+  "cases": [
+    {
+      "id": "offset-basis",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.std.fnv1a.v1", "function": "offset_basis" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected": [
+        { "integer": { "value": 14695981039346656037, "type": { "bits": 64, "signed": false } } }
+      ]
+    },
+    {
+      "id": "step-a",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.std.fnv1a.v1", "function": "step" },
+        "arguments": [
+          { "integer": { "value": 14695981039346656037, "type": { "bits": 64, "signed": false } } },
+          { "byte": { "value": 97 } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [
+        { "integer": { "value": 12638187200555641996, "type": { "bits": 64, "signed": false } } }
+      ]
+    },
+    {
+      "id": "fold-abc-with-explicit-capacity",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.std.fnv1a.v1", "function": "fold" },
+        "arguments": [
+          { "integer": { "value": 14695981039346656037, "type": { "bits": 64, "signed": false } } },
+          {
+            "sequence": {
+              "values": [
+                { "byte": { "value": 97 } },
+                { "byte": { "value": 98 } },
+                { "byte": { "value": 99 } }
+              ]
+            }
+          },
+          { "integer": { "value": 3, "type": { "bits": 64, "signed": false } } }
+        ],
+        "step_budget": 4096,
+        "type_arguments": [{ "kind": "nat", "value": 8 }]
+      },
+      "expected": [
+        { "integer": { "value": 16654208175385433931, "type": { "bits": 64, "signed": false } } }
+      ]
+    }
+  ],
+  "properties": []
+}

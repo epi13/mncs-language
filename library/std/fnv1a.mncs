@@ -1,0 +1,29 @@
+mncs 0.13;
+
+// mncs.std.fnv1a — bounded, generic FNV-1a byte folding.
+//
+// The algorithm is intentionally small: callers choose the accumulator
+// seed, while this module owns the language-level XOR/multiply step and the
+// bounded-view fold. It is useful for deterministic content/token identity,
+// not a cryptographic digest and not a substitute for mncs.std.sha256.
+//
+// The length is explicit because a bounded view may contain padding beyond
+// the live prefix. Positions outside the live prefix are never observed.
+module mncs.std.fnv1a.v1;
+
+fn offset_basis() -> (result: u64) {
+    return 14695981039346656037;
+}
+
+fn step(state: u64, value: byte) -> (result: u64) {
+    return (state ^ (value as u64)) *% 1099511628211;
+}
+
+fn fold<N: Nat>(state: u64, values: [byte; up_to N], length: u64) -> (result: u64) {
+    iterate i over values carrying h: u64 = state {
+        let live: bool = i < length;
+        next h = select(live, step(h, values[i]), h);
+    }
+    return h;
+}
+

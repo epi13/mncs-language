@@ -476,6 +476,20 @@ fn encoding_sequence_results_agree_per_backend() {
     }
 }
 
+/// The shared FNV-1a fold owns the bitwise step and bounded-view traversal
+/// used by deterministic identity consumers. Its explicit Nat specialization
+/// is exercised across every executable backend so consumers do not carry
+/// width-specific copies of the algorithm.
+#[test]
+fn fnv1a_bounded_fold_agrees_per_backend() {
+    let source = library("std/fnv1a.mncs");
+    let corpus = example("execution/library-std-fnv1a-corpus.json");
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_library_experiment(&source, backend, &corpus);
+        assert_value_agreement(backend, code, &result, &stderr, 3);
+    }
+}
+
 /// INGEST-P-003: the reusable UTF-8 substrate (`mncs.std.text_utf8.v1`)
 /// validates bounded views, steps one scalar with a progress guarantee,
 /// and folds the documented ASCII-plus-Latin-1 pairs — identically on

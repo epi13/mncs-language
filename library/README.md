@@ -101,6 +101,7 @@ resolution provenance.
 | `std/channel.mncs` | `mncs.std.channel.v1` (Profile 0.13) | bounded channel/close/drain protocol with explicit acceptance |
 | `std/chunk.mncs` | `mncs.std.chunk.v1` (Profile 0.13) | bounded line-chunk cursors over byte views with continuation joins |
 | `std/relation.mncs` | `mncs.std.relation.v1` (Profile 0.13) | bounded edge-set insert with deduplication, transitive closure, reachability |
+| `std/fnv1a.mncs` | `mncs.std.fnv1a.v1` (Profile 0.13) | generic bounded FNV-1a byte fold with explicit seed, live length, and non-cryptographic identity scope |
 | `std/scope.mncs` | `mncs.std.scope.v1` (Profile 0.13) | bounded task scope with completion/cancel accounting |
 | `std/sort.mncs` | `mncs.std.sort.v1` (Profile 0.13) | bounded insertion sort/dedup over u64 windows |
 | `std/store.mncs` | `mncs.std.store.v1` (Profile 0.13) | generational compare-and-swap store with snapshots and compaction |
