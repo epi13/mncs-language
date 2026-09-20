@@ -1,0 +1,67 @@
+{
+  "schema_version": "mncs-family.verification-obligation-inventory/v1",
+  "repository": "mncs-language",
+  "revision": 1,
+  "obligations": [
+    {
+      "identity": "mncs-language.semantic-impact.classification",
+      "title": "Compiler impact classifies invalidatable guarantee domains and change kinds",
+      "guarantee_domain": "compiler",
+      "evidence_role": "canonical_regression",
+      "lifecycle": "permanent",
+      "scope": "local",
+      "subjects": ["mncs.semantic-impact/1", "mncs.semantic-impact-classification/1"],
+      "invalidation_dependencies": ["crates/mncs-model/src/graph.rs", "mncs.semantic-impact/1"],
+      "executor": {
+        "provider": "mncs-language",
+        "kind": "native_first_class_test",
+        "entrypoint": "cargo test -p mncs-model"
+      },
+      "evidence_identity": {
+        "subject_fields": ["semantic_subject_identity", "subject_fingerprint"],
+        "definition_fields": ["compiler_revision", "classification_schema_version"],
+        "execution_fields": ["test_execution_identity", "observation_identity"]
+      }
+    },
+    {
+      "identity": "mncs-language.compiler.test-inventory",
+      "title": "Compiler test and declaration inventories retain stable identities",
+      "guarantee_domain": "compiler",
+      "evidence_role": "conformance",
+      "lifecycle": "permanent",
+      "scope": "consumer",
+      "subjects": ["mncs.compiler.test-inventory/1"],
+      "invalidation_dependencies": ["crates/mncs-compiler/src/inventory.rs", "crates/mncs-cli/src/main.rs"],
+      "executor": {
+        "provider": "mncs-language",
+        "kind": "compile_experiment",
+        "entrypoint": "cargo test -p mncs-compiler"
+      },
+      "evidence_identity": {
+        "subject_fields": ["subject_identity", "subject_fingerprint"],
+        "definition_fields": ["inventory_identity"],
+        "execution_fields": ["execution_identity"]
+      }
+    },
+    {
+      "identity": "mncs-language.profile.parser-contract",
+      "title": "Language profile and parser/front-end semantics remain conformance-bound",
+      "guarantee_domain": "parser_front_end",
+      "evidence_role": "conformance",
+      "lifecycle": "permanent",
+      "scope": "family",
+      "subjects": ["source-profile", "parser_semantics"],
+      "invalidation_dependencies": ["crates/mncs-syntax/src/profile.rs"],
+      "executor": {
+        "provider": "mncs-language",
+        "kind": "compile_experiment",
+        "entrypoint": "cargo test --workspace"
+      },
+      "evidence_identity": {
+        "subject_fields": ["profile_identity"],
+        "definition_fields": ["compiler_revision"],
+        "execution_fields": ["execution_identity"]
+      }
+    }
+  ]
+}
