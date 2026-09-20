@@ -1,0 +1,27 @@
+mncs 0.18;
+
+// Bounded no-follow metadata observations.  The runtime snapshot is the
+// same fs_list authority used by fs-scan; these fields expose only the
+// metadata already used for generation, never a path or ambient authority.
+module examples.fs_metadata;
+
+fn entry_kind(index: u64) -> (result: u64)
+    capability fs_root
+    effect fs_list authorized_by fs_root
+{
+    return fs_entry_kind_at(index);
+}
+
+fn entry_size(index: u64) -> (result: u64)
+    capability fs_root
+    effect fs_list authorized_by fs_root
+{
+    return fs_entry_size_at(index);
+}
+
+fn entry_mtime(index: u64) -> (result: u64)
+    capability fs_root
+    effect fs_list authorized_by fs_root
+{
+    return fs_entry_mtime_at(index);
+}

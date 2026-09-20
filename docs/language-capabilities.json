@@ -218,6 +218,20 @@
         "name": "fs_entry_kind_at"
       },
       {
+        "arity": 1,
+        "capability_kind": "filesystem_root_grant",
+        "effect": "fs_list",
+        "introduced_profile": "0.18",
+        "name": "fs_entry_size_at"
+      },
+      {
+        "arity": 1,
+        "capability_kind": "filesystem_root_grant",
+        "effect": "fs_list",
+        "introduced_profile": "0.18",
+        "name": "fs_entry_mtime_at"
+      },
+      {
         "arity": 0,
         "capability_kind": "filesystem_root_grant",
         "effect": "fs_list",
@@ -683,7 +697,7 @@
         "name": "vector"
       }
     ],
-    "inventory_identity": "sha256:e610453d5b7581c7da81eb8c1258a4beaeb02d4551e568b7b9684fc69a9d4186",
+    "inventory_identity": "sha256:bcfc2d1d3d5fafe8891297f4477fe0006536600935addfde4fcb308af3050af5",
     "profiles": [
       {
         "features": [
@@ -1012,7 +1026,7 @@
       }
     ],
     "schema_version": "mncs.language-inventory/1",
-    "source_identity": "sha256:67a05605857cfb633e454a626a87300b4ef135eea8f19dd1f256eda84e37b6ed",
+    "source_identity": "sha256:c649fdaa10f5878555fd87ae615d11b99c13848d901d35bd989486f58a9902aa",
     "syntax_features": [
       "acyclic_calls",
       "atomic_artifact_publication",
@@ -1139,8 +1153,8 @@
       }
     ]
   },
-  "compiler_inventory_identity": "sha256:e610453d5b7581c7da81eb8c1258a4beaeb02d4551e568b7b9684fc69a9d4186",
-  "content_identity": "sha256:8dab5b8f673a2d79d27f1f90eebb14500483e9942cd1b06b105458bf96385294",
+  "compiler_inventory_identity": "sha256:bcfc2d1d3d5fafe8891297f4477fe0006536600935addfde4fcb308af3050af5",
+  "content_identity": "sha256:d9de82516aff2f3a85c5392341fbd29e0d4c2e41c20a5acb8cdcf80ebc65b35f",
   "current_profile": "0.18",
   "examples": [
     {
@@ -7578,6 +7592,39 @@
     },
     {
       "capabilities": [],
+      "compiler_source_identity": "mncs:source:artifact:d15e01bee16b842d7111d5ccfa11535df5a3775ae4dae1de2a609b369dd9fa49",
+      "effects": [],
+      "exports": [
+        "fold",
+        "offset_basis",
+        "step"
+      ],
+      "imports": [],
+      "inventory_identity": "sha256:45a9a57de1792cd8a8a2d4574ff05ad1b39abaa553d9f19ddf29c9106aca8a63",
+      "module": "mncs.std.fnv1a.v1",
+      "path": "library/std/fnv1a.mncs",
+      "profile": "0.13",
+      "source_identity": "sha256:33502607a12639ea8a75def86a4ed7093018b5c0a9ca838a1fa8385516373590",
+      "symbols": [
+        {
+          "identity": "mncs:0.2:function:mncs.std.fnv1a.v1::fold",
+          "kind": "function",
+          "name": "fold"
+        },
+        {
+          "identity": "mncs:0.2:function:mncs.std.fnv1a.v1::offset_basis",
+          "kind": "function",
+          "name": "offset_basis"
+        },
+        {
+          "identity": "mncs:0.2:function:mncs.std.fnv1a.v1::step",
+          "kind": "function",
+          "name": "step"
+        }
+      ]
+    },
+    {
+      "capabilities": [],
       "compiler_source_identity": "mncs:source:artifact:7aec7133977f64ba4a0989284848aaeeab02fd3f3cbbdfc135fff65f17c43e24",
       "effects": [],
       "exports": [
@@ -10026,10 +10073,10 @@
   },
   "provenance": [
     {
-      "inventory_identity": "sha256:e610453d5b7581c7da81eb8c1258a4beaeb02d4551e568b7b9684fc69a9d4186",
+      "inventory_identity": "sha256:bcfc2d1d3d5fafe8891297f4477fe0006536600935addfde4fcb308af3050af5",
       "kind": "compiler_language_inventory",
       "path": "compiler:language-inventory",
-      "source_identity": "sha256:67a05605857cfb633e454a626a87300b4ef135eea8f19dd1f256eda84e37b6ed"
+      "source_identity": "sha256:c649fdaa10f5878555fd87ae615d11b99c13848d901d35bd989486f58a9902aa"
     },
     {
       "kind": "canonical_example",
@@ -10260,6 +10307,11 @@
       "kind": "library_module",
       "path": "library/std/fixed.mncs",
       "source_identity": "sha256:62bc1be04c3af5f6413362799dab3bb652f6c741a32f3cb46162b9e2eefa9899"
+    },
+    {
+      "kind": "library_module",
+      "path": "library/std/fnv1a.mncs",
+      "source_identity": "sha256:33502607a12639ea8a75def86a4ed7093018b5c0a9ca838a1fa8385516373590"
     },
     {
       "kind": "library_module",

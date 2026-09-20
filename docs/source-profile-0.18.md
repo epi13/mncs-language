@@ -67,6 +67,22 @@ the compact UTF-8 JSON projection. This keeps native identity material and
 the external artifact identity byte-for-byte identical; the tagged internal
 `ExecutionValue` representation is never hashed as a wire contract.
 
+Profile 0.18 also exposes the metadata already used by the bounded filesystem
+snapshot and generation calculation:
+
+```text
+fs_entry_size_at(index)   → u64
+fs_entry_mtime_at(index)  → u64
+```
+
+These operations require `capability fs_root` and exactly one `fs_list`
+authority. They inspect the indexed snapshot entry without following a final
+symlink. The returned size is the entry's own size; the timestamp is a bounded
+host modification value suitable for generation/recovery decisions, not a
+semantic clock. Unknown or unsupported metadata fails closed. The operation
+does not add path construction, ambient authority, unbounded metadata, or
+portable-backend filesystem realization.
+
 ## Evolution
 
 The generic codec is a language/runtime mechanism. Commons-owned contracts

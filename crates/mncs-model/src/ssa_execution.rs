@@ -2490,6 +2490,8 @@ fn execute_instruction(
                 "fs_list_count"
                     | "fs_entry_name_at"
                     | "fs_entry_kind_at"
+                    | "fs_entry_size_at"
+                    | "fs_entry_mtime_at"
                     | "fs_generation"
                     | "fs_read_bytes_at"
             ) {

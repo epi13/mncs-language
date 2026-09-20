@@ -393,6 +393,20 @@ fn compiler_operations() -> Vec<CompilerOperation> {
             "0.12",
         ),
         (
+            "fs_entry_size_at",
+            1,
+            "fs_list",
+            "filesystem_root_grant",
+            "0.18",
+        ),
+        (
+            "fs_entry_mtime_at",
+            1,
+            "fs_list",
+            "filesystem_root_grant",
+            "0.18",
+        ),
+        (
             "fs_generation",
             0,
             "fs_list",

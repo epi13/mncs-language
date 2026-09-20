@@ -45,6 +45,10 @@ fn source() -> String {
     example("source/fs-scan.mncs")
 }
 
+fn metadata_source() -> String {
+    example("source/fs-metadata.mncs")
+}
+
 fn corpus() -> String {
     example("execution/fs-scan-corpus.json")
 }
@@ -116,6 +120,43 @@ fn run_execute(function: &str, args: Vec<Value>, grants: Vec<Value>) -> Value {
         )
     });
     result
+}
+
+fn run_metadata_execute(function: &str, index: u64, root: &std::path::Path) -> Value {
+    use std::io::Write;
+    let request = json!({
+        "schema_version": "0.1",
+        "target": {"module": "examples.fs_metadata", "function": function},
+        "arguments": [u64_arg(index)],
+        "step_budget": 100000,
+        "policy": {"effects": "realize"},
+        "host_grants": [fs_grant(root)],
+    });
+    let mut child = binary()
+        .env("MNCS_LIBRARY_PATH", library_dir())
+        .args(["execute", &metadata_source(), "/dev/stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn metadata execute");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(
+            serde_json::to_string(&request)
+                .expect("request JSON")
+                .as_bytes(),
+        )
+        .expect("write request");
+    let output = child.wait_with_output().expect("run metadata execute");
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
+        panic!(
+            "{function}: no result JSON (rc={:?}): {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
 }
 
 fn fs_grant(root: &std::path::Path) -> Value {
@@ -356,6 +397,58 @@ fn fs_generation_moves_on_mutation() {
         first["returned"], third["returned"],
         "mutation must move the generation"
     );
+}
+
+/// Metadata queries use the existing no-follow snapshot machinery: a link is
+/// classified as `other`, its own metadata remains inspectable, and the
+/// provenance names the field as a no-follow observation.
+#[test]
+#[cfg(unix)]
+fn fs_metadata_is_bounded_and_nofollow() {
+    let root = std::env::temp_dir().join(format!(
+        "mncs-fs-metadata-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::create_dir_all(&root).expect("mkdirs");
+    std::fs::write(root.join("real"), b"abc").expect("real file");
+    std::os::unix::fs::symlink("real", root.join("link")).expect("link");
+
+    let kind = run_metadata_execute("entry_kind", 0, &root);
+    assert_eq!(kind["status"], "returned", "{kind}");
+    assert_eq!(kind["returned"][0]["integer"]["value"], 2, "{kind}");
+
+    let link_size = run_metadata_execute("entry_size", 0, &root);
+    assert_eq!(link_size["status"], "returned", "{link_size}");
+    assert_eq!(
+        link_size["returned"][0]["integer"]["value"], 4,
+        "{link_size}"
+    );
+    assert!(
+        link_size["effects"][0]["provenance"]
+            .as_str()
+            .unwrap()
+            .contains("nofollow:true field:fs_entry_size_at"),
+        "{link_size}"
+    );
+
+    let real_size = run_metadata_execute("entry_size", 1, &root);
+    assert_eq!(real_size["status"], "returned", "{real_size}");
+    assert_eq!(
+        real_size["returned"][0]["integer"]["value"], 3,
+        "{real_size}"
+    );
+
+    let link_mtime = run_metadata_execute("entry_mtime", 0, &root);
+    assert_eq!(link_mtime["status"], "returned", "{link_mtime}");
+    assert!(
+        link_mtime["effects"][0]["provenance"]
+            .as_str()
+            .unwrap()
+            .contains("nofollow:true field:fs_entry_mtime_at"),
+        "{link_mtime}"
+    );
+    let _ = std::fs::remove_dir_all(root);
 }
 
 /// Stale indexes fail closed with a re-list hint; directory reads are

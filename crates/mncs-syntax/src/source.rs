@@ -776,6 +776,21 @@ pub enum AstExpr {
         index: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Granted-filesystem entry size `fs_entry_size_at(index)` (Profile
+    /// 0.18). The snapshot uses no-follow metadata, so a symlink's own
+    /// metadata is never replaced with its target's metadata.
+    FsEntrySizeAt {
+        index: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Granted-filesystem entry modification generation/time
+    /// `fs_entry_mtime_at(index)` (Profile 0.18). The value is wall data:
+    /// compare it or carry it as provenance, never treat it as semantic
+    /// time.
+    FsEntryMtimeAt {
+        index: Box<AstExpr>,
+        span: SourceSpan,
+    },
     /// Granted-root mutation hint `fs_generation()` (Profile 0.12).
     /// Returns a generation counter covering names, kinds, sizes, and
     /// mtimes of the granted tree. Poll between bounded quiet windows;
@@ -924,6 +939,8 @@ impl AstExpr {
             | Self::FsListCount { span, .. }
             | Self::FsEntryNameAt { span, .. }
             | Self::FsEntryKindAt { span, .. }
+            | Self::FsEntrySizeAt { span, .. }
+            | Self::FsEntryMtimeAt { span, .. }
             | Self::FsGeneration { span, .. }
             | Self::FsReadBytesAt { span, .. }
             | Self::FsCreateFile { span, .. }
@@ -3699,11 +3716,25 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
-            ("fs_entry_name_at", 1) | ("fs_entry_kind_at", 1) => {
-                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_12) {
+            ("fs_entry_name_at", 1)
+            | ("fs_entry_kind_at", 1)
+            | ("fs_entry_size_at", 1)
+            | ("fs_entry_mtime_at", 1) => {
+                let required_profile = if name.text.as_str() == "fs_entry_name_at"
+                    || name.text.as_str() == "fs_entry_kind_at"
+                {
+                    SOURCE_PROFILE_VERSION_0_12
+                } else {
+                    SOURCE_PROFILE_VERSION_0_18
+                };
+                if !profile_at_least(&self.profile, required_profile) {
                     self.error(
                         "MNP204",
-                        "filesystem intrinsics require source profile 0.12 or later",
+                        if required_profile == SOURCE_PROFILE_VERSION_0_12 {
+                            "filesystem intrinsics require source profile 0.12 or later"
+                        } else {
+                            "filesystem metadata intrinsics require source profile 0.18 or later"
+                        },
                         vec![TokenKind::RightParen],
                     );
                     return None;
@@ -3712,22 +3743,33 @@ impl<'a> Parser<'a> {
                 let (Some(index),) = (iter.next(),) else {
                     return None;
                 };
-                if name.text.as_str() == "fs_entry_name_at" {
-                    Some(AstExpr::FsEntryNameAt {
+                Some(match name.text.as_str() {
+                    "fs_entry_name_at" => AstExpr::FsEntryNameAt {
                         index: Box::new(index),
                         span,
-                    })
-                } else {
-                    Some(AstExpr::FsEntryKindAt {
+                    },
+                    "fs_entry_kind_at" => AstExpr::FsEntryKindAt {
                         index: Box::new(index),
                         span,
-                    })
-                }
+                    },
+                    "fs_entry_size_at" => AstExpr::FsEntrySizeAt {
+                        index: Box::new(index),
+                        span,
+                    },
+                    "fs_entry_mtime_at" => AstExpr::FsEntryMtimeAt {
+                        index: Box::new(index),
+                        span,
+                    },
+                    _ => unreachable!("filesystem entry intrinsic was matched above"),
+                })
             }
-            ("fs_entry_name_at", _) | ("fs_entry_kind_at", _) => {
+            ("fs_entry_name_at", _)
+            | ("fs_entry_kind_at", _)
+            | ("fs_entry_size_at", _)
+            | ("fs_entry_mtime_at", _) => {
                 self.error(
                     "MNP205",
-                    "fs_entry_name_at and fs_entry_kind_at take exactly one u64 entry-index argument",
+                    "filesystem entry metadata intrinsics take exactly one u64 entry-index argument",
                     vec![TokenKind::RightParen],
                 );
                 None
@@ -5384,6 +5426,8 @@ fn is_profile08_intrinsic(name: &str) -> bool {
             | "fs_list_count"
             | "fs_entry_name_at"
             | "fs_entry_kind_at"
+            | "fs_entry_size_at"
+            | "fs_entry_mtime_at"
             | "fs_generation"
             | "fs_read_bytes_at"
             | "fs_create_file"

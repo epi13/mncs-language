@@ -3668,9 +3668,10 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             calls_in_expr(message, calls);
             calls_in_expr(signature, calls);
         }
-        AstExpr::FsEntryNameAt { index, .. } | AstExpr::FsEntryKindAt { index, .. } => {
-            calls_in_expr(index, calls)
-        }
+        AstExpr::FsEntryNameAt { index, .. }
+        | AstExpr::FsEntryKindAt { index, .. }
+        | AstExpr::FsEntrySizeAt { index, .. }
+        | AstExpr::FsEntryMtimeAt { index, .. } => calls_in_expr(index, calls),
         AstExpr::FsReadBytesAt {
             entry,
             offset,
@@ -5903,10 +5904,10 @@ impl<'a> BodyBuilder<'a> {
     }
 
     /// Elaborate the indexed granted-filesystem intrinsics
-    /// (`fs_entry_name_at`, `fs_entry_kind_at`; index PRESS-003) under
-    /// exactly one declared `fs_list` effect. Names deliver
-    /// `[byte; up_to 64]`; kinds deliver `u64` (0 = file, 1 = dir,
-    /// 2 = other).
+    /// (`fs_entry_name_at`, `fs_entry_kind_at`, `fs_entry_size_at`, and
+    /// `fs_entry_mtime_at`; index PRESS-003) under exactly one declared
+    /// `fs_list` effect. Names deliver `[byte; up_to 64]`; all metadata
+    /// fields deliver `u64` (kind: 0 = file, 1 = dir, 2 = other).
     fn elaborate_fs_entry_at(
         &mut self,
         operation: &str,
@@ -8909,6 +8910,22 @@ impl<'a> BodyBuilder<'a> {
             ),
             AstExpr::FsEntryKindAt { index, span } => self.elaborate_fs_entry_at(
                 "fs_entry_kind_at",
+                index,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
+            AstExpr::FsEntrySizeAt { index, span } => self.elaborate_fs_entry_at(
+                "fs_entry_size_at",
+                index,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
+            AstExpr::FsEntryMtimeAt { index, span } => self.elaborate_fs_entry_at(
+                "fs_entry_mtime_at",
                 index,
                 *span,
                 expected,

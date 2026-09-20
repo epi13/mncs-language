@@ -1125,7 +1125,8 @@ pub fn host_call_effect_kind(operation: &str) -> &'static str {
         "structured_write" => "structured_write",
         "ed25519_verify" => "ed25519_verify",
         "blob_append" => "host_write",
-        "fs_list_count" | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_generation" => "fs_list",
+        "fs_list_count" | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_entry_size_at"
+        | "fs_entry_mtime_at" | "fs_generation" => "fs_list",
         "fs_read_bytes_at" => "fs_read",
         "fs_create_file" | "fs_write_bytes_at" | "fs_append_bytes_at" | "fs_mkdir"
         | "fs_delete_at" | "fs_rename_at" | "fs_sync_at" => "fs_write",
@@ -1142,9 +1143,8 @@ pub fn host_call_arity(operation: &str) -> Option<usize> {
     match operation {
         "blob_read" | "clock_read" | "fs_list_count" | "fs_generation" => Some(0),
         "sha256_digest" | "structured_digest" | "process_run" | "blob_append"
-        | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_mkdir" | "fs_delete_at" | "fs_sync_at" => {
-            Some(1)
-        }
+        | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_entry_size_at" | "fs_entry_mtime_at"
+        | "fs_mkdir" | "fs_delete_at" | "fs_sync_at" => Some(1),
         "fs_create_file" | "fs_append_bytes_at" | "fs_rename_at" | "structured_read" => Some(2),
         "structured_read_identity" => Some(3),
         "provider_call" => Some(2),

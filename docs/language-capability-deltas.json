@@ -526,9 +526,97 @@
         "removed": []
       },
       "to_profile": "0.18"
+    },
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [],
+        "removed": []
+      },
+      "current_content_identity": "sha256:d9de82516aff2f3a85c5392341fbd29e0d4c2e41c20a5acb8cdcf80ebc65b35f",
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "exports": {
+        "added": [
+          "mncs.std.fnv1a.v1::fold",
+          "mncs.std.fnv1a.v1::offset_basis",
+          "mncs.std.fnv1a.v1::step"
+        ],
+        "removed": []
+      },
+      "from_profile": "0.18",
+      "intrinsics": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "modules": {
+        "added": [
+          "mncs.std.fnv1a.v1"
+        ],
+        "changed": [],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:8dab5b8f673a2d79d27f1f90eebb14500483e9942cd1b06b105458bf96385294",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "to_profile": "0.18"
+    },
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [],
+        "removed": []
+      },
+      "current_content_identity": "sha256:d9de82516aff2f3a85c5392341fbd29e0d4c2e41c20a5acb8cdcf80ebc65b35f",
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "exports": {
+        "added": [
+          "mncs.std.fnv1a.v1::fold",
+          "mncs.std.fnv1a.v1::offset_basis",
+          "mncs.std.fnv1a.v1::step"
+        ],
+        "removed": []
+      },
+      "from_profile": "0.18",
+      "intrinsics": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "modules": {
+        "added": [
+          "mncs.std.fnv1a.v1"
+        ],
+        "changed": [],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:8dab5b8f673a2d79d27f1f90eebb14500483e9942cd1b06b105458bf96385294",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "to_profile": "0.18"
     }
   ],
-  "history_identity": "sha256:c3586244ec7d50c21f9cb2d33c4b618d33acc4b5049d03cb41ae2c516a966aee",
+  "history_identity": "sha256:48a1e53c3ad86391d43b2beafbbadb73754a50e2b8bdf8c08a974632c9ce3aea",
   "retention": 8,
   "schema_version": "mncs.language-capability-deltas/1"
 }

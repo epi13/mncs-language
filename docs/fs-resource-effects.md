@@ -30,7 +30,7 @@ an explicit capability grant:
 There is no ambient filesystem access. This is the same fail-closed
 posture as `host_read`/`host_write`, extended from one blob to a tree.
 
-## 2. Intrinsics (source profile 0.12)
+## 2. Intrinsics (source profile 0.12 and 0.18)
 
 | intrinsic | effect | returns |
 |---|---|---|
@@ -44,6 +44,22 @@ Indices are data, never authority: a stale or wild index fails closed
 (`InvalidRequest` with a re-list hint), never with a value. Operands
 must be `u64` (MNE262). Reads clamp to 64 bytes and to end-of-input;
 short reads and empty views at end-of-input are the EOF signal.
+
+Profile 0.18 adds bounded metadata observations over the same snapshot:
+
+| intrinsic | effect | returns |
+|---|---|---|
+| `fs_entry_size_at(i)` | `fs_list` | `u64` no-follow entry size |
+| `fs_entry_mtime_at(i)` | `fs_list` | `u64` bounded modification timestamp/generation |
+
+The runtime obtains these fields with non-following metadata inspection.
+Symlinks remain `other`; their metadata is not replaced by the target's
+metadata. A platform that can enumerate an entry but cannot provide the
+requested metadata returns a typed runtime failure rather than an ambiguous
+zero. The result carries the existing granted-root and snapshot provenance,
+plus `nofollow:true` and the observed field. This is an observation boundary,
+not a pathname API, a TOCTOU-free publication protocol, or a claim that every
+compiled backend realizes filesystem effects.
 
 ## 3. Determinism contract
 

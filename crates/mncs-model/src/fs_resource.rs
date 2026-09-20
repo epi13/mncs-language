@@ -57,6 +57,14 @@ pub struct FsEntry {
     /// Relative path from the granted root, as raw bytes (`/`-separated).
     pub rel: Vec<u8>,
     pub kind: u64,
+    /// No-follow entry size from `symlink_metadata`.
+    pub size: u64,
+    /// No-follow modification time/generation from `symlink_metadata`.
+    pub mtime_nanos: u64,
+    /// False means the platform could enumerate the entry but could not
+    /// expose its metadata; size/mtime queries fail closed rather than
+    /// returning an ambiguous zero.
+    pub metadata_known: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,7 +106,7 @@ pub fn fs_snapshot(root: &Path) -> Result<FsSnapshot, String> {
     if !canonical.is_dir() {
         return Err(format!("fs grant root {root:?} is not a directory"));
     }
-    let mut ordered: BTreeMap<Vec<u8>, u64> = BTreeMap::new();
+    let mut ordered: BTreeMap<Vec<u8>, FsEntry> = BTreeMap::new();
     let mut gen_parts: Vec<u8> = Vec::new();
     let mut stack: Vec<(PathBuf, Vec<u8>)> = vec![(canonical.clone(), Vec::new())];
     // Iterative descent with an explicit stack; directory handles are
@@ -131,7 +139,7 @@ pub fn fs_snapshot(root: &Path) -> Result<FsSnapshot, String> {
             // Generation covers every walked path, including skipped
             // overlong names, so no mutation is invisible to pollers.
             let metadata = std::fs::symlink_metadata(&child_path);
-            let (len, mtime_nanos) = match metadata {
+            let (len, mtime_nanos, metadata_known) = match metadata {
                 Ok(meta) => {
                     let mtime = meta
                         .modified()
@@ -139,9 +147,9 @@ pub fn fs_snapshot(root: &Path) -> Result<FsSnapshot, String> {
                         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
                         .map(|elapsed| elapsed.as_nanos().min(u128::from(u64::MAX)) as u64)
                         .unwrap_or(0);
-                    (meta.len(), mtime)
+                    (meta.len(), mtime, true)
                 }
-                Err(_) => (0, 0),
+                Err(_) => (0, 0, false),
             };
             gen_parts.push(kind as u8);
             gen_parts.extend_from_slice(&child_rel);
@@ -156,7 +164,16 @@ pub fn fs_snapshot(root: &Path) -> Result<FsSnapshot, String> {
                     "fs list of {root:?} exceeds the {FS_LIST_MAX_ENTRIES}-entry bound; refusing"
                 ));
             }
-            ordered.insert(child_rel.clone(), kind);
+            ordered.insert(
+                child_rel.clone(),
+                FsEntry {
+                    rel: child_rel.clone(),
+                    kind,
+                    size: len,
+                    mtime_nanos,
+                    metadata_known,
+                },
+            );
             if kind == FS_KIND_DIR {
                 stack.push((child_path, child_rel));
             }
@@ -165,11 +182,11 @@ pub fn fs_snapshot(root: &Path) -> Result<FsSnapshot, String> {
     let mut snapshot_parts: Vec<u8> = Vec::new();
     let entries: Vec<FsEntry> = ordered
         .into_iter()
-        .map(|(rel, kind)| {
-            snapshot_parts.push(kind as u8);
+        .map(|(rel, entry)| {
+            snapshot_parts.push(entry.kind as u8);
             snapshot_parts.extend_from_slice(&rel);
             snapshot_parts.push(0);
-            FsEntry { rel, kind }
+            entry
         })
         .collect();
     let snapshot_sha256 = sha256_hex(&snapshot_parts);
@@ -332,7 +349,7 @@ pub fn fs_realize(
                 provenance: format!("grant:{} gen:{:016x}", grant.locator, snapshot.generation),
             },
         )),
-        "fs_entry_name_at" | "fs_entry_kind_at" => {
+        "fs_entry_name_at" | "fs_entry_kind_at" | "fs_entry_size_at" | "fs_entry_mtime_at" => {
             let index = u64_operand(args, 0, operation)? as usize;
             let entry = snapshot.entries.get(index).ok_or_else(|| {
                 FsFail::InvalidRequest(format!(
@@ -353,6 +370,33 @@ pub fn fs_realize(
                         kind: "fs_list".to_owned(),
                         target: "dir_list".to_owned(),
                         provenance: format!("{list_provenance} index:{index}"),
+                    },
+                ))
+            } else if operation == "fs_entry_size_at" || operation == "fs_entry_mtime_at" {
+                if !entry.metadata_known {
+                    return Err(FsFail::RuntimeFailure(format!(
+                        "{operation} metadata for entry index {index} is unknown on this platform; refusing"
+                    )));
+                }
+                let value = if operation == "fs_entry_size_at" {
+                    entry.size
+                } else {
+                    entry.mtime_nanos
+                };
+                Ok((
+                    ExecutionValue::Integer {
+                        value: value as i128,
+                        ty: crate::IntegerType {
+                            bits: 64,
+                            signed: false,
+                        },
+                    },
+                    FsEffect {
+                        kind: "fs_list".to_owned(),
+                        target: "dir_list".to_owned(),
+                        provenance: format!(
+                            "{list_provenance} index:{index} nofollow:true field:{operation}"
+                        ),
                     },
                 ))
             } else {
