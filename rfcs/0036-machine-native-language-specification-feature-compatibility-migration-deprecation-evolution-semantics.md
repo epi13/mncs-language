@@ -29,6 +29,23 @@ The fourth rule defines the trust model:
 
 RFC 0036 therefore treats language evolution as a proof- and evidence-bearing transformation graph rather than a release-note convention.
 
+### Current bounded implementation slice (2026-09)
+
+The repository now publishes `docs/language-migrations.json` as the
+language-owned source of migration knowledge. Its first canonicalization
+entries remove the chronological `mncs.index.digest.v2` and
+`mncs.index.scan.v2` implementation identities in favor of the singular
+`mncs.index.digest` and `mncs.index.scan` modules. Each entry records the
+mechanical-safety claim, semantic caveats, minimum profile, exact source
+transformation, and verification obligation. `mncs-doctor` consumes this
+manifest and rewrites only active `module`/`use` declarations; it does not
+rewrite comments, historical evidence, serialized representations, or
+protocol identities.
+
+This is a bounded source-canonicalization implementation, not a claim that
+general profile migration, deprecation, or semantic preservation has been
+completed. Those broader obligations remain open under this RFC.
+
 ## 2. Motivation
 
 A mature MNCS implementation will eventually need to change itself.
