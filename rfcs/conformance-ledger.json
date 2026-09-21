@@ -2307,7 +2307,7 @@
         "Formal profile-wide migration/deprecation semantics remain future work; the current slice covers explicit, mechanically safe canonical module rewrites and does not claim general semantic migration."
       ],
       "pressure_sources": [],
-      "last_validated_revision": "bfa455a5453ee36edfa3987de12b136bed95356c",
+      "last_validated_revision": "b58449f",
       "profiles": [
         "0.1-0.10"
       ],
