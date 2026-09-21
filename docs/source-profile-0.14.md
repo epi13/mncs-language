@@ -32,8 +32,9 @@ identical trap semantics. Below 0.14 the intrinsic never parses
 (`MNP207`); wrong arity is `MNP208`.
 
 Evidence: `examples/source/pressure-span-copy.mncs`,
-`examples/execution/pressure-span-copy-corpus.json` (15 cases, all five
-executable backends),
+`examples/execution/pressure-span-copy-corpus.json` (17 cases, including an
+externally supplied view with a large destination offset, all five executable
+backends),
 `crates/mncs-cli/tests/pressure_span_copy.rs`.
 
 ## Checked view narrowing (WEB-P-006)

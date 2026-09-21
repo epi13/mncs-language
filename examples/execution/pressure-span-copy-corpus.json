@@ -211,6 +211,66 @@
    "expected_status": "returned"
   },
   {
+   "id": "external_view_large_offset",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_external_view"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {"byte": {"value": 7}},
+        {"byte": {"value": 8}}
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 48,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 16,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
    "id": "static_window",
    "request": {
     "schema_version": "0.1",

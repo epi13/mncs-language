@@ -28,6 +28,15 @@ fn copy_view_src(n: u64, src_at: u64, len: u64) -> (result: u64) {
     return (out[7] as u64) + (out[8] as u64) + (out[11] as u64) + (out[40] as u64);
 }
 
+// External byte views use packed host bytes rather than canonical eight-byte
+// cells. A large destination offset must not make the eager source read for
+// an untouched lane wrap into a negative linear-memory address.
+fn copy_external_view(src: [byte; up_to 64], dst_at: u64, src_at: u64, len: u64) -> (result: u64) {
+    let dst: [byte; 64] = [1; 64];
+    let out: [byte; 64] = copy_span(dst, dst_at, src, src_at, len);
+    return (out[0] as u64) + (out[48] as u64) + (out[49] as u64);
+}
+
 // All-literal window over exact bounds: static evidence, no check.
 fn copy_static() -> (result: u64) {
     let dst: [u64; 8] = [0; 8];
