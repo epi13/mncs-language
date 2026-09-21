@@ -3,7 +3,7 @@
 > Generated from `rfcs/conformance-ledger.json` by
 > `scripts/gen_rfc_ledger_docs.py`. Do not edit by hand.
 
-Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 satisfied, 31 partially satisfied, 36 unsatisfied criteria.
+Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 satisfied, 32 partially satisfied, 35 unsatisfied criteria.
 
 ## Reading this document
 
@@ -54,7 +54,7 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 
 | 0033 | Machine-Native Realization Search, Multi-Objective Optimization, Pareto, Risk, Preference, and Selection-Policy Semantics | DRAFT | SUBSTRATE |
 | 0034 | Machine-Native Test, Fuzz, Coverage, Experiment, Benchmark, Oracle, and Empirical-Evidence Semantics | DRAFT | BOUNDED_IMPLEMENTATION |
 | 0035 | Machine-Native Elaboration, Scope, Binding, Inference, Constraint, Defaulting, Coherence, and Resolution Semantics | DRAFT | PARTIAL |
-| 0036 | Machine-Native Language, Specification, Feature, Compatibility, Migration, Deprecation, and Evolution Semantics | DRAFT | SUBSTRATE |
+| 0036 | Machine-Native Language, Specification, Feature, Compatibility, Migration, Deprecation, and Evolution Semantics | DRAFT | PARTIAL |
 | 0037 | Machine-Native Observability, Audit, Telemetry, Trace Correlation, Operational Evidence, and Runtime-Verification Semantics | DRAFT | SUBSTRATE |
 | 0038 | Machine-Native Compiler, Compilation, Refinement, Validation, and Cross-Target Semantics | DRAFT | PARTIAL |
 | 0039 | Machine-Native Compiler Stage and Experiment Contracts | PROPOSED | PARTIAL |
@@ -595,21 +595,18 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 
 ### RFC 0034 — Machine-Native Test, Fuzz, Coverage, Experiment, Benchmark, Oracle, and Empirical-Evidence Semantics
 
 - Design: **DRAFT**; implementation: **BOUNDED_IMPLEMENTATION** (experimental; confidence high).
-- Scope: Experiment corpora with expectations, bounded agreement checks, backend evidence suites, proof-kernel fuzz corpus, and the first source-owned test/experiment projection; coverage/benchmark/oracle models remain partial.
-- Stages: semantic program, compiler inventory, backend execution, evidence projection.
+- Scope: Experiment corpora with expectations, bounded agreement checks, backend evidence suites, proof-kernel fuzz corpus; coverage/benchmark/oracle models partial.
+- Stages: backend execution.
 - Depends on: RFC 0012.
 - Required by: RFC 0007.
-- Tests: `crates/mncs-cli/tests/backend_family.rs`, `crates/mncs-cli/tests/proof_kernel.rs`, `crates/mncs-compiler/tests/test_inventory.rs`, `mncs-test/tests/test_runner.py`.
+- Tests: `crates/mncs-cli/tests/backend_family.rs`, `crates/mncs-cli/tests/proof_kernel.rs`.
 - Acceptance criteria:
   - [x] 0034-C1: Experiment corpora with machine-checked expectations — evidence: `examples/execution/`, `crates/mncs-model/src/experiment.rs`
   - [x] 0034-C2: Bounded cross-backend agreement as explicit non-proof evidence — evidence: `crates/mncs-cli/tests/backend_family.rs`, `crates/mncs-cli/tests/proof_kernel.rs`
   - [~] 0034-C3: Fuzz corpora with differential oracles — evidence: `examples/execution/proof-kernel-fuzz-corpus.json`, `scripts/gen_proof_fuzz.py`
-  - [x] 0034-C4a: First-class source test declarations have stable declaration and case identities — evidence: `crates/mncs-model/src/identity.rs`, `crates/mncs-compiler/tests/test_inventory.rs`
-  - [x] 0034-C4b: Compiler-owned deterministic test inventory is consumed by the canonical runner — evidence: `crates/mncs-compiler/src/frontend.rs`, `mncs-test/tools/mncs_test.py`, `mncs-test/tests/test_runner.py`
-  - [x] 0034-C4c: Runtime test executions project to distinct observations and oracle evaluations without promoting finite PASS to proof — evidence: `mncs-test/tools/mncs_test.py`, `mncs-test/schemas/test-inventory.schema.json`
-  - [ ] 0034-C4: Coverage, benchmark, and general oracle semantics
+  - [ ] 0034-C4: Coverage, benchmark, and oracle semantics
 - Known gaps:
-  - Coverage and benchmark models remain future work. The source-test projection is bounded: compiler-input experiments remain external fixtures, imported-module test policy is explicit, and empirical evidence is never promoted to proof by construction.
+  - Coverage and benchmark models remain future work; empirical evidence is never promoted to proof by construction.
 - Pressure sources: RFC 0007 tranche (differential fuzz oracle).
 
 ### RFC 0035 — Machine-Native Elaboration, Scope, Binding, Inference, Constraint, Defaulting, Coherence, and Resolution Semantics
@@ -630,15 +627,15 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 
 
 ### RFC 0036 — Machine-Native Language, Specification, Feature, Compatibility, Migration, Deprecation, and Evolution Semantics
 
-- Design: **DRAFT**; implementation: **SUBSTRATE** (experimental; confidence medium).
+- Design: **DRAFT**; implementation: **PARTIAL** (experimental; confidence medium).
 - Scope: Schema versions, profile-gated features, additive profile evolution; migration and deprecation machinery narrow.
 - Profiles: 0.1-0.10.
 - Depends on: RFC 0005.
 - Acceptance criteria:
   - [~] 0036-C1: Versioned schemas with additive profile evolution — evidence: `spec/source-profile-0.1.md`, `docs/source-profile-0.10.md`
-  - [ ] 0036-C2: Migration, deprecation, and compatibility machinery
+  - [~] 0036-C2: Migration, deprecation, and compatibility machinery — evidence: `docs/language-migrations.json`, `docs/language-migrations.md`
 - Known gaps:
-  - Formal migration/deprecation semantics are future work.
+  - Formal profile-wide migration/deprecation semantics remain future work; the current slice covers explicit, mechanically safe canonical module rewrites and does not claim general semantic migration.
 
 ### RFC 0037 — Machine-Native Observability, Audit, Telemetry, Trace Correlation, Operational Evidence, and Runtime-Verification Semantics
 

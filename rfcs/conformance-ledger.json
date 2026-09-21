@@ -2274,7 +2274,7 @@
       "title": "Machine-Native Language, Specification, Feature, Compatibility, Migration, Deprecation, and Evolution Semantics",
       "file": "rfcs/0036-machine-native-language-specification-feature-compatibility-migration-deprecation-evolution-semantics.md",
       "design_status": "DRAFT",
-      "implementation_status": "SUBSTRATE",
+      "implementation_status": "PARTIAL",
       "implementation_scope": "Schema versions, profile-gated features, additive profile evolution; migration and deprecation machinery narrow.",
       "normativity": "experimental",
       "acceptance_criteria": [
@@ -2290,8 +2290,11 @@
         {
           "id": "0036-C2",
           "text": "Migration, deprecation, and compatibility machinery",
-          "state": "unsatisfied",
-          "evidence": []
+          "state": "partial",
+          "evidence": [
+            "docs/language-migrations.json",
+            "docs/language-migrations.md"
+          ]
         }
       ],
       "evidence_artifacts": [],
@@ -2301,10 +2304,10 @@
         "0005"
       ],
       "gaps": [
-        "Formal migration/deprecation semantics are future work."
+        "Formal profile-wide migration/deprecation semantics remain future work; the current slice covers explicit, mechanically safe canonical module rewrites and does not claim general semantic migration."
       ],
       "pressure_sources": [],
-      "last_validated_revision": "bfa455a5453ee36edfa3987de12b136bed95356c",
+      "last_validated_revision": "b58449f",
       "profiles": [
         "0.1-0.10"
       ],
