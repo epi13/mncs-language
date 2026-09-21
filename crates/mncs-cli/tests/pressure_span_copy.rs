@@ -92,7 +92,7 @@ fn span_copy_values_agree_on_every_backend() {
         let cases = result["cases"]
             .as_array()
             .unwrap_or_else(|| panic!("{backend}: missing cases; {result:#}"));
-        assert_eq!(cases.len(), 16, "{backend}: case count");
+        assert_eq!(cases.len(), 17, "{backend}: case count");
         for case in cases {
             let id = case["case_id"].as_str().unwrap_or("?");
             if id.starts_with("trap_") {

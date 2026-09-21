@@ -2361,6 +2361,30 @@ fn lower_instruction(
                 body.push(Instr::LocalGet(src_at));
                 body.push(Instr::I64Add);
             };
+            // A lane outside the destination window keeps the destination
+            // value, but the branchless realization still has to form a
+            // source value before the final select.  Clamp that source index
+            // to zero for those lanes so a large destination offset cannot
+            // turn `lane - dst_at` into a wrapped negative linear-memory
+            // address.  The runtime bounds check above already guarantees
+            // the real index is valid for every lane inside the window.
+            let push_in = |body: &mut Vec<Instr>, lane: u32| {
+                body.push(Instr::LocalGet(dst_at));
+                body.push(Instr::I64Const(i64::from(lane)));
+                body.push(Instr::I64LeU);
+                body.push(Instr::I64Const(i64::from(lane)));
+                body.push(Instr::LocalGet(dst_at));
+                body.push(Instr::I64Sub);
+                body.push(Instr::LocalGet(len));
+                body.push(Instr::I64LtU);
+                body.push(Instr::I32And);
+            };
+            let push_safe_sidx = |body: &mut Vec<Instr>, lane: u32| {
+                push_sidx(body, lane);
+                body.push(Instr::I64Const(0));
+                push_in(body, lane);
+                body.push(Instr::Select);
+            };
             let byte_view_src = is_byte && matches!(src_bound, mncs_model::SequenceBound::UpTo(_));
             // Allocate a fresh canonical destination cell and fill it lane
             // by lane with a branchless span select: lane `j` takes the
@@ -2397,10 +2421,10 @@ fn lower_instruction(
                     // Marker set (cell-backed): stride 8; clear (packed
                     // host bytes): stride 1. Projection order: [base]
                     // [sidx*8] [sidx] [marker].
-                    push_sidx(body, lane);
+                    push_safe_sidx(body, lane);
                     body.push(Instr::I64Const(3));
                     body.push(Instr::I64Shl);
-                    push_sidx(body, lane);
+                    push_safe_sidx(body, lane);
                     body.push(Instr::LocalGet(source));
                     body.push(Instr::I64Const(63));
                     body.push(Instr::I64ShrU);
@@ -2408,7 +2432,7 @@ fn lower_instruction(
                     body.push(Instr::Select);
                     body.push(Instr::I32WrapI64);
                 } else {
-                    push_sidx(body, lane);
+                    push_safe_sidx(body, lane);
                     body.push(Instr::I64Const(3));
                     body.push(Instr::I64Shl);
                     body.push(Instr::I32WrapI64);
