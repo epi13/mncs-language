@@ -6,6 +6,7 @@
 //! transformation claim.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -1703,12 +1704,35 @@ impl BackendArtifact {
 
     pub fn identity_is_valid(&self) -> bool {
         crate::record_counter("artifact_hash");
-        self.backend.identity_is_valid()
+        let profile = std::env::var_os("MNCS_RUNTIME_PROFILE").is_some();
+        let structural_started = Instant::now();
+        let structural_valid = self.backend.identity_is_valid()
             && self.input.identity_is_valid()
             && self.target.identity_is_valid()
-            && !self.artifact_kind.trim().is_empty()
-            && self.bytes_sha256 == sha256_hex(&self.bytes().unwrap_or_default())
-            && self.identity == self.recomputed_identity()
+            && !self.artifact_kind.trim().is_empty();
+        if profile {
+            eprintln!(
+                "mncs-artifact-profile phase=structural_identity elapsed_ns={}",
+                structural_started.elapsed().as_nanos()
+            );
+        }
+        let bytes_started = Instant::now();
+        let bytes_valid = self.bytes_sha256 == sha256_hex(&self.bytes().unwrap_or_default());
+        if profile {
+            eprintln!(
+                "mncs-artifact-profile phase=bytes_digest elapsed_ns={}",
+                bytes_started.elapsed().as_nanos()
+            );
+        }
+        let identity_started = Instant::now();
+        let identity_valid = self.identity == self.recomputed_identity();
+        if profile {
+            eprintln!(
+                "mncs-artifact-profile phase=content_identity elapsed_ns={}",
+                identity_started.elapsed().as_nanos()
+            );
+        }
+        structural_valid && bytes_valid && identity_valid
     }
 
     fn recomputed_identity(&self) -> SemanticId {

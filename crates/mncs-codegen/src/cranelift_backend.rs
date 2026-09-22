@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write;
+use std::sync::Arc;
 
 use mncs_model::{
     ArithmeticIntent, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
@@ -4177,17 +4178,17 @@ where
 /// finalized host module alive across transitions. The logical state still
 /// belongs to the language-owned stateful runner; this object only amortizes
 /// backend setup and preserves the physical artifact boundary.
-pub struct CraneliftStatefulSession<'a> {
-    artifact: &'a mncs_model::BackendArtifact,
+pub struct CraneliftStatefulSession {
+    artifact: Arc<mncs_model::BackendArtifact>,
     scalar: ScalarModule,
     jit: JitSession,
 }
 
-pub fn prepare_stateful_session<'a>(
-    artifact: &'a mncs_model::BackendArtifact,
-) -> Result<CraneliftStatefulSession<'a>, String> {
+pub fn prepare_stateful_session(
+    artifact: Arc<mncs_model::BackendArtifact>,
+) -> Result<CraneliftStatefulSession, String> {
     crate::support::backend_matches_identity(
-        artifact,
+        artifact.as_ref(),
         &cranelift_backend(),
         CRANELIFT_ARTIFACT_KIND,
     )
@@ -4198,8 +4199,14 @@ pub fn prepare_stateful_session<'a>(
         .map_err(|error| format!("invalid Cranelift payload: {error}"))?;
     let names = function_names(&payload.program, &payload.ssa);
     let scalar = lower_to_scalar(&payload.program, &payload.ssa, &names);
-    if !scalar.unsupported.is_empty() || scalar.functions.is_empty() {
-        return Err("Cranelift payload lowers to an unsupported or empty scalar module".to_owned());
+    if !scalar.unsupported.is_empty() {
+        return Err(format!(
+            "Cranelift payload lowers to unsupported scalar operations: {}",
+            scalar.unsupported.join("; ")
+        ));
+    }
+    if scalar.functions.is_empty() {
+        return Err("Cranelift payload lowers to an empty scalar module".to_owned());
     }
     if emit_clif(&scalar) != payload.clif {
         return Err(
@@ -4214,14 +4221,14 @@ pub fn prepare_stateful_session<'a>(
     })
 }
 
-impl CraneliftStatefulSession<'_> {
+impl CraneliftStatefulSession {
     pub fn execute(&mut self, request: &ExecutionRequest) -> BackendExecutionResult {
-        let mut result = empty_execution(self.artifact, request);
+        let mut result = empty_execution(self.artifact.as_ref(), request);
         // P1-013: a request naming a compiled generic instantiation
         // resolves to the emitted specialization entry; requests without
         // type arguments pass through untouched.
         let (entry_module, entry_function) = match crate::support::resolve_request_entry(
-            self.artifact,
+            self.artifact.as_ref(),
             &request.target.module,
             &request.target.function,
             &request.type_arguments,

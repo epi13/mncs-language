@@ -5,8 +5,9 @@
 //! terminators directly.  Agreement with body execution is bounded evidence
 //! about the declared corpus and is not compiler correctness.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +26,490 @@ use crate::{
 pub const SSA_EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
 pub const LOWERING_EXECUTION_COMPARISON_SCHEMA_VERSION: &str = "0.1";
 const MAX_SSA_TRACE_ENTRIES: usize = 256;
+
+type BlockIndex = HashMap<SemanticId, usize>;
+
+/// Per-frame value storage. The immutable identity-to-slot map is prepared
+/// once per SSA function; frames then store only values in a dense vector.
+/// This keeps the language's identity-keyed semantics while avoiding a
+/// fresh owned `SemanticId` allocation for every SSA output.
+struct ValueMap<'a> {
+    slots: &'a HashMap<SemanticId, usize>,
+    values: Vec<Option<ExecutionValue>>,
+    overflow: HashMap<SemanticId, ExecutionValue>,
+    current_output: Option<(*const SemanticId, usize)>,
+}
+
+impl<'a> ValueMap<'a> {
+    fn new(slots: &'a HashMap<SemanticId, usize>) -> Self {
+        Self {
+            slots,
+            values: (0..slots.len()).map(|_| None).collect(),
+            overflow: HashMap::new(),
+            current_output: None,
+        }
+    }
+
+    #[inline(always)]
+    fn set_instruction(&mut self, instruction: &SsaInstruction, output_slots: &[usize]) {
+        self.current_output = instruction.outputs.first().and_then(|output| {
+            output_slots
+                .first()
+                .map(|slot| (&output.identity as *const SemanticId, *slot))
+        });
+    }
+
+    fn get(&self, key: &SemanticId) -> Option<&ExecutionValue> {
+        self.slots
+            .get(key)
+            .and_then(|slot| self.values.get(*slot).and_then(Option::as_ref))
+            .or_else(|| self.overflow.get(key))
+    }
+
+    #[inline(always)]
+    fn get_slot(&self, slot: usize) -> Option<&ExecutionValue> {
+        self.values.get(slot).and_then(Option::as_ref)
+    }
+
+    fn insert_ref(&mut self, key: &SemanticId, value: ExecutionValue) {
+        let key_pointer = key as *const SemanticId;
+        if let Some((candidate, slot)) = self.current_output {
+            if candidate == key_pointer {
+                if let Some(cell) = self.values.get_mut(slot) {
+                    *cell = Some(value);
+                    return;
+                }
+            }
+        }
+        if let Some(slot) = self.slots.get(key).copied() {
+            if let Some(cell) = self.values.get_mut(slot) {
+                *cell = Some(value);
+                return;
+            }
+        }
+        self.overflow.insert(key.clone(), value);
+    }
+
+    fn remove(&mut self, key: &SemanticId) -> Option<ExecutionValue> {
+        if let Some(slot) = self.slots.get(key).copied() {
+            if let Some(cell) = self.values.get_mut(slot) {
+                return cell.take();
+            }
+        }
+        self.overflow.remove(key)
+    }
+}
+
+impl<'a> crate::execution::SsaValueLookup for ValueMap<'a> {
+    fn ssa_value(&self, key: &SemanticId) -> Option<&ExecutionValue> {
+        self.get(key)
+    }
+}
+
+impl<'a> crate::fs_resource::ExecutionValueLookup<SemanticId> for ValueMap<'a> {
+    fn execution_value(&self, key: &SemanticId) -> Option<&ExecutionValue> {
+        self.get(key)
+    }
+}
+
+fn runtime_profile_stage(stage: &str, started: Instant) {
+    if std::env::var_os("MNCS_RUNTIME_PROFILE").is_some() {
+        eprintln!(
+            "mncs-ssa-profile phase={} elapsed_ns={}",
+            stage,
+            started.elapsed().as_nanos()
+        );
+    }
+}
+
+/// Optional bounded telemetry for one top-level SSA request. It is disabled
+/// unless `MNCS_RUNTIME_PROFILE` is present, so normal execution does not
+/// pay for timers or logging. The counters are generic executor evidence,
+/// not semantic inputs and never affect a result.
+#[derive(Debug, Serialize)]
+struct RuntimeProfile {
+    #[serde(skip)]
+    enabled: bool,
+    #[serde(skip)]
+    started: Instant,
+    execution_frames: u64,
+    instructions: u64,
+    scalar_arithmetic_instructions: u64,
+    arithmetic_ns: u128,
+    scalar_operator_ns: u128,
+    instruction_dispatch_ns: u128,
+    instruction_kind_ns: BTreeMap<String, u128>,
+    non_call_instruction_ns: u128,
+    frame_setup_ns: u128,
+    nested_calls: u64,
+    nested_call_setup_ns: u128,
+    nested_call_execution_ns: u128,
+    nested_call_merge_ns: u128,
+    target_resolution_ns: u128,
+    sequence_replace_count: u64,
+    sequence_replace_elements_cloned: u64,
+    sequence_replace_bytes_cloned: u64,
+    sequence_replace_ns: u128,
+    sequence_copy_count: u64,
+    sequence_copy_elements_cloned: u64,
+    sequence_copy_bytes_cloned: u64,
+    sequence_copy_ns: u128,
+    trace_entries: u64,
+    trace_ns: u128,
+}
+
+impl RuntimeProfile {
+    fn new() -> Self {
+        Self {
+            enabled: std::env::var_os("MNCS_RUNTIME_PROFILE").is_some(),
+            started: Instant::now(),
+            execution_frames: 0,
+            instructions: 0,
+            scalar_arithmetic_instructions: 0,
+            arithmetic_ns: 0,
+            scalar_operator_ns: 0,
+            instruction_dispatch_ns: 0,
+            instruction_kind_ns: BTreeMap::new(),
+            non_call_instruction_ns: 0,
+            frame_setup_ns: 0,
+            nested_calls: 0,
+            nested_call_setup_ns: 0,
+            nested_call_execution_ns: 0,
+            nested_call_merge_ns: 0,
+            target_resolution_ns: 0,
+            sequence_replace_count: 0,
+            sequence_replace_elements_cloned: 0,
+            sequence_replace_bytes_cloned: 0,
+            sequence_replace_ns: 0,
+            sequence_copy_count: 0,
+            sequence_copy_elements_cloned: 0,
+            sequence_copy_bytes_cloned: 0,
+            sequence_copy_ns: 0,
+            trace_entries: 0,
+            trace_ns: 0,
+        }
+    }
+
+    #[inline]
+    fn mark(&self) -> Option<Instant> {
+        self.enabled.then(Instant::now)
+    }
+
+    #[inline]
+    fn add_elapsed(target: &mut u128, started: Option<Instant>) {
+        if let Some(started) = started {
+            *target += started.elapsed().as_nanos();
+        }
+    }
+
+    fn record_instruction(&mut self, kind: &SsaInstructionKind) {
+        if !self.enabled {
+            return;
+        }
+        self.instructions += 1;
+        // This map is diagnostic-only and is populated only when profiling
+        // is explicitly enabled. It separates generic dispatch families
+        // without putting a tag or timer in the normal executor path.
+        if matches!(
+            kind,
+            SsaInstructionKind::Integer { .. }
+                | SsaInstructionKind::IntegerCompare { .. }
+                | SsaInstructionKind::Float { .. }
+                | SsaInstructionKind::FloatCompare { .. }
+                | SsaInstructionKind::FloatIntrinsic { .. }
+                | SsaInstructionKind::BooleanOp { .. }
+                | SsaInstructionKind::BooleanCompare { .. }
+                | SsaInstructionKind::BooleanNot
+                | SsaInstructionKind::ByteBitwise { .. }
+                | SsaInstructionKind::ByteShift { .. }
+                | SsaInstructionKind::ByteCompare { .. }
+                | SsaInstructionKind::VectorBinary { .. }
+                | SsaInstructionKind::VectorCompare { .. }
+                | SsaInstructionKind::VectorReduce { .. }
+                | SsaInstructionKind::MaskBinary { .. }
+                | SsaInstructionKind::MaskNot { .. }
+                | SsaInstructionKind::MaskReduce { .. }
+                | SsaInstructionKind::Convert { .. }
+        ) {
+            self.scalar_arithmetic_instructions += 1;
+        }
+    }
+
+    fn record_dispatch(&mut self, kind: &SsaInstructionKind, started: Option<Instant>) {
+        if !self.enabled {
+            return;
+        }
+        if let Some(started) = started {
+            *self
+                .instruction_kind_ns
+                .entry(instruction_kind_name(kind).to_owned())
+                .or_default() += started.elapsed().as_nanos();
+        }
+    }
+
+    fn record_trace(&mut self, before: usize, after: usize, started: Option<Instant>) {
+        if !self.enabled {
+            return;
+        }
+        self.trace_entries += (after.saturating_sub(before)) as u64;
+        Self::add_elapsed(&mut self.trace_ns, started);
+    }
+
+    fn record_sequence_replace(
+        &mut self,
+        elements_cloned: usize,
+        bytes_cloned: usize,
+        started: Option<Instant>,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        self.sequence_replace_count += 1;
+        self.sequence_replace_elements_cloned += elements_cloned as u64;
+        self.sequence_replace_bytes_cloned += bytes_cloned as u64;
+        Self::add_elapsed(&mut self.sequence_replace_ns, started);
+    }
+
+    fn record_sequence_copy(
+        &mut self,
+        elements_cloned: usize,
+        bytes_cloned: usize,
+        started: Option<Instant>,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        self.sequence_copy_count += 1;
+        self.sequence_copy_elements_cloned += elements_cloned as u64;
+        self.sequence_copy_bytes_cloned += bytes_cloned as u64;
+        Self::add_elapsed(&mut self.sequence_copy_ns, started);
+    }
+
+    fn emit(&self, result: &SsaExecutionResult) {
+        if !self.enabled {
+            return;
+        }
+        let mut profile = serde_json::to_value(self).unwrap_or_default();
+        if let Some(object) = profile.as_object_mut() {
+            object.insert(
+                "total_ns".to_owned(),
+                serde_json::json!(self.started.elapsed().as_nanos()),
+            );
+            object.insert("steps".to_owned(), serde_json::json!(result.steps));
+            object.insert(
+                "status".to_owned(),
+                serde_json::json!(format!("{:?}", result.status)),
+            );
+        }
+        eprintln!("mncs-runtime-profile {}", profile);
+    }
+}
+
+fn instruction_kind_name(kind: &SsaInstructionKind) -> &'static str {
+    match kind {
+        SsaInstructionKind::Constant { .. } => "constant",
+        SsaInstructionKind::Integer { .. } => "integer",
+        SsaInstructionKind::IntegerCompare { .. } => "integer_compare",
+        SsaInstructionKind::FloatConstant { .. } => "float_constant",
+        SsaInstructionKind::Float { .. } => "float",
+        SsaInstructionKind::FloatCompare { .. } => "float_compare",
+        SsaInstructionKind::FloatIntrinsic { .. } => "float_intrinsic",
+        SsaInstructionKind::BooleanOp { .. } => "boolean_op",
+        SsaInstructionKind::BooleanCompare { .. } => "boolean_compare",
+        SsaInstructionKind::BooleanNot => "boolean_not",
+        SsaInstructionKind::ByteBitwise { .. } => "byte_bitwise",
+        SsaInstructionKind::ByteShift { .. } => "byte_shift",
+        SsaInstructionKind::ByteCompare { .. } => "byte_compare",
+        SsaInstructionKind::Select { .. } => "select",
+        SsaInstructionKind::SequenceReplace { .. } => "sequence_replace",
+        SsaInstructionKind::BoundCheck { .. } => "bound_check",
+        SsaInstructionKind::SequenceCopy { .. } => "sequence_copy",
+        SsaInstructionKind::VectorConstruct { .. } => "vector_construct",
+        SsaInstructionKind::VectorSplat { .. } => "vector_splat",
+        SsaInstructionKind::VectorExtract { .. } => "vector_extract",
+        SsaInstructionKind::VectorReplace { .. } => "vector_replace",
+        SsaInstructionKind::VectorBinary { .. } => "vector_binary",
+        SsaInstructionKind::VectorCompare { .. } => "vector_compare",
+        SsaInstructionKind::MaskBinary { .. } => "mask_binary",
+        SsaInstructionKind::MaskNot { .. } => "mask_not",
+        SsaInstructionKind::MaskReduce { .. } => "mask_reduce",
+        SsaInstructionKind::VectorReduce { .. } => "vector_reduce",
+        SsaInstructionKind::Convert { .. } => "convert",
+        SsaInstructionKind::SequenceConstruct { .. } => "sequence_construct",
+        SsaInstructionKind::SequenceProject { .. } => "sequence_project",
+        SsaInstructionKind::SequenceLength { .. } => "sequence_length",
+        SsaInstructionKind::ViewConstruct { .. } => "view_construct",
+        SsaInstructionKind::ViewNarrow { .. } => "view_narrow",
+        SsaInstructionKind::FiniteConstruct { .. } => "finite_construct",
+        SsaInstructionKind::FinitePayloadProject { .. } => "finite_payload_project",
+        SsaInstructionKind::FiniteIsVariant { .. } => "finite_is_variant",
+        SsaInstructionKind::RecordConstruct { .. } => "record_construct",
+        SsaInstructionKind::RecordProject { .. } => "record_project",
+        SsaInstructionKind::Call { .. } => "call",
+        SsaInstructionKind::Effect => "effect",
+        SsaInstructionKind::HostCall { .. } => "host_call",
+        SsaInstructionKind::RuntimeCheck { .. } => "runtime_check",
+    }
+}
+
+/// Immutable execution preparation shared by every frame in a retained
+/// session.  The identity maps are derived from the validated program/SSA
+/// pair and are never used as an authority: the artifact identity and the
+/// request checks remain the authority at the public boundary.
+struct PreparedSsaProgram {
+    functions: Vec<PreparedSsaFunction>,
+    function_indices: HashMap<SemanticId, usize>,
+}
+
+struct PreparedSsaFunction {
+    module_index: usize,
+    input_types: Vec<BodyType>,
+    value_types: HashMap<SemanticId, BodyType>,
+    value_slots: HashMap<SemanticId, usize>,
+    blocks: Vec<PreparedSsaBlock>,
+    block_indices: BlockIndex,
+}
+
+struct PreparedSsaBlock {
+    instructions: Vec<PreparedSsaInstruction>,
+}
+
+struct PreparedSsaInstruction {
+    input_slots: Vec<usize>,
+    output_slots: Vec<usize>,
+    call_target: Option<PreparedCallTarget>,
+}
+
+#[derive(Clone, Copy)]
+struct PreparedCallTarget {
+    prepared_index: usize,
+    program_index: Option<usize>,
+}
+
+#[derive(Clone, Copy)]
+struct FrameTarget<'a> {
+    module: &'a str,
+    function: &'a str,
+}
+
+impl PreparedSsaProgram {
+    fn new(program: &Program, module: &SsaModule) -> Self {
+        let program_indices = program
+            .functions
+            .iter()
+            .enumerate()
+            .map(|(index, function)| {
+                (
+                    function_id(function.identity_namespace(&program.module), &function.name),
+                    index,
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let functions = module
+            .functions
+            .iter()
+            .enumerate()
+            .map(|(module_index, function)| {
+                let input_types = function
+                    .inputs
+                    .iter()
+                    .map(|input| ssa_input_type(program, &input.ty))
+                    .collect::<Vec<_>>();
+                let mut value_types = HashMap::new();
+                for (input, ty) in function.inputs.iter().zip(&input_types) {
+                    value_types.insert(input.identity.clone(), ty.clone());
+                }
+                for block in &function.blocks {
+                    for parameter in &block.parameters {
+                        value_types.insert(
+                            parameter.identity.clone(),
+                            ssa_input_type(program, &parameter.ty),
+                        );
+                    }
+                    for instruction in &block.instructions {
+                        for output in &instruction.outputs {
+                            value_types.insert(
+                                output.identity.clone(),
+                                ssa_input_type(program, &output.ty),
+                            );
+                        }
+                    }
+                }
+                let block_indices = function
+                    .blocks
+                    .iter()
+                    .enumerate()
+                    .map(|(index, block)| (block.identity.clone(), index))
+                    .collect::<HashMap<_, _>>();
+                let value_slots = value_types
+                    .keys()
+                    .enumerate()
+                    .map(|(slot, identity)| (identity.clone(), slot))
+                    .collect::<HashMap<_, _>>();
+                let blocks = function
+                    .blocks
+                    .iter()
+                    .map(|block| PreparedSsaBlock {
+                        instructions: block
+                            .instructions
+                            .iter()
+                            .map(|instruction| PreparedSsaInstruction {
+                                input_slots: instruction
+                                    .inputs
+                                    .iter()
+                                    .map(|identity| {
+                                        value_slots.get(identity).copied().unwrap_or(usize::MAX)
+                                    })
+                                    .collect(),
+                                output_slots: instruction
+                                    .outputs
+                                    .iter()
+                                    .map(|output| {
+                                        value_slots
+                                            .get(&output.identity)
+                                            .copied()
+                                            .unwrap_or(usize::MAX)
+                                    })
+                                    .collect(),
+                                call_target: match &instruction.kind {
+                                    SsaInstructionKind::Call { function, .. } => module
+                                        .functions
+                                        .iter()
+                                        .position(|candidate| {
+                                            candidate.semantic_identity == *function
+                                        })
+                                        .map(|prepared_index| PreparedCallTarget {
+                                            prepared_index,
+                                            program_index: program_indices.get(function).copied(),
+                                        }),
+                                    _ => None,
+                                },
+                            })
+                            .collect(),
+                    })
+                    .collect();
+                PreparedSsaFunction {
+                    module_index,
+                    input_types,
+                    value_types,
+                    value_slots,
+                    blocks,
+                    block_indices,
+                }
+            })
+            .collect::<Vec<_>>();
+        let function_indices = module
+            .functions
+            .iter()
+            .enumerate()
+            .map(|(index, function)| (function.semantic_identity.clone(), index))
+            .collect::<HashMap<_, _>>();
+        Self {
+            functions,
+            function_indices,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SsaExecutionTraceEntry {
@@ -194,7 +679,23 @@ pub fn execute_ssa_module(
     module: &SsaModule,
     request: &crate::ExecutionRequest,
 ) -> SsaExecutionResult {
-    execute_ssa_module_with_validation(program, module, request, true, None, None, None, 0, None)
+    let mut profile = RuntimeProfile::new();
+    let result = execute_ssa_module_with_validation(
+        program,
+        module,
+        request,
+        true,
+        None,
+        None,
+        None,
+        None,
+        0,
+        None,
+        MAX_SSA_TRACE_ENTRIES,
+        &mut profile,
+    );
+    profile.emit(&result);
+    result
 }
 
 /// Interpret an SSA module after its immutable program/module validation has
@@ -207,7 +708,23 @@ pub fn execute_ssa_module_prevalidated(
     module: &SsaModule,
     request: &crate::ExecutionRequest,
 ) -> SsaExecutionResult {
-    execute_ssa_module_with_validation(program, module, request, false, None, None, None, 0, None)
+    let mut profile = RuntimeProfile::new();
+    let result = execute_ssa_module_with_validation(
+        program,
+        module,
+        request,
+        false,
+        None,
+        None,
+        None,
+        None,
+        0,
+        None,
+        MAX_SSA_TRACE_ENTRIES,
+        &mut profile,
+    );
+    profile.emit(&result);
+    result
 }
 
 /// Reusable immutable execution preparation for a bounded stateful session.
@@ -220,7 +737,7 @@ pub struct SsaExecutionSession {
     /// program or SSA module after the receipt and block indexes were built.
     program: Arc<Program>,
     module: Arc<SsaModule>,
-    block_indices: BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>,
+    prepared: PreparedSsaProgram,
     program_identity: SemanticId,
     program_fingerprint: String,
     module_fingerprint: String,
@@ -255,36 +772,37 @@ impl SsaExecutionSession {
         if module.semantic_identity != program_identity {
             return Err("SSA semantic program identity does not match program".to_owned());
         }
-        if !module.identity_is_valid() {
+        let identity_started = Instant::now();
+        let identity_valid = module.identity_is_valid();
+        runtime_profile_stage("module_identity", identity_started);
+        if !identity_valid {
             return Err("SSA module identity does not match semantic/HIR identity".to_owned());
         }
-        if !program.validate().valid {
+        let program_validation_started = Instant::now();
+        let program_valid = program.validate().valid;
+        runtime_profile_stage("program_validation", program_validation_started);
+        if !program_valid {
             return Err("program validation failed".to_owned());
         }
-        if !module.validate().valid {
+        let module_validation_started = Instant::now();
+        let module_valid = module.validate().valid;
+        runtime_profile_stage("module_validation", module_validation_started);
+        if !module_valid {
             return Err("SSA validation failed".to_owned());
         }
+        let program_fingerprint_started = Instant::now();
         let program_fingerprint = program
             .content_fingerprint()
             .map_err(|error| format!("program fingerprint failed: {error}"))?;
+        runtime_profile_stage("program_fingerprint", program_fingerprint_started);
+        let module_fingerprint_started = Instant::now();
         let module_fingerprint = module
             .fingerprint()
             .map_err(|error| format!("SSA fingerprint failed: {error}"))?;
-        let block_indices = module
-            .functions
-            .iter()
-            .map(|function| {
-                (
-                    function.semantic_identity.clone(),
-                    function
-                        .blocks
-                        .iter()
-                        .enumerate()
-                        .map(|(index, block)| (block.identity.clone(), index))
-                        .collect(),
-                )
-            })
-            .collect();
+        runtime_profile_stage("module_fingerprint", module_fingerprint_started);
+        let prepared_started = Instant::now();
+        let prepared = PreparedSsaProgram::new(&program, &module);
+        runtime_profile_stage("prepared_indexes", prepared_started);
         let validation_receipt = EvidenceReceipt::new(
             "SSA artifact validates against semantic program",
             module.identity.clone(),
@@ -311,7 +829,7 @@ impl SsaExecutionSession {
         Ok(Self {
             program,
             module,
-            block_indices,
+            prepared,
             program_identity,
             program_fingerprint,
             module_fingerprint,
@@ -326,12 +844,14 @@ impl SsaExecutionSession {
     /// Execute only the exact immutable program/SSA pair validated by this
     /// session. Request-specific validation still runs for every transition.
     pub fn execute(&self, request: &crate::ExecutionRequest) -> SsaExecutionResult {
-        execute_ssa_module_with_validation(
+        let mut profile = RuntimeProfile::new();
+        let result = execute_ssa_module_with_validation(
             &self.program,
             &self.module,
             request,
             false,
-            Some(&self.block_indices),
+            Some(&self.prepared),
+            None,
             Some((
                 &self.program_identity,
                 &self.program_fingerprint,
@@ -340,7 +860,11 @@ impl SsaExecutionSession {
             None,
             0,
             None,
-        )
+            MAX_SSA_TRACE_ENTRIES,
+            &mut profile,
+        );
+        profile.emit(&result);
+        result
     }
 
     /// Execute with a host-supplied generic provider registry. Provider
@@ -351,12 +875,14 @@ impl SsaExecutionSession {
         request: &crate::ExecutionRequest,
         provider_runtime: &dyn crate::ProviderRuntime,
     ) -> SsaExecutionResult {
-        execute_ssa_module_with_validation(
+        let mut profile = RuntimeProfile::new();
+        let result = execute_ssa_module_with_validation(
             &self.program,
             &self.module,
             request,
             false,
-            Some(&self.block_indices),
+            Some(&self.prepared),
+            None,
             Some((
                 &self.program_identity,
                 &self.program_fingerprint,
@@ -365,7 +891,11 @@ impl SsaExecutionSession {
             None,
             0,
             Some(provider_runtime),
-        )
+            MAX_SSA_TRACE_ENTRIES,
+            &mut profile,
+        );
+        profile.emit(&result);
+        result
     }
 
     /// Execute a stateful transition while transferring ownership of its
@@ -393,12 +923,14 @@ impl SsaExecutionSession {
             host_grants,
             call_depth_budget,
         };
-        execute_ssa_module_with_validation(
+        let mut profile = RuntimeProfile::new();
+        let result = execute_ssa_module_with_validation(
             &self.program,
             &self.module,
             &request,
             false,
-            Some(&self.block_indices),
+            Some(&self.prepared),
+            None,
             Some((
                 &self.program_identity,
                 &self.program_fingerprint,
@@ -407,7 +939,11 @@ impl SsaExecutionSession {
             Some(arguments),
             0,
             None,
-        )
+            MAX_SSA_TRACE_ENTRIES,
+            &mut profile,
+        );
+        profile.emit(&result);
+        result
     }
 }
 
@@ -417,11 +953,14 @@ fn execute_ssa_module_with_validation(
     module: &SsaModule,
     request: &crate::ExecutionRequest,
     validate_artifact: bool,
-    block_cache: Option<&BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>>,
+    prepared: Option<&PreparedSsaProgram>,
+    direct_function: Option<&SemanticId>,
     cached_identity: Option<(&SemanticId, &String, &String)>,
     owned_arguments: Option<Vec<ExecutionValue>>,
     call_depth: u64,
     provider_runtime: Option<&dyn crate::ProviderRuntime>,
+    trace_limit: usize,
+    profile: &mut RuntimeProfile,
 ) -> SsaExecutionResult {
     if request.schema_version != crate::EXECUTION_REQUEST_SCHEMA_VERSION {
         return SsaExecutionResult::invalid(
@@ -442,7 +981,8 @@ fn execute_ssa_module_with_validation(
             "SSA semantic program identity does not match program",
         );
     }
-    if request.target.module != program.module
+    if direct_function.is_none()
+        && request.target.module != program.module
         && !program
             .functions
             .iter()
@@ -500,66 +1040,81 @@ fn execute_ssa_module_with_validation(
             return SsaExecutionResult::invalid(request, "SSA validation failed");
         }
     }
-    // P1-013: resolve a generic target through its explicit,
-    // previously compiled specialization exactly like the body executor.
-    // `NotFound` falls through to the historical SSA lookup so the
-    // missing-entry message below stays byte-identical.
-    let entry_name = match crate::resolve_generic_entry(
-        program,
-        &request.target.module,
-        &request.target.function,
-        &request.type_arguments,
-    ) {
-        Ok(crate::GenericEntryTarget::Concrete { function_name }) => function_name,
-        Ok(crate::GenericEntryTarget::Specialization { function_name, .. }) => function_name,
-        Err(crate::GenericEntryFailure::NotFound) => request.target.function.clone(),
-        Err(failure) => {
-            return SsaExecutionResult::invalid(
-                request,
-                crate::generic_entry_failure_reason(&failure),
-            );
-        }
+    let local_prepared;
+    let prepared = if let Some(prepared) = prepared {
+        prepared
+    } else {
+        local_prepared = PreparedSsaProgram::new(program, module);
+        &local_prepared
     };
-    // Resolve the target against its home module namespace when the target
-    // names a linked declaration rather than a root-module function.
-    let target_namespace = program
-        .functions
-        .iter()
-        .find(|candidate| {
-            candidate.name == entry_name
-                && candidate.identity_namespace(&program.module) == request.target.module
-        })
-        .map(|candidate| candidate.identity_namespace(&program.module).to_owned())
-        .unwrap_or_else(|| program.module.clone());
-    let semantic_function = function_id(&target_namespace, &entry_name);
-    let Some(function) = module
-        .functions
-        .iter()
-        .find(|function| function.semantic_identity == semantic_function)
-    else {
+    let target_resolution_started = profile.mark();
+    let semantic_function = if let Some(direct_function) = direct_function {
+        direct_function.clone()
+    } else {
+        // P1-013: resolve a generic target through its explicit,
+        // previously compiled specialization exactly like the body executor.
+        // `NotFound` falls through to the historical SSA lookup so the
+        // missing-entry message below stays byte-identical.
+        let entry_name = match crate::resolve_generic_entry(
+            program,
+            &request.target.module,
+            &request.target.function,
+            &request.type_arguments,
+        ) {
+            Ok(crate::GenericEntryTarget::Concrete { function_name }) => function_name,
+            Ok(crate::GenericEntryTarget::Specialization { function_name, .. }) => function_name,
+            Err(crate::GenericEntryFailure::NotFound) => request.target.function.clone(),
+            Err(failure) => {
+                return SsaExecutionResult::invalid(
+                    request,
+                    crate::generic_entry_failure_reason(&failure),
+                );
+            }
+        };
+        // Resolve the target against its home module namespace when the target
+        // names a linked declaration rather than a root-module function.
+        let target_namespace = program
+            .functions
+            .iter()
+            .find(|candidate| {
+                candidate.name == entry_name
+                    && candidate.identity_namespace(&program.module) == request.target.module
+            })
+            .map(|candidate| candidate.identity_namespace(&program.module).to_owned())
+            .unwrap_or_else(|| program.module.clone());
+        function_id(&target_namespace, &entry_name)
+    };
+    RuntimeProfile::add_elapsed(&mut profile.target_resolution_ns, target_resolution_started);
+    let Some(prepared_index) = prepared.function_indices.get(&semantic_function).copied() else {
         return SsaExecutionResult::invalid(
             request,
             "execution target SSA function does not exist",
         );
     };
-    let (program_identity, module_fingerprint) = cached_identity
+    let prepared_function = &prepared.functions[prepared_index];
+    let function = &module.functions[prepared_function.module_index];
+    // Re-share the resolved identity with nested calls (see
+    // `resolve_execution_cache`): the raw parameter is `None` on every fresh
+    // entry point, and passing it through unchanged would make every nested
+    // MNCS call re-serialize and re-hash the whole SSA module.
+    let owned_cache = cached_identity
+        .is_none()
+        .then(|| resolve_execution_cache(program, module, None))
+        .flatten();
+    let resolved_cache: Option<(&SemanticId, &String, &String)> = cached_identity.or_else(|| {
+        owned_cache
+            .as_ref()
+            .map(|(identity, program_fingerprint, fingerprint)| {
+                (identity, program_fingerprint, fingerprint)
+            })
+    });
+    let (program_identity, module_fingerprint) = resolved_cache
         .map(
             |(program_identity, _program_fingerprint, module_fingerprint)| {
                 (program_identity.clone(), Some(module_fingerprint.clone()))
             },
         )
-        .unwrap_or_else(|| (program_id(&program.module), module.fingerprint().ok()));
-    // Re-share the resolved identity with nested calls (see
-    // `resolve_execution_cache`): the raw parameter is `None` on every fresh
-    // entry point, and passing it through unchanged would make every nested
-    // MNCS call re-serialize and re-hash the whole SSA module.
-    let owned_cache = resolve_execution_cache(program, module, cached_identity);
-    let resolved_cache: Option<(&SemanticId, &String, &String)> =
-        owned_cache
-            .as_ref()
-            .map(|(identity, program_fingerprint, fingerprint)| {
-                (identity, program_fingerprint, fingerprint)
-            });
+        .unwrap_or_else(|| (program_id(&program.module), None));
     let mut result = SsaExecutionResult {
         schema_version: SSA_EXECUTION_RESULT_SCHEMA_VERSION.to_owned(),
         status: ExecutionStatus::InvalidRequest,
@@ -576,48 +1131,82 @@ fn execute_ssa_module_with_validation(
         trace_truncated: false,
         effects: Vec::new(),
     };
-    let Some(mut values) =
-        initialize_inputs(program, function, request, &mut result, owned_arguments)
-    else {
+    let Some(returned) = execute_prepared_function(
+        program,
+        module,
+        prepared,
+        function,
+        prepared_function,
+        request,
+        FrameTarget {
+            module: &request.target.module,
+            function: &request.target.function,
+        },
+        owned_arguments,
+        &mut result,
+        call_depth,
+        trace_limit,
+        provider_runtime,
+        profile,
+    ) else {
         return result;
     };
-    let mut value_types = BTreeMap::new();
-    for input in &function.inputs {
-        value_types.insert(input.identity.clone(), ssa_input_type(program, &input.ty));
+    result.returned = returned;
+    result.status = ExecutionStatus::Returned;
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_prepared_function(
+    program: &Program,
+    module: &SsaModule,
+    prepared: &PreparedSsaProgram,
+    function: &SsaFunction,
+    prepared_function: &PreparedSsaFunction,
+    request: &crate::ExecutionRequest,
+    frame_target: FrameTarget<'_>,
+    owned_arguments: Option<Vec<ExecutionValue>>,
+    result: &mut SsaExecutionResult,
+    call_depth: u64,
+    trace_limit: usize,
+    provider_runtime: Option<&dyn crate::ProviderRuntime>,
+    profile: &mut RuntimeProfile,
+) -> Option<Vec<ExecutionValue>> {
+    let depth_limit = request
+        .call_depth_budget
+        .unwrap_or(crate::MODEL_MAX_CALL_DEPTH);
+    if call_depth > depth_limit {
+        result.fail(
+            ExecutionStatus::BudgetExhausted,
+            None,
+            format!("execution call depth {call_depth} exceeded budget {depth_limit}"),
+        );
+        return None;
     }
-    for block in &function.blocks {
-        for parameter in &block.parameters {
-            value_types.insert(
-                parameter.identity.clone(),
-                ssa_input_type(program, &parameter.ty),
-            );
-        }
-        for instruction in &block.instructions {
-            for output in &instruction.outputs {
-                value_types.insert(output.identity.clone(), ssa_input_type(program, &output.ty));
-            }
-        }
+    if profile.enabled {
+        profile.execution_frames += 1;
     }
-    let local_block_indices = if block_cache.is_none() {
-        function
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(index, block)| (block.identity.clone(), index))
-            .collect::<BTreeMap<_, _>>()
-    } else {
-        BTreeMap::new()
-    };
-    let block_indices = block_cache
-        .and_then(|cache| cache.get(&function.semantic_identity))
-        .unwrap_or(&local_block_indices);
+    let frame_setup_started = profile.mark();
+    let mut values = initialize_inputs(
+        program,
+        function,
+        &prepared_function.input_types,
+        &prepared_function.value_slots,
+        request,
+        frame_target,
+        result,
+        owned_arguments,
+    )?;
+    let value_types = &prepared_function.value_types;
+    let block_indices = &prepared_function.block_indices;
+    RuntimeProfile::add_elapsed(&mut profile.frame_setup_ns, frame_setup_started);
     let Some(entry) = function.blocks.first().map(|block| block.identity.clone()) else {
         result.fail(
             ExecutionStatus::InvalidRequest,
             None,
             "SSA function has no entry block",
         );
-        return result;
+        return None;
     };
     let mut current = entry;
     loop {
@@ -627,12 +1216,18 @@ fn execute_ssa_module_with_validation(
                 None,
                 "SSA reached an unknown block",
             );
-            return result;
+            return None;
         };
         let block = &function.blocks[block_index];
-        trace_block(&mut result, block, "block_enter");
-        for instruction in &block.instructions {
-            if !consume_step(&mut result, request.step_budget) {
+        let prepared_block = &prepared_function.blocks[block_index];
+        let trace_started = profile.mark();
+        let trace_before = result.trace.len();
+        trace_block(result, block, "block_enter", trace_limit);
+        profile.record_trace(trace_before, result.trace.len(), trace_started);
+        for (instruction, prepared_instruction) in
+            block.instructions.iter().zip(&prepared_block.instructions)
+        {
+            if !consume_step(result, request.step_budget) {
                 result.fail(
                     ExecutionStatus::BudgetExhausted,
                     instruction
@@ -641,34 +1236,94 @@ fn execute_ssa_module_with_validation(
                         .or_else(|| Some(instruction.identity.clone())),
                     "execution step budget exhausted",
                 );
-                return result;
+                return None;
             }
-            trace_instruction(&mut result, block, instruction, "instruction");
+            profile.record_instruction(&instruction.kind);
+            let arithmetic_started = if matches!(
+                &instruction.kind,
+                SsaInstructionKind::Integer { .. }
+                    | SsaInstructionKind::IntegerCompare { .. }
+                    | SsaInstructionKind::Float { .. }
+                    | SsaInstructionKind::FloatCompare { .. }
+                    | SsaInstructionKind::FloatIntrinsic { .. }
+                    | SsaInstructionKind::BooleanOp { .. }
+                    | SsaInstructionKind::BooleanCompare { .. }
+                    | SsaInstructionKind::BooleanNot
+                    | SsaInstructionKind::ByteBitwise { .. }
+                    | SsaInstructionKind::ByteShift { .. }
+                    | SsaInstructionKind::ByteCompare { .. }
+                    | SsaInstructionKind::VectorBinary { .. }
+                    | SsaInstructionKind::VectorCompare { .. }
+                    | SsaInstructionKind::VectorReduce { .. }
+                    | SsaInstructionKind::MaskBinary { .. }
+                    | SsaInstructionKind::MaskNot { .. }
+                    | SsaInstructionKind::MaskReduce { .. }
+                    | SsaInstructionKind::Convert { .. }
+            ) {
+                profile.mark()
+            } else {
+                None
+            };
+            let is_call = matches!(&instruction.kind, SsaInstructionKind::Call { .. });
+            let trace_started = profile.mark();
+            let trace_before = result.trace.len();
+            trace_instruction(result, block, instruction, "instruction", trace_limit);
+            profile.record_trace(trace_before, result.trace.len(), trace_started);
+            let instruction_started = profile.mark();
             if execute_instruction(
                 program,
                 module,
                 instruction,
                 &mut values,
-                &value_types,
-                &mut result,
+                &prepared_instruction.input_slots,
+                &prepared_instruction.output_slots,
+                prepared_instruction.call_target,
+                value_types,
+                result,
                 request,
-                block_cache,
-                resolved_cache,
+                frame_target,
+                Some(prepared),
                 call_depth,
                 provider_runtime,
+                trace_limit,
+                profile,
             ) {
-                return result;
+                profile.record_dispatch(&instruction.kind, instruction_started);
+                RuntimeProfile::add_elapsed(
+                    &mut profile.instruction_dispatch_ns,
+                    instruction_started,
+                );
+                if !is_call {
+                    RuntimeProfile::add_elapsed(
+                        &mut profile.non_call_instruction_ns,
+                        instruction_started,
+                    );
+                }
+                RuntimeProfile::add_elapsed(&mut profile.arithmetic_ns, arithmetic_started);
+                return None;
             }
+            profile.record_dispatch(&instruction.kind, instruction_started);
+            RuntimeProfile::add_elapsed(&mut profile.instruction_dispatch_ns, instruction_started);
+            if !is_call {
+                RuntimeProfile::add_elapsed(
+                    &mut profile.non_call_instruction_ns,
+                    instruction_started,
+                );
+            }
+            RuntimeProfile::add_elapsed(&mut profile.arithmetic_ns, arithmetic_started);
         }
-        if !consume_step(&mut result, request.step_budget) {
+        if !consume_step(result, request.step_budget) {
             result.fail(
                 ExecutionStatus::BudgetExhausted,
                 block.semantic_identity.clone(),
                 "execution step budget exhausted",
             );
-            return result;
+            return None;
         }
-        trace_block(&mut result, block, "terminator");
+        let trace_started = profile.mark();
+        let trace_before = result.trace.len();
+        trace_block(result, block, "terminator", trace_limit);
+        profile.record_trace(trace_before, result.trace.len(), trace_started);
         match &block.terminator {
             SsaTerminator::Return { values: returned } => {
                 let mut returned_values = Vec::with_capacity(returned.len());
@@ -689,7 +1344,7 @@ fn execute_ssa_module_with_validation(
                             block.semantic_identity.clone(),
                             "return referenced an unavailable value",
                         );
-                        return result;
+                        return None;
                     };
                     returned_values.push(returned_value);
                 }
@@ -699,11 +1354,9 @@ fn execute_ssa_module_with_validation(
                         block.semantic_identity.clone(),
                         "return referenced an unavailable value",
                     );
-                    return result;
+                    return None;
                 }
-                result.returned = returned_values;
-                result.status = ExecutionStatus::Returned;
-                return result;
+                return Some(returned_values);
             }
             SsaTerminator::Branch { target, arguments } => {
                 if !assign_block_arguments(function, block_indices, target, arguments, &mut values)
@@ -713,7 +1366,7 @@ fn execute_ssa_module_with_validation(
                         block.semantic_identity.clone(),
                         "branch arguments did not match target parameters",
                     );
-                    return result;
+                    return None;
                 }
                 current = target.clone();
             }
@@ -730,7 +1383,7 @@ fn execute_ssa_module_with_validation(
                         block.semantic_identity.clone(),
                         "conditional branch did not receive a boolean value",
                     );
-                    return result;
+                    return None;
                 };
                 let (target, arguments) = if *value {
                     (then_target, then_arguments)
@@ -744,7 +1397,7 @@ fn execute_ssa_module_with_validation(
                         block.semantic_identity.clone(),
                         "conditional branch arguments did not match target parameters",
                     );
-                    return result;
+                    return None;
                 }
                 current = target.clone();
             }
@@ -754,7 +1407,7 @@ fn execute_ssa_module_with_validation(
                     block.semantic_identity.clone(),
                     format!("failure terminator reached: {mode:?}"),
                 );
-                return result;
+                return None;
             }
         }
     }
@@ -862,15 +1515,21 @@ fn execute_instruction(
     program: &Program,
     module: &SsaModule,
     instruction: &SsaInstruction,
-    values: &mut BTreeMap<SemanticId, ExecutionValue>,
-    value_types: &BTreeMap<SemanticId, BodyType>,
+    values: &mut ValueMap,
+    input_slots: &[usize],
+    output_slots: &[usize],
+    call_target: Option<PreparedCallTarget>,
+    value_types: &HashMap<SemanticId, BodyType>,
     result: &mut SsaExecutionResult,
     request: &crate::ExecutionRequest,
-    block_cache: Option<&BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>>,
-    cached_identity: Option<(&SemanticId, &String, &String)>,
+    frame_target: FrameTarget<'_>,
+    prepared: Option<&PreparedSsaProgram>,
     call_depth: u64,
     provider_runtime: Option<&dyn crate::ProviderRuntime>,
+    trace_limit: usize,
+    profile: &mut RuntimeProfile,
 ) -> bool {
+    values.set_instruction(instruction, output_slots);
     match &instruction.kind {
         SsaInstructionKind::Constant { value, ty } => {
             let Some(value) = constant_value(*value, ty) else {
@@ -882,7 +1541,7 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), value);
+                values.insert_ref(&output.identity, value);
             }
         }
         SsaInstructionKind::RecordConstruct {
@@ -901,8 +1560,8 @@ fn execute_instruction(
                 return true;
             }
             let mut fields = Vec::new();
-            for (name, input) in field_names.iter().zip(&instruction.inputs) {
-                let Some(value) = values.get(input) else {
+            for (name, input_slot) in field_names.iter().zip(input_slots) {
+                let Some(value) = values.get_slot(*input_slot) else {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         instruction_identity(instruction),
@@ -914,8 +1573,8 @@ fn execute_instruction(
             }
             fields.sort_by(|left, right| left.0.cmp(&right.0));
             let name = output.ty.semantic_name();
-            values.insert(
-                output.identity.clone(),
+            values.insert_ref(
+                &output.identity,
                 ExecutionValue::Record {
                     type_identity: type_identity.clone(),
                     name,
@@ -924,10 +1583,10 @@ fn execute_instruction(
             );
         }
         SsaInstructionKind::RecordProject { field, .. } => {
-            let Some(input) = instruction.inputs.first() else {
+            let Some(input_slot) = input_slots.first() else {
                 return true;
             };
-            let Some(ExecutionValue::Record { fields, .. }) = values.get(input) else {
+            let Some(ExecutionValue::Record { fields, .. }) = values.get_slot(*input_slot) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -938,7 +1597,7 @@ fn execute_instruction(
             match fields.iter().find(|(name, _)| name == field) {
                 Some((_, value)) => {
                     if let Some(output) = instruction.outputs.first() {
-                        values.insert(output.identity.clone(), value.clone());
+                        values.insert_ref(&output.identity, value.clone());
                     }
                 }
                 None => {
@@ -964,7 +1623,7 @@ fn execute_instruction(
                 );
                 return true;
             }
-            let Some((left, right)) = integer_operands(instruction, values) else {
+            let Some((left, right)) = integer_operands(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -972,8 +1631,10 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(value) = evaluate_integer(operator, *operand_type, *intent, left, right)
-            else {
+            let operator_started = profile.mark();
+            let evaluated = evaluate_integer(operator, *operand_type, *intent, left, right);
+            RuntimeProfile::add_elapsed(&mut profile.scalar_operator_ns, operator_started);
+            let Some(value) = evaluated else {
                 result.fail(
                     ExecutionStatus::RuntimeFailure,
                     instruction_identity(instruction),
@@ -982,8 +1643,8 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Integer {
                         value,
                         ty: match &output.ty {
@@ -998,7 +1659,7 @@ fn execute_instruction(
             predicate,
             operand_type,
         } => {
-            let Some((left, right)) = integer_operands(instruction, values) else {
+            let Some((left, right)) = integer_operands(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1006,7 +1667,10 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(value) = compare_integers(predicate, *operand_type, left, right) else {
+            let operator_started = profile.mark();
+            let compared = compare_integers(predicate, *operand_type, left, right);
+            RuntimeProfile::add_elapsed(&mut profile.scalar_operator_ns, operator_started);
+            let Some(value) = compared else {
                 result.fail(
                     ExecutionStatus::Unsupported,
                     instruction_identity(instruction),
@@ -1015,7 +1679,7 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+                values.insert_ref(&output.identity, ExecutionValue::Boolean { value });
             }
         }
         SsaInstructionKind::FloatConstant { bits, ty } => {
@@ -1028,8 +1692,8 @@ fn execute_instruction(
                 return true;
             }
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Float {
                         bits: *bits,
                         ty: *ty,
@@ -1046,7 +1710,7 @@ fn execute_instruction(
                 );
                 return true;
             }
-            let Some((left, right)) = float_operands(instruction, values) else {
+            let Some((left, right)) = float_operands(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1054,7 +1718,10 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(value) = evaluate_float(operator, left, right) else {
+            let operator_started = profile.mark();
+            let evaluated = evaluate_float(operator, left, right);
+            RuntimeProfile::add_elapsed(&mut profile.scalar_operator_ns, operator_started);
+            let Some(value) = evaluated else {
                 result.fail(
                     ExecutionStatus::RuntimeFailure,
                     instruction_identity(instruction),
@@ -1063,8 +1730,8 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Float {
                         bits: value.to_bits(),
                         ty: crate::FloatType::f64(),
@@ -1073,7 +1740,7 @@ fn execute_instruction(
             }
         }
         SsaInstructionKind::FloatCompare { predicate } => {
-            let Some((left, right)) = float_operands(instruction, values) else {
+            let Some((left, right)) = float_operands(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1089,7 +1756,10 @@ fn execute_instruction(
                 );
                 return true;
             }
-            let Some(value) = compare_floats(predicate, left, right) else {
+            let operator_started = profile.mark();
+            let compared = compare_floats(predicate, left, right);
+            RuntimeProfile::add_elapsed(&mut profile.scalar_operator_ns, operator_started);
+            let Some(value) = compared else {
                 result.fail(
                     ExecutionStatus::Unsupported,
                     instruction_identity(instruction),
@@ -1098,11 +1768,11 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+                values.insert_ref(&output.identity, ExecutionValue::Boolean { value });
             }
         }
         SsaInstructionKind::FloatIntrinsic { function } => {
-            let Some(input) = float_operand(instruction, values) else {
+            let Some(input) = float_operand(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1118,6 +1788,7 @@ fn execute_instruction(
                 );
                 return true;
             }
+            let operator_started = profile.mark();
             let value = match function.as_str() {
                 "sin" => input.sin(),
                 "cos" => input.cos(),
@@ -1135,6 +1806,7 @@ fn execute_instruction(
                     return true;
                 }
             };
+            RuntimeProfile::add_elapsed(&mut profile.scalar_operator_ns, operator_started);
             if !value.is_finite() {
                 result.fail(
                     ExecutionStatus::RuntimeFailure,
@@ -1144,8 +1816,8 @@ fn execute_instruction(
                 return true;
             }
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Float {
                         bits: value.to_bits(),
                         ty: crate::FloatType::f64(),
@@ -1154,7 +1826,7 @@ fn execute_instruction(
             }
         }
         SsaInstructionKind::BooleanOp { operator } => {
-            let Some((left, right)) = boolean_operands(instruction, values) else {
+            let Some((left, right)) = boolean_operands(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1162,6 +1834,7 @@ fn execute_instruction(
                 );
                 return true;
             };
+            let operator_started = profile.mark();
             let value = match operator.as_str() {
                 "and" => left && right,
                 "or" => left || right,
@@ -1174,12 +1847,13 @@ fn execute_instruction(
                     return true;
                 }
             };
+            RuntimeProfile::add_elapsed(&mut profile.scalar_operator_ns, operator_started);
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+                values.insert_ref(&output.identity, ExecutionValue::Boolean { value });
             }
         }
         SsaInstructionKind::BooleanCompare { predicate } => {
-            let Some((left, right)) = boolean_operands(instruction, values) else {
+            let Some((left, right)) = boolean_operands(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1187,6 +1861,7 @@ fn execute_instruction(
                 );
                 return true;
             };
+            let operator_started = profile.mark();
             let value = match predicate.as_str() {
                 "eq" => left == right,
                 "ne" => left != right,
@@ -1199,12 +1874,13 @@ fn execute_instruction(
                     return true;
                 }
             };
+            RuntimeProfile::add_elapsed(&mut profile.scalar_operator_ns, operator_started);
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+                values.insert_ref(&output.identity, ExecutionValue::Boolean { value });
             }
         }
         SsaInstructionKind::BooleanNot => {
-            let [input] = instruction.inputs.as_slice() else {
+            let [input_slot] = input_slots else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1212,7 +1888,7 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(ExecutionValue::Boolean { value }) = values.get(input) else {
+            let Some(ExecutionValue::Boolean { value }) = values.get_slot(*input_slot) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1220,15 +1896,15 @@ fn execute_instruction(
                 );
                 return true;
             };
+            let operator_started = profile.mark();
+            let negated = !value;
+            RuntimeProfile::add_elapsed(&mut profile.scalar_operator_ns, operator_started);
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
-                    ExecutionValue::Boolean { value: !value },
-                );
+                values.insert_ref(&output.identity, ExecutionValue::Boolean { value: negated });
             }
         }
         SsaInstructionKind::ByteBitwise { operator } => {
-            let Some((left, right)) = byte_operands(instruction, values) else {
+            let Some((left, right)) = byte_operands(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1236,7 +1912,10 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(value) = crate::execution::evaluate_byte_bitwise(operator, left, right) else {
+            let operator_started = profile.mark();
+            let evaluated = crate::execution::evaluate_byte_bitwise(operator, left, right);
+            RuntimeProfile::add_elapsed(&mut profile.scalar_operator_ns, operator_started);
+            let Some(value) = evaluated else {
                 result.fail(
                     ExecutionStatus::Unsupported,
                     instruction_identity(instruction),
@@ -1245,11 +1924,11 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), ExecutionValue::Byte { value });
+                values.insert_ref(&output.identity, ExecutionValue::Byte { value });
             }
         }
         SsaInstructionKind::ByteShift { operator } => {
-            let Some((byte, count)) = byte_shift_operands(instruction, values) else {
+            let Some((byte, count)) = byte_shift_operands(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1257,7 +1936,10 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(value) = crate::execution::evaluate_byte_shift(operator, byte, count) else {
+            let operator_started = profile.mark();
+            let evaluated = crate::execution::evaluate_byte_shift(operator, byte, count);
+            RuntimeProfile::add_elapsed(&mut profile.scalar_operator_ns, operator_started);
+            let Some(value) = evaluated else {
                 result.fail(
                     ExecutionStatus::Unsupported,
                     instruction_identity(instruction),
@@ -1266,11 +1948,11 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), ExecutionValue::Byte { value });
+                values.insert_ref(&output.identity, ExecutionValue::Byte { value });
             }
         }
         SsaInstructionKind::ByteCompare { predicate } => {
-            let Some((left, right)) = byte_operands(instruction, values) else {
+            let Some((left, right)) = byte_operands(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1278,7 +1960,10 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(value) = crate::execution::compare_bytes(predicate, left, right) else {
+            let operator_started = profile.mark();
+            let compared = crate::execution::compare_bytes(predicate, left, right);
+            RuntimeProfile::add_elapsed(&mut profile.scalar_operator_ns, operator_started);
+            let Some(value) = compared else {
                 result.fail(
                     ExecutionStatus::Unsupported,
                     instruction_identity(instruction),
@@ -1287,13 +1972,11 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+                values.insert_ref(&output.identity, ExecutionValue::Boolean { value });
             }
         }
         SsaInstructionKind::Convert { from, to } => {
-            let Some(operand_value) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
-            else {
+            let Some(operand_slot) = input_slots.first() else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1301,10 +1984,21 @@ fn execute_instruction(
                 );
                 return true;
             };
-            match crate::execution::convert_scalar_value(operand_value, from, to) {
+            let Some(operand_value) = values.get_slot(*operand_slot) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "conversion operand was unavailable",
+                );
+                return true;
+            };
+            let operator_started = profile.mark();
+            let converted = crate::execution::convert_scalar_value(operand_value, from, to);
+            RuntimeProfile::add_elapsed(&mut profile.scalar_operator_ns, operator_started);
+            match converted {
                 Ok(converted) => {
                     if let Some(output) = instruction.outputs.first() {
-                        values.insert(output.identity.clone(), converted);
+                        values.insert_ref(&output.identity, converted);
                     }
                 }
                 Err(ExecutionStatus::RuntimeFailure) => {
@@ -1338,8 +2032,8 @@ fn execute_instruction(
                 return true;
             }
             let mut element_values = Vec::with_capacity(instruction.inputs.len());
-            for input in &instruction.inputs {
-                let Some(value) = values.get(input) else {
+            for input_slot in input_slots {
+                let Some(value) = values.get_slot(*input_slot) else {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         instruction_identity(instruction),
@@ -1349,8 +2043,8 @@ fn execute_instruction(
                 };
                 element_values.push(value.clone());
             }
-            values.insert(
-                output.identity.clone(),
+            values.insert_ref(
+                &output.identity,
                 ExecutionValue::Sequence {
                     values: element_values.into(),
                 },
@@ -1360,10 +2054,9 @@ fn execute_instruction(
             let Some(output) = instruction.outputs.first() else {
                 return true;
             };
-            let collected: Option<Vec<_>> = instruction
-                .inputs
+            let collected: Option<Vec<_>> = input_slots
                 .iter()
-                .map(|input| values.get(input).cloned())
+                .map(|input_slot| values.get_slot(*input_slot).cloned())
                 .collect();
             let Some(collected) = collected else {
                 result.fail(
@@ -1381,8 +2074,8 @@ fn execute_instruction(
                 );
                 return true;
             }
-            values.insert(
-                output.identity.clone(),
+            values.insert_ref(
+                &output.identity,
                 ExecutionValue::Vector {
                     values: collected.into(),
                 },
@@ -1392,10 +2085,7 @@ fn execute_instruction(
             let Some(output) = instruction.outputs.first() else {
                 return true;
             };
-            let Some(value) = values
-                .get(instruction.inputs.first().unwrap_or(&output_sentinel()))
-                .cloned()
-            else {
+            let Some(input_slot) = input_slots.first() else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1403,8 +2093,16 @@ fn execute_instruction(
                 );
                 return true;
             };
-            values.insert(
-                output.identity.clone(),
+            let Some(value) = values.get_slot(*input_slot).cloned() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector splat operand was unavailable",
+                );
+                return true;
+            };
+            values.insert_ref(
+                &output.identity,
                 ExecutionValue::Vector {
                     values: vec![value; *lanes as usize].into(),
                 },
@@ -1413,8 +2111,15 @@ fn execute_instruction(
         SsaInstructionKind::VectorExtract {
             lanes, evidence, ..
         } => {
-            let Some(ExecutionValue::Vector { values: vector }) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            let Some(input_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector extraction operand was unavailable",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Vector { values: vector }) = values.get_slot(*input_slot)
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -1423,7 +2128,7 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(index) = ssa_integer_operand(instruction, values, 1) else {
+            let Some(index) = ssa_integer_operand(input_slots, values, 1) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1445,14 +2150,21 @@ fn execute_instruction(
                 return true;
             }
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), vector[index as usize].clone());
+                values.insert_ref(&output.identity, vector[index as usize].clone());
             }
         }
         SsaInstructionKind::VectorReplace {
             lanes, evidence, ..
         } => {
-            let Some(ExecutionValue::Vector { values: source }) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            let Some(input_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector replacement source was unavailable",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Vector { values: source }) = values.get_slot(*input_slot)
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -1461,7 +2173,7 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(index) = ssa_integer_operand(instruction, values, 1) else {
+            let Some(index) = ssa_integer_operand(input_slots, values, 1) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1469,10 +2181,15 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(element) = values
-                .get(instruction.inputs.get(2).unwrap_or(&output_sentinel()))
-                .cloned()
-            else {
+            let Some(element_slot) = input_slots.get(2) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector replacement element was unavailable",
+                );
+                return true;
+            };
+            let Some(element) = values.get_slot(*element_slot).cloned() else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1496,8 +2213,8 @@ fn execute_instruction(
             let mut updated = source.as_ref().clone();
             updated[index as usize] = element;
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Vector {
                         values: updated.into(),
                     },
@@ -1510,7 +2227,7 @@ fn execute_instruction(
             intent,
             ..
         } => {
-            let Some((left, right)) = ssa_vector_operands(instruction, values) else {
+            let Some((left, right)) = ssa_vector_operands(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1533,8 +2250,8 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Vector {
                         values: produced.into(),
                     },
@@ -1546,7 +2263,7 @@ fn execute_instruction(
             element_type,
             ..
         } => {
-            let Some((left, right)) = ssa_vector_operands(instruction, values) else {
+            let Some((left, right)) = ssa_vector_operands(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1565,8 +2282,8 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Mask {
                         lanes: lanes.into(),
                     },
@@ -1574,7 +2291,7 @@ fn execute_instruction(
             }
         }
         SsaInstructionKind::MaskBinary { operator, .. } => {
-            let Some((left, right)) = ssa_mask_operands(instruction, values) else {
+            let Some((left, right)) = ssa_mask_operands(input_slots, values) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1592,8 +2309,8 @@ fn execute_instruction(
                 })
                 .collect();
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Mask {
                         lanes: lanes.into(),
                     },
@@ -1601,9 +2318,15 @@ fn execute_instruction(
             }
         }
         SsaInstructionKind::MaskNot { .. } => {
-            let Some(ExecutionValue::Mask { lanes }) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
-            else {
+            let Some(input_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "mask not operand was unavailable",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Mask { lanes }) = values.get_slot(*input_slot) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1612,8 +2335,8 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Mask {
                         lanes: lanes.iter().map(|lane| !lane).collect::<Vec<_>>().into(),
                     },
@@ -1621,9 +2344,15 @@ fn execute_instruction(
             }
         }
         SsaInstructionKind::MaskReduce { operator, .. } => {
-            let Some(ExecutionValue::Mask { lanes }) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
-            else {
+            let Some(input_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "mask reduction operand was unavailable",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Mask { lanes }) = values.get_slot(*input_slot) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1637,7 +2366,7 @@ fn execute_instruction(
                 _ => !lanes.iter().any(|lane| *lane),
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+                values.insert_ref(&output.identity, ExecutionValue::Boolean { value });
             }
         }
         SsaInstructionKind::VectorReduce {
@@ -1646,8 +2375,15 @@ fn execute_instruction(
             intent,
             ..
         } => {
-            let Some(ExecutionValue::Vector { values: lanes }) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            let Some(input_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector reduction operand was unavailable",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Vector { values: lanes }) = values.get_slot(*input_slot)
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -1667,12 +2403,19 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), value);
+                values.insert_ref(&output.identity, value);
             }
         }
         SsaInstructionKind::SequenceProject { bound: _, evidence } => {
-            let Some(ExecutionValue::Sequence { values: elements }) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            let Some(input_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "sequence projection operand was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Sequence { values: elements }) = values.get_slot(*input_slot)
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -1681,7 +2424,7 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(index) = ssa_integer_operand(instruction, values, 1) else {
+            let Some(index) = ssa_integer_operand(input_slots, values, 1) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1725,14 +2468,20 @@ fn execute_instruction(
             }
             if let Some(output) = instruction.outputs.first() {
                 if let Some(value) = elements.get(index as usize) {
-                    values.insert(output.identity.clone(), value.clone());
+                    values.insert_ref(&output.identity, value.clone());
                 }
             }
         }
         SsaInstructionKind::Select { operand_type: _ } => {
-            let Some(condition) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
-            else {
+            let Some(condition_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "selection condition was unavailable",
+                );
+                return true;
+            };
+            let Some(condition) = values.get_slot(*condition_slot) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1742,7 +2491,7 @@ fn execute_instruction(
             };
             if let ExecutionValue::Mask { lanes } = condition {
                 let Some(ExecutionValue::Vector { values: true_lanes }) =
-                    values.get(&instruction.inputs[1])
+                    values.get_slot(*input_slots.get(1).unwrap_or(&usize::MAX))
                 else {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
@@ -1753,7 +2502,7 @@ fn execute_instruction(
                 };
                 let Some(ExecutionValue::Vector {
                     values: false_lanes,
-                }) = values.get(&instruction.inputs[2])
+                }) = values.get_slot(*input_slots.get(2).unwrap_or(&usize::MAX))
                 else {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
@@ -1782,8 +2531,8 @@ fn execute_instruction(
                     })
                     .collect::<Vec<_>>();
                 if let Some(output) = instruction.outputs.first() {
-                    values.insert(
-                        output.identity.clone(),
+                    values.insert_ref(
+                        &output.identity,
                         ExecutionValue::Vector {
                             values: selected.into(),
                         },
@@ -1800,13 +2549,9 @@ fn execute_instruction(
                 return true;
             };
             let candidate_index = if *chosen_true { 1 } else { 2 };
-            let Some(selected) = values
-                .get(
-                    instruction
-                        .inputs
-                        .get(candidate_index)
-                        .unwrap_or(&output_sentinel()),
-                )
+            let Some(selected) = input_slots
+                .get(candidate_index)
+                .and_then(|slot| values.get_slot(*slot))
                 .cloned()
             else {
                 result.fail(
@@ -1817,12 +2562,13 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), selected);
+                values.insert_ref(&output.identity, selected);
             }
         }
         SsaInstructionKind::SequenceReplace {
             bound, evidence, ..
         } => {
+            let sequence_started = profile.mark();
             let crate::SequenceBound::Exact(length) = bound else {
                 result.fail(
                     ExecutionStatus::Unsupported,
@@ -1831,8 +2577,15 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(ExecutionValue::Sequence { values: source }) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            let Some(input_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "functional update source was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Sequence { values: source }) = values.get_slot(*input_slot)
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -1842,7 +2595,7 @@ fn execute_instruction(
                 return true;
             };
             let source = source.clone();
-            let Some(index) = ssa_integer_operand(instruction, values, 1) else {
+            let Some(index) = ssa_integer_operand(input_slots, values, 1) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1850,10 +2603,15 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(element) = values
-                .get(instruction.inputs.get(2).unwrap_or(&output_sentinel()))
-                .cloned()
-            else {
+            let Some(element_slot) = input_slots.get(2) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "functional update element was unavailable",
+                );
+                return true;
+            };
+            let Some(element) = values.get_slot(*element_slot).cloned() else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1884,9 +2642,18 @@ fn execute_instruction(
             }
             let mut updated = source.as_ref().clone();
             updated[index as usize] = element;
+            let bytes_cloned = if updated
+                .iter()
+                .all(|value| matches!(value, ExecutionValue::Byte { .. }))
+            {
+                updated.len()
+            } else {
+                0
+            };
+            profile.record_sequence_replace(updated.len(), bytes_cloned, sequence_started);
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Sequence {
                         values: updated.into(),
                     },
@@ -1894,8 +2661,15 @@ fn execute_instruction(
             }
         }
         SsaInstructionKind::BoundCheck { .. } => {
-            let Some(ExecutionValue::Sequence { values: sequence }) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            let Some(input_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "checked-index sequence was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Sequence { values: sequence }) = values.get_slot(*input_slot)
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -1904,7 +2678,7 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(index) = ssa_integer_operand(instruction, values, 1) else {
+            let Some(index) = ssa_integer_operand(input_slots, values, 1) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -1924,8 +2698,8 @@ fn execute_instruction(
                 return true;
             }
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Integer {
                         value: index,
                         ty: IntegerType {
@@ -1942,6 +2716,7 @@ fn execute_instruction(
             evidence,
             ..
         } => {
+            let sequence_started = profile.mark();
             let crate::SequenceBound::Exact(dst_length) = dst_bound else {
                 result.fail(
                     ExecutionStatus::Unsupported,
@@ -1950,9 +2725,17 @@ fn execute_instruction(
                 );
                 return true;
             };
+            let Some(destination_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "span copy destination was unavailable or not a sequence",
+                );
+                return true;
+            };
             let Some(ExecutionValue::Sequence {
                 values: destination,
-            }) = values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            }) = values.get_slot(*destination_slot)
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -1962,8 +2745,15 @@ fn execute_instruction(
                 return true;
             };
             let destination = destination.clone();
-            let Some(ExecutionValue::Sequence { values: source }) =
-                values.get(instruction.inputs.get(2).unwrap_or(&output_sentinel()))
+            let Some(source_slot) = input_slots.get(2) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "span copy source was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Sequence { values: source }) = values.get_slot(*source_slot)
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -1974,9 +2764,9 @@ fn execute_instruction(
             };
             let source = source.clone();
             let (Some(dst_at), Some(src_at), Some(len)) = (
-                ssa_integer_operand(instruction, values, 1),
-                ssa_integer_operand(instruction, values, 3),
-                ssa_integer_operand(instruction, values, 4),
+                ssa_integer_operand(input_slots, values, 1),
+                ssa_integer_operand(input_slots, values, 3),
+                ssa_integer_operand(input_slots, values, 4),
             ) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -2013,9 +2803,22 @@ fn execute_instruction(
             let mut updated = destination.as_ref().clone();
             updated[(dst_at as usize)..((dst_at as usize) + (len as usize))]
                 .clone_from_slice(&source[(src_at as usize)..((src_at as usize) + (len as usize))]);
+            let bytes_cloned = if updated
+                .iter()
+                .all(|value| matches!(value, ExecutionValue::Byte { .. }))
+            {
+                updated.len()
+            } else {
+                0
+            };
+            profile.record_sequence_copy(
+                updated.len() + len as usize,
+                bytes_cloned,
+                sequence_started,
+            );
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Sequence {
                         values: updated.into(),
                     },
@@ -2023,8 +2826,15 @@ fn execute_instruction(
             }
         }
         SsaInstructionKind::SequenceLength { bound: _ } => {
-            let Some(ExecutionValue::Sequence { values: elements }) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            let Some(input_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "length observation operand was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Sequence { values: elements }) = values.get_slot(*input_slot)
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -2034,8 +2844,8 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Integer {
                         value: elements.len() as i128,
                         ty: IntegerType {
@@ -2058,8 +2868,15 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(ExecutionValue::Sequence { values: source }) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            let Some(input_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "view construction source was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Sequence { values: source }) = values.get_slot(*input_slot)
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -2069,8 +2886,8 @@ fn execute_instruction(
                 return true;
             };
             let (Some(start), Some(end)) = (
-                ssa_integer_operand(instruction, values, 1),
-                ssa_integer_operand(instruction, values, 2),
+                ssa_integer_operand(input_slots, values, 1),
+                ssa_integer_operand(input_slots, values, 2),
             ) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -2104,8 +2921,8 @@ fn execute_instruction(
                 return true;
             }
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Sequence {
                         values: source[start as usize..end as usize].to_vec().into(),
                     },
@@ -2116,8 +2933,15 @@ fn execute_instruction(
             source_cap: _,
             new_cap,
         } => {
-            let Some(ExecutionValue::Sequence { values: source }) =
-                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            let Some(input_slot) = input_slots.first() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "view narrowing source was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Sequence { values: source }) = values.get_slot(*input_slot)
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -2138,8 +2962,8 @@ fn execute_instruction(
                 return true;
             }
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Sequence {
                         values: source.clone(),
                     },
@@ -2156,7 +2980,10 @@ fn execute_instruction(
                 let mut payload = Vec::new();
                 let mut available = true;
                 for (index, field) in payload_fields.iter().enumerate() {
-                    match values.get(instruction.inputs.get(index).unwrap_or(&output.identity)) {
+                    match input_slots
+                        .get(index)
+                        .and_then(|slot| values.get_slot(*slot))
+                    {
                         Some(value) => payload.push((field.clone(), value.clone())),
                         None => available = false,
                     }
@@ -2169,8 +2996,8 @@ fn execute_instruction(
                     );
                     return true;
                 }
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Finite {
                         type_identity: type_identity.clone(),
                         variant_identity: variant_identity.clone(),
@@ -2191,10 +3018,7 @@ fn execute_instruction(
                 variant_identity: actual_variant,
                 discriminant: actual_discriminant,
                 payload,
-            }) = instruction
-                .inputs
-                .first()
-                .and_then(|input| values.get(input))
+            }) = input_slots.first().and_then(|slot| values.get_slot(*slot))
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -2217,8 +3041,8 @@ fn execute_instruction(
             match payload.iter().find(|(name, _)| name == field) {
                 Some((_, value)) => {
                     if let Some(output) = instruction.outputs.first() {
-                        let output_identity = output.identity.clone();
-                        values.insert(output_identity, value.clone());
+                        let output_identity = &output.identity;
+                        values.insert_ref(output_identity, value.clone());
                     }
                 }
                 None => {
@@ -2241,10 +3065,7 @@ fn execute_instruction(
                 variant_identity: actual_variant,
                 discriminant: actual_discriminant,
                 ..
-            }) = instruction
-                .inputs
-                .first()
-                .and_then(|input| values.get(input))
+            }) = input_slots.first().and_then(|slot| values.get_slot(*slot))
             else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
@@ -2269,8 +3090,8 @@ fn execute_instruction(
                 return true;
             }
             if let Some(output) = instruction.outputs.first() {
-                values.insert(
-                    output.identity.clone(),
+                values.insert_ref(
+                    &output.identity,
                     ExecutionValue::Boolean {
                         value: actual_variant == variant_identity
                             && actual_discriminant == discriminant,
@@ -2278,13 +3099,17 @@ fn execute_instruction(
                 );
             }
         }
-        SsaInstructionKind::Call { function, .. } => {
-            let Some(callee) = program.functions.iter().find(|candidate| {
-                function_id(
-                    candidate.identity_namespace(&program.module),
-                    &candidate.name,
-                ) == *function
-            }) else {
+        SsaInstructionKind::Call { .. } => {
+            let call_started = profile.mark();
+            let Some(prepared) = prepared else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "SSA call preparation is unavailable",
+                );
+                return true;
+            };
+            let Some(call_target) = call_target else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -2292,10 +3117,27 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let Some(arguments) = instruction
-                .inputs
+            let Some(program_index) = call_target.program_index else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "SSA call target semantic function does not exist",
+                );
+                return true;
+            };
+            let program_callee = &program.functions[program_index];
+            let Some(prepared_callee) = prepared.functions.get(call_target.prepared_index) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "SSA call target preparation is unavailable",
+                );
+                return true;
+            };
+            let callee = &module.functions[prepared_callee.module_index];
+            let Some(arguments) = input_slots
                 .iter()
-                .map(|input| values.get(input).cloned())
+                .map(|input_slot| values.get_slot(*input_slot).cloned())
                 .collect::<Option<Vec<_>>>()
             else {
                 result.fail(
@@ -2305,8 +3147,7 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let remaining = request.step_budget.saturating_sub(result.steps);
-            if remaining == 0 {
+            if request.step_budget.saturating_sub(result.steps) == 0 {
                 result.fail(
                     ExecutionStatus::BudgetExhausted,
                     instruction_identity(instruction),
@@ -2314,64 +3155,39 @@ fn execute_instruction(
                 );
                 return true;
             }
-            let nested_request = crate::ExecutionRequest {
-                schema_version: request.schema_version.clone(),
-                target: crate::ExecutionTarget {
-                    module: callee.identity_namespace(&program.module).to_owned(),
-                    function: callee.name.clone(),
-                },
-                arguments,
-                // Nested callees are specialization-rewritten concrete
-                // targets; a nested call still naming a generic template
-                // fails closed in entry resolution below.
-                type_arguments: Vec::new(),
-                step_budget: remaining,
-                policy: request.policy.clone(),
-                // Authority flows explicitly to callees within one
-                // execution: nested calls inherit the request's grants,
-                // still bounded and still matched by capability name.
-                host_grants: request.host_grants.clone(),
-                // Depth fuel flows the same way (RFC 0047).
-                call_depth_budget: request.call_depth_budget,
-            };
-            // Re-share the caller-resolved identity (cheap clone) so the
-            // nested call never re-fingerprints the module. Resolved here,
-            // on the Call path only, to keep every other instruction free
-            // of cache bookkeeping.
-            let owned_nested_cache = resolve_execution_cache(program, module, cached_identity);
-            let nested_cache: Option<(&SemanticId, &String, &String)> = owned_nested_cache
-                .as_ref()
-                .map(|(identity, program_fingerprint, fingerprint)| {
-                    (identity, program_fingerprint, fingerprint)
-                });
-            let nested = execute_ssa_module_with_validation(
+            if profile.enabled {
+                profile.nested_calls += 1;
+            }
+            RuntimeProfile::add_elapsed(&mut profile.nested_call_setup_ns, call_started);
+            let nested_execution_started = profile.mark();
+            let nested = execute_prepared_function(
                 program,
                 module,
-                &nested_request,
-                false,
-                block_cache,
-                nested_cache,
-                None,
+                prepared,
+                callee,
+                prepared_callee,
+                request,
+                FrameTarget {
+                    module: program_callee.identity_namespace(&program.module),
+                    function: &program_callee.name,
+                },
+                Some(arguments),
+                result,
                 call_depth + 1,
+                trace_limit,
                 provider_runtime,
+                profile,
             );
-            let trace_offset = result.steps;
-            result.steps = result.steps.saturating_add(nested.steps);
-            result.effects.extend(nested.effects.clone());
-            for mut entry in nested.trace.clone() {
-                entry.step = entry.step.saturating_add(trace_offset);
-                if result.trace.len() < 256 {
-                    result.trace.push(entry);
-                } else {
-                    result.trace_truncated = true;
-                }
-            }
-            if nested.status != ExecutionStatus::Returned {
-                result.status = nested.status;
-                result.failure = nested.failure;
+            RuntimeProfile::add_elapsed(
+                &mut profile.nested_call_execution_ns,
+                nested_execution_started,
+            );
+            let merge_started = profile.mark();
+            RuntimeProfile::add_elapsed(&mut profile.nested_call_merge_ns, merge_started);
+            let Some(returned_values) = nested else {
                 return true;
-            }
-            let Some(returned) = nested.returned.first().cloned() else {
+            };
+            let Some(returned) = returned_values.first().cloned() else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
@@ -2380,7 +3196,7 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), returned);
+                values.insert_ref(&output.identity, returned);
             }
         }
         SsaInstructionKind::Effect => {
@@ -2389,7 +3205,7 @@ fn execute_instruction(
                 return true;
             }
             for effect in &instruction.effects {
-                let declared = declared_effect(program, &request.target.function, effect);
+                let declared = declared_effect(program, frame_target.function, effect);
                 result.effects.push(ExecutionEffectEvent {
                     operation: instruction_identity(instruction).unwrap_or_else(|| effect.clone()),
                     kind: declared
@@ -2524,7 +3340,7 @@ fn execute_instruction(
                         // host-call chain below and let the `blob_read`
                         // default overwrite this value.
                         if let Some(output) = instruction.outputs.first() {
-                            values.insert(output.identity.clone(), value);
+                            values.insert_ref(&output.identity, value);
                         }
                         result.effects.push(ExecutionEffectEvent {
                             operation: instruction_identity(instruction).unwrap_or_else(|| {
@@ -2611,7 +3427,7 @@ fn execute_instruction(
                 match crate::fs_resource::fs_mutate(operation, grant, &ints, &views, !intent_only) {
                     Ok((value, effect)) => {
                         if let Some(output) = instruction.outputs.first() {
-                            values.insert(output.identity.clone(), value);
+                            values.insert_ref(&output.identity, value);
                         }
                         result.effects.push(ExecutionEffectEvent {
                             operation: instruction_identity(instruction).unwrap_or_else(|| {
@@ -2733,7 +3549,7 @@ fn execute_instruction(
                     );
                     return true;
                 }
-                values.insert(output.identity.clone(), invocation.value);
+                values.insert_ref(&output.identity, invocation.value);
                 result.effects.push(ExecutionEffectEvent {
                     operation: instruction_identity(instruction).unwrap_or_else(|| {
                         crate::identity::SemanticId(format!("host-call:{capability}"))
@@ -2833,7 +3649,7 @@ fn execute_instruction(
                 );
                 match read {
                     Ok((value, effect)) => {
-                        values.insert(output.identity.clone(), value);
+                        values.insert_ref(&output.identity, value);
                         result.effects.push(ExecutionEffectEvent {
                             operation: instruction_identity(instruction).unwrap_or_else(|| {
                                 crate::identity::SemanticId(format!("host-call:{capability}"))
@@ -2934,7 +3750,7 @@ fn execute_instruction(
                     program, value_type, &value, grant, &path, &schema, !observing,
                 ) {
                     Ok((returned, effect)) => {
-                        values.insert(output.identity.clone(), returned);
+                        values.insert_ref(&output.identity, returned);
                         result.effects.push(ExecutionEffectEvent {
                             operation: instruction_identity(instruction).unwrap_or_else(|| {
                                 crate::identity::SemanticId(format!("host-call:{capability}"))
@@ -3049,7 +3865,7 @@ fn execute_instruction(
                     }
                 };
                 let program_name = process_request.program.clone();
-                values.insert(output.identity.clone(), returned);
+                values.insert_ref(&output.identity, returned);
                 result.effects.push(ExecutionEffectEvent {
                     operation: instruction_identity(instruction).unwrap_or_else(|| {
                         crate::identity::SemanticId(format!("host-call:{capability}"))
@@ -3103,8 +3919,8 @@ fn execute_instruction(
                         }
                     };
                 if let Some(output) = instruction.outputs.first() {
-                    values.insert(
-                        output.identity.clone(),
+                    values.insert_ref(
+                        &output.identity,
                         ExecutionValue::Sequence {
                             values: digest
                                 .iter()
@@ -3135,8 +3951,8 @@ fn execute_instruction(
                     return true;
                 };
                 if let Some(output) = instruction.outputs.first() {
-                    values.insert(
-                        output.identity.clone(),
+                    values.insert_ref(
+                        &output.identity,
                         ExecutionValue::Integer {
                             value: millis as i128,
                             ty: IntegerType {
@@ -3170,8 +3986,8 @@ fn execute_instruction(
                 };
                 let digest = crate::execution::sha256_digest_bytes(&view);
                 if let Some(output) = instruction.outputs.first() {
-                    values.insert(
-                        output.identity.clone(),
+                    values.insert_ref(
+                        &output.identity,
                         ExecutionValue::Sequence {
                             values: digest
                                 .iter()
@@ -3220,10 +4036,7 @@ fn execute_instruction(
                     return true;
                 };
                 if let Some(output) = instruction.outputs.first() {
-                    values.insert(
-                        output.identity.clone(),
-                        ExecutionValue::Boolean { value: valid },
-                    );
+                    values.insert_ref(&output.identity, ExecutionValue::Boolean { value: valid });
                 }
                 result.effects.push(ExecutionEffectEvent {
                     operation: instruction_identity(instruction).unwrap_or_else(|| {
@@ -3268,8 +4081,8 @@ fn execute_instruction(
                     }
                 };
                 if let Some(output) = instruction.outputs.first() {
-                    values.insert(
-                        output.identity.clone(),
+                    values.insert_ref(
+                        &output.identity,
                         ExecutionValue::Integer {
                             value: appended as i128,
                             ty: IntegerType {
@@ -3303,8 +4116,8 @@ fn execute_instruction(
                             value: *byte as i128,
                         })
                         .collect();
-                    values.insert(
-                        output.identity.clone(),
+                    values.insert_ref(
+                        &output.identity,
                         ExecutionValue::Sequence {
                             values: delivered.into(),
                         },
@@ -3367,7 +4180,7 @@ fn declared_effect(
 /// consumers keep matching.
 fn abi_mismatch_reason(
     program: &Program,
-    request: &crate::ExecutionRequest,
+    frame_target: FrameTarget<'_>,
     function: &SsaFunction,
     index: usize,
     expected: &BodyType,
@@ -3375,8 +4188,8 @@ fn abi_mismatch_reason(
 ) -> String {
     let mut reason = format!(
         "argument does not match SSA input type: function {}::{} (ssa function {}), argument index {index}, expected {} ({}) but received {}",
-        request.target.module,
-        request.target.function,
+        frame_target.module,
+        frame_target.function,
         function.identity.0,
         expected.semantic_name(),
         expected.canonical_identity(),
@@ -3404,13 +4217,16 @@ fn aggregate_shape_note(
     crate::value_contract::first_aggregate_mismatch(program, value, ty, path)
 }
 
-fn initialize_inputs(
+fn initialize_inputs<'a>(
     program: &Program,
     function: &SsaFunction,
+    input_types: &[BodyType],
+    value_slots: &'a HashMap<SemanticId, usize>,
     request: &crate::ExecutionRequest,
+    frame_target: FrameTarget<'_>,
     result: &mut SsaExecutionResult,
     owned_arguments: Option<Vec<ExecutionValue>>,
-) -> Option<BTreeMap<SemanticId, ExecutionValue>> {
+) -> Option<ValueMap<'a>> {
     let argument_count = owned_arguments
         .as_ref()
         .map_or(request.arguments.len(), Vec::len);
@@ -3424,15 +4240,16 @@ fn initialize_inputs(
     }
     let mut owned_arguments =
         owned_arguments.map(|arguments| arguments.into_iter().map(Some).collect::<Vec<_>>());
-    let mut values = BTreeMap::new();
+    let mut values = ValueMap::new(value_slots);
     for (index, input) in function.inputs.iter().enumerate() {
-        let ty = ssa_input_type(program, &input.ty);
+        let ty = input_types.get(index)?;
         if owned_arguments.is_some() {
             let argument = owned_arguments
                 .as_ref()
                 .and_then(|arguments| arguments.get(index).and_then(Option::as_ref))?;
             if !value_matches_type(program, argument, &ty) {
-                let reason = abi_mismatch_reason(program, request, function, index, &ty, argument);
+                let reason =
+                    abi_mismatch_reason(program, frame_target, function, index, &ty, argument);
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     Some(input.identity.clone()),
@@ -3464,7 +4281,8 @@ fn initialize_inputs(
         } else {
             let argument = request.arguments.get(index)?;
             if !value_matches_type(program, argument, &ty) {
-                let reason = abi_mismatch_reason(program, request, function, index, &ty, argument);
+                let reason =
+                    abi_mismatch_reason(program, frame_target, function, index, &ty, argument);
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     Some(input.identity.clone()),
@@ -3504,7 +4322,7 @@ fn initialize_inputs(
             let argument = request.arguments.get(index)?;
             normalize_value(program, argument, &ty)?
         };
-        values.insert(input.identity.clone(), normalized);
+        values.insert_ref(&input.identity, normalized);
     }
     Some(values)
 }
@@ -3535,10 +4353,10 @@ fn normalize_value_owned(
 
 fn assign_block_arguments(
     function: &SsaFunction,
-    block_indices: &BTreeMap<SemanticId, usize>,
+    block_indices: &BlockIndex,
     target: &SemanticId,
     arguments: &[SemanticId],
-    values: &mut BTreeMap<SemanticId, ExecutionValue>,
+    values: &mut ValueMap,
 ) -> bool {
     let Some(block_index) = block_indices.get(target).copied() else {
         return false;
@@ -3557,99 +4375,81 @@ fn assign_block_arguments(
         return false;
     };
     for (parameter, value) in block.parameters.iter().zip(incoming) {
-        values.insert(parameter.identity.clone(), value);
+        values.insert_ref(&parameter.identity, value);
     }
     true
 }
 
-fn boolean_operands(
-    instruction: &SsaInstruction,
-    values: &BTreeMap<SemanticId, ExecutionValue>,
-) -> Option<(bool, bool)> {
-    let [left, right] = instruction.inputs.as_slice() else {
+fn boolean_operands(input_slots: &[usize], values: &ValueMap) -> Option<(bool, bool)> {
+    let [left, right] = input_slots else {
         return None;
     };
-    let Some(ExecutionValue::Boolean { value: left }) = values.get(left) else {
+    let Some(ExecutionValue::Boolean { value: left }) = values.get_slot(*left) else {
         return None;
     };
-    let Some(ExecutionValue::Boolean { value: right }) = values.get(right) else {
+    let Some(ExecutionValue::Boolean { value: right }) = values.get_slot(*right) else {
         return None;
     };
     Some((*left, *right))
 }
 
-fn float_operand(
-    instruction: &SsaInstruction,
-    values: &BTreeMap<SemanticId, ExecutionValue>,
-) -> Option<f64> {
-    let [input] = instruction.inputs.as_slice() else {
+fn float_operand(input_slots: &[usize], values: &ValueMap) -> Option<f64> {
+    let [input] = input_slots else {
         return None;
     };
-    let ExecutionValue::Float { bits, .. } = values.get(input)? else {
+    let ExecutionValue::Float { bits, .. } = values.get_slot(*input)? else {
         return None;
     };
     Some(f64::from_bits(*bits))
 }
 
-fn float_operands(
-    instruction: &SsaInstruction,
-    values: &BTreeMap<SemanticId, ExecutionValue>,
-) -> Option<(f64, f64)> {
-    let [left, right] = instruction.inputs.as_slice() else {
+fn float_operands(input_slots: &[usize], values: &ValueMap) -> Option<(f64, f64)> {
+    let [left, right] = input_slots else {
         return None;
     };
-    let ExecutionValue::Float { bits: left, .. } = values.get(left)? else {
+    let ExecutionValue::Float { bits: left, .. } = values.get_slot(*left)? else {
         return None;
     };
-    let ExecutionValue::Float { bits: right, .. } = values.get(right)? else {
+    let ExecutionValue::Float { bits: right, .. } = values.get_slot(*right)? else {
         return None;
     };
     Some((f64::from_bits(*left), f64::from_bits(*right)))
 }
 
-fn integer_operands(
-    instruction: &SsaInstruction,
-    values: &BTreeMap<SemanticId, ExecutionValue>,
-) -> Option<(i128, i128)> {
-    let [left, right] = instruction.inputs.as_slice() else {
+fn integer_operands(input_slots: &[usize], values: &ValueMap) -> Option<(i128, i128)> {
+    let [left, right] = input_slots else {
         return None;
     };
-    let ExecutionValue::Integer { value: left, .. } = values.get(left)? else {
+    let ExecutionValue::Integer { value: left, .. } = values.get_slot(*left)? else {
         return None;
     };
-    let ExecutionValue::Integer { value: right, .. } = values.get(right)? else {
+    let ExecutionValue::Integer { value: right, .. } = values.get_slot(*right)? else {
         return None;
     };
     Some((*left, *right))
 }
 
-fn byte_operands(
-    instruction: &SsaInstruction,
-    values: &BTreeMap<SemanticId, ExecutionValue>,
-) -> Option<(i128, i128)> {
-    let [left, right] = instruction.inputs.as_slice() else {
+fn byte_operands(input_slots: &[usize], values: &ValueMap) -> Option<(i128, i128)> {
+    let [left, right] = input_slots else {
         return None;
     };
-    let ExecutionValue::Byte { value: left } = values.get(left)? else {
+    let ExecutionValue::Byte { value: left } = values.get_slot(*left)? else {
         return None;
     };
-    let ExecutionValue::Byte { value: right } = values.get(right)? else {
+    let ExecutionValue::Byte { value: right } = values.get_slot(*right)? else {
         return None;
     };
     Some((*left, *right))
 }
 
-fn byte_shift_operands(
-    instruction: &SsaInstruction,
-    values: &BTreeMap<SemanticId, ExecutionValue>,
-) -> Option<(i128, i128)> {
-    let [left, right] = instruction.inputs.as_slice() else {
+fn byte_shift_operands(input_slots: &[usize], values: &ValueMap) -> Option<(i128, i128)> {
+    let [left, right] = input_slots else {
         return None;
     };
-    let ExecutionValue::Byte { value: left } = values.get(left)? else {
+    let ExecutionValue::Byte { value: left } = values.get_slot(*left)? else {
         return None;
     };
-    let ExecutionValue::Integer { value: right, .. } = values.get(right)? else {
+    let ExecutionValue::Integer { value: right, .. } = values.get_slot(*right)? else {
         return None;
     };
     if *right < 0 {
@@ -3658,47 +4458,37 @@ fn byte_shift_operands(
     Some((*left, *right))
 }
 
-fn ssa_integer_operand(
-    instruction: &SsaInstruction,
-    values: &BTreeMap<SemanticId, ExecutionValue>,
-    index: usize,
-) -> Option<i128> {
-    match values.get(instruction.inputs.get(index)?)? {
+fn ssa_integer_operand(input_slots: &[usize], values: &ValueMap, index: usize) -> Option<i128> {
+    match values.get_slot(*input_slots.get(index)?)? {
         ExecutionValue::Integer { value, .. } => Some(*value),
         _ => None,
     }
 }
 
 fn ssa_vector_operands<'a>(
-    instruction: &SsaInstruction,
-    values: &'a BTreeMap<SemanticId, ExecutionValue>,
+    input_slots: &[usize],
+    values: &'a ValueMap,
 ) -> Option<(&'a [ExecutionValue], &'a [ExecutionValue])> {
-    let ExecutionValue::Vector { values: left } = values.get(instruction.inputs.first()?)? else {
+    let ExecutionValue::Vector { values: left } = values.get_slot(*input_slots.first()?)? else {
         return None;
     };
-    let ExecutionValue::Vector { values: right } = values.get(instruction.inputs.get(1)?)? else {
+    let ExecutionValue::Vector { values: right } = values.get_slot(*input_slots.get(1)?)? else {
         return None;
     };
     (left.len() == right.len()).then_some((left, right))
 }
 
 fn ssa_mask_operands<'a>(
-    instruction: &SsaInstruction,
-    values: &'a BTreeMap<SemanticId, ExecutionValue>,
+    input_slots: &[usize],
+    values: &'a ValueMap,
 ) -> Option<(&'a [bool], &'a [bool])> {
-    let ExecutionValue::Mask { lanes: left } = values.get(instruction.inputs.first()?)? else {
+    let ExecutionValue::Mask { lanes: left } = values.get_slot(*input_slots.first()?)? else {
         return None;
     };
-    let ExecutionValue::Mask { lanes: right } = values.get(instruction.inputs.get(1)?)? else {
+    let ExecutionValue::Mask { lanes: right } = values.get_slot(*input_slots.get(1)?)? else {
         return None;
     };
     (left.len() == right.len()).then_some((left, right))
-}
-
-/// A stand-in identity for operand lookups when an instruction is malformed;
-/// the lookup misses and the caller reports InvalidRequest.
-fn output_sentinel() -> SemanticId {
-    SemanticId("mncs:ssa-execution:sentinel".to_owned())
 }
 
 fn constant_value(value: i128, ty: &BodyType) -> Option<ExecutionValue> {
@@ -4240,8 +5030,8 @@ fn instruction_identity(instruction: &SsaInstruction) -> Option<SemanticId> {
         .or_else(|| Some(instruction.identity.clone()))
 }
 
-fn trace_block(result: &mut SsaExecutionResult, block: &SsaBlock, event: &str) {
-    if result.trace.len() >= MAX_SSA_TRACE_ENTRIES {
+fn trace_block(result: &mut SsaExecutionResult, block: &SsaBlock, event: &str, trace_limit: usize) {
+    if result.trace.len() >= trace_limit {
         result.trace_truncated = true;
         return;
     }
@@ -4263,8 +5053,9 @@ fn trace_instruction(
     block: &SsaBlock,
     instruction: &SsaInstruction,
     event: &str,
+    trace_limit: usize,
 ) {
-    if result.trace.len() >= MAX_SSA_TRACE_ENTRIES {
+    if result.trace.len() >= trace_limit {
         result.trace_truncated = true;
         return;
     }

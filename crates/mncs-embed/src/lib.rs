@@ -18,6 +18,7 @@
 //! (including Python via ctypes): JSON in, JSON out, no Rust layout.
 
 use std::collections::BTreeSet;
+use std::time::Instant;
 
 use mncs_codegen::OwnedExecutionSession;
 use mncs_model::{
@@ -93,12 +94,16 @@ impl Artifact {
                 "backend artifact identity does not validate; refusing",
             ));
         }
-        artifact.normalize_legacy_contracts();
-        if !artifact.identity_is_valid() {
-            return Err(EmbedError::new(
-                "invalid_identity",
-                "backend artifact identity does not validate after normalization; refusing",
-            ));
+        if artifact.schema_version == mncs_model::BACKEND_ARTIFACT_SCHEMA_VERSION_PRE_TYPED
+            || artifact.schema_version == mncs_model::BACKEND_ARTIFACT_SCHEMA_VERSION_PRE_INTERFACE
+        {
+            artifact.normalize_legacy_contracts();
+            if !artifact.identity_is_valid() {
+                return Err(EmbedError::new(
+                    "invalid_identity",
+                    "backend artifact identity does not validate after normalization; refusing",
+                ));
+            }
         }
         Ok(Self { inner: artifact })
     }
@@ -365,7 +370,11 @@ pub struct Session {
 
 impl Session {
     pub fn open(artifact: Artifact) -> Result<Self, EmbedError> {
-        let inner = OwnedExecutionSession::new(artifact.inner)
+        // `Artifact::from_json`/`from_source` have already crossed the
+        // artifact identity admission boundary. Avoid hashing the complete
+        // artifact a second time while retaining the validating constructor
+        // for callers that have not crossed that boundary.
+        let inner = OwnedExecutionSession::new_admitted(artifact.inner)
             .map_err(|message| EmbedError::new("invalid_artifact", message))?;
         Ok(Self { inner })
     }
@@ -413,6 +422,8 @@ impl Session {
         options: &CallOptions,
         provider_runtime: Option<&dyn mncs_model::ProviderRuntime>,
     ) -> CallOutput {
+        let profile = std::env::var_os("MNCS_RUNTIME_PROFILE").is_some();
+        let request_started = Instant::now();
         let step_budget = if options.step_budget == 0 {
             8_192
         } else {
@@ -441,10 +452,14 @@ impl Session {
             request = request.with_host_grants(&grants);
             request.policy.effects = EffectExecutionPolicy::Realize;
         }
+        let request_build_ns = request_started.elapsed().as_nanos();
+        let execution_started = Instant::now();
         let observation = provider_runtime.map_or_else(
             || self.inner.execute(&request),
             |provider_runtime| self.inner.execute_with_provider(&request, provider_runtime),
         );
+        let execution_ns = execution_started.elapsed().as_nanos();
+        let result_started = Instant::now();
         let status = match observation.status {
             ExecutionStatus::Returned => "returned",
             ExecutionStatus::InvalidRequest => "invalid_request",
@@ -453,7 +468,7 @@ impl Session {
             ExecutionStatus::BudgetExhausted => "budget_exhausted",
         }
         .to_owned();
-        CallOutput {
+        let output = CallOutput {
             status,
             returned: observation.returned,
             steps: observation.steps,
@@ -463,7 +478,16 @@ impl Session {
             artifact_sha256: self.digest().to_owned(),
             backend: self.backend_name().to_owned(),
             reused_session: self.reused(),
+        };
+        if profile {
+            eprintln!(
+                "mncs-embed-call-profile request_build_ns={} execution_ns={} result_build_ns={}",
+                request_build_ns,
+                execution_ns,
+                result_started.elapsed().as_nanos()
+            );
         }
+        output
     }
 
     /// Execute one named entrypoint with a generic admitted provider
@@ -672,9 +696,29 @@ pub unsafe extern "C" fn mncs_session_open(bytes: *const c_uchar, len: usize) ->
         return ptr::null_mut();
     }
     let raw = unsafe { slice::from_raw_parts(bytes, len) };
-    let opened = Artifact::from_json(raw)
-        .map_err(|error| error.to_string())
-        .and_then(|artifact| Session::open(artifact).map_err(|error| error.to_string()));
+    let profile = std::env::var_os("MNCS_RUNTIME_PROFILE").is_some();
+    let decode_started = Instant::now();
+    let artifact = match Artifact::from_json(raw) {
+        Ok(artifact) => artifact,
+        Err(error) => {
+            stash_error(error.to_string());
+            return ptr::null_mut();
+        }
+    };
+    if profile {
+        eprintln!(
+            "mncs-embed-profile phase=artifact_admission elapsed_ns={}",
+            decode_started.elapsed().as_nanos()
+        );
+    }
+    let open_started = Instant::now();
+    let opened = Session::open(artifact).map_err(|error| error.to_string());
+    if profile {
+        eprintln!(
+            "mncs-embed-profile phase=session_open elapsed_ns={}",
+            open_started.elapsed().as_nanos()
+        );
+    }
     match opened {
         Ok(session) => Box::into_raw(Box::new(session)),
         Err(message) => {
@@ -813,7 +857,15 @@ pub unsafe extern "C" fn mncs_session_call_batch(
         return ptr::null_mut();
     }
     let session = unsafe { &*handle };
+    let profile = std::env::var_os("MNCS_RUNTIME_PROFILE").is_some();
+    let abi_copy_started = Instant::now();
     let text = read_c_str(requests_json).unwrap_or_else(|| "[]".to_owned());
+    if profile {
+        eprintln!(
+            "mncs-embed-profile phase=request_abi_copy elapsed_ns={}",
+            abi_copy_started.elapsed().as_nanos()
+        );
+    }
     #[derive(serde::Deserialize)]
     struct BatchRequest {
         module: String,
@@ -827,6 +879,7 @@ pub unsafe extern "C" fn mncs_session_call_batch(
         #[serde(default)]
         type_arguments: Vec<mncs_model::ExecutionTypeArgument>,
     }
+    let request_decode_started = Instant::now();
     let requests: Vec<BatchRequest> = match serde_json::from_str(&text) {
         Ok(requests) => requests,
         Err(error) => {
@@ -834,6 +887,13 @@ pub unsafe extern "C" fn mncs_session_call_batch(
             return ptr::null_mut();
         }
     };
+    if profile {
+        eprintln!(
+            "mncs-embed-profile phase=request_json_decode elapsed_ns={}",
+            request_decode_started.elapsed().as_nanos()
+        );
+    }
+    let execution_started = Instant::now();
     let outputs: Vec<CallOutput> = requests
         .into_iter()
         .map(|request| {
@@ -846,8 +906,23 @@ pub unsafe extern "C" fn mncs_session_call_batch(
             session.call(&request.module, &request.function, request.args, &options)
         })
         .collect();
+    if profile {
+        eprintln!(
+            "mncs-embed-profile phase=request_validation_and_execution elapsed_ns={}",
+            execution_started.elapsed().as_nanos()
+        );
+    }
+    let response_encode_started = Instant::now();
     match CallResponse::of(&outputs) {
-        Ok(response) => response,
+        Ok(response) => {
+            if profile {
+                eprintln!(
+                    "mncs-embed-profile phase=result_json_encode elapsed_ns={}",
+                    response_encode_started.elapsed().as_nanos()
+                );
+            }
+            response
+        }
         Err(message) => {
             stash_error(message);
             ptr::null_mut()
