@@ -18,7 +18,8 @@ mod support;
 mod wasm;
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
 use std::time::Instant;
 
 use mncs_model::{
@@ -1821,7 +1822,7 @@ enum PreparedStatefulBackend<'a> {
     },
     C11(c11::C11StatefulSession<'a>),
     Llvm(llvm::LlvmStatefulSession<'a>),
-    Cranelift(Box<cranelift_backend::CraneliftStatefulSession<'a>>),
+    Cranelift(Box<cranelift_backend::CraneliftStatefulSession>),
     OneShot,
 }
 
@@ -1907,7 +1908,7 @@ impl<'a> BackendStatefulSession<'a> {
                 },
             )
         } else if identity_valid && artifact.backend.name == CRANELIFT_BACKEND_NAME {
-            cranelift_backend::prepare_stateful_session(artifact).map_or(
+            cranelift_backend::prepare_stateful_session(Arc::new(artifact.clone())).map_or(
                 PreparedStatefulBackend::OneShot,
                 |session| {
                     mncs_model::record_counter("backend_session");
@@ -2118,7 +2119,7 @@ enum PreparedStatelessBackend<'a> {
     /// handles) and never cross threads.
     C11(std::cell::RefCell<c11::C11StatefulSession<'a>>),
     Llvm(std::cell::RefCell<llvm::LlvmStatefulSession<'a>>),
-    Cranelift(Box<std::cell::RefCell<cranelift_backend::CraneliftStatefulSession<'a>>>),
+    Cranelift(Box<std::cell::RefCell<cranelift_backend::CraneliftStatefulSession>>),
     OneShot,
 }
 
@@ -2198,7 +2199,7 @@ impl<'a> BackendExecutionSession<'a> {
             // artifact, then millisecond calls. Where host policy denies
             // executable memory, preparation fails and each case falls
             // back to the one-shot path (which tries its own AOT route).
-            cranelift_backend::prepare_stateful_session(artifact).map_or(
+            cranelift_backend::prepare_stateful_session(Arc::new(artifact.clone())).map_or(
                 PreparedStatelessBackend::OneShot,
                 |session| {
                     mncs_model::record_counter("backend_session");
@@ -2259,10 +2260,87 @@ impl<'a> BackendExecutionSession<'a> {
 /// exact artifact identity plus digest it executed — no recompilation,
 /// no substitution, no silent fallback. Backends without a prepared path
 /// execute one-shot per call, exactly like the borrowing session.
+enum CraneliftWorkerCommand {
+    Execute(ExecutionRequest, mpsc::SyncSender<BackendExecutionResult>),
+    Shutdown,
+}
+
+/// Keep the non-`Send` Cranelift JIT on one dedicated worker thread while the
+/// embedding session remains safe to retain in the provider registry. The
+/// worker is a transport detail; it executes the same language-owned request
+/// through the retained Cranelift backend and never changes semantic
+/// authority or artifact identity.
+struct CraneliftWorker {
+    sender: mpsc::SyncSender<CraneliftWorkerCommand>,
+    join: Mutex<Option<thread::JoinHandle<()>>>,
+}
+
+impl CraneliftWorker {
+    fn new(artifact: Arc<BackendArtifact>) -> Result<Self, String> {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+        let join = thread::Builder::new()
+            .name("mncs-cranelift-session".to_owned())
+            .spawn(move || {
+                let mut session = match cranelift_backend::prepare_stateful_session(artifact) {
+                    Ok(session) => session,
+                    Err(error) => {
+                        let _ = ready_sender.send(Err(error));
+                        return;
+                    }
+                };
+                let _ = ready_sender.send(Ok(()));
+                while let Ok(command) = receiver.recv() {
+                    match command {
+                        CraneliftWorkerCommand::Execute(request, response) => {
+                            let _ = response.send(session.execute(&request));
+                        }
+                        CraneliftWorkerCommand::Shutdown => break,
+                    }
+                }
+            })
+            .map_err(|error| format!("unable to start Cranelift session worker: {error}"))?;
+        match ready_receiver.recv() {
+            Ok(Ok(())) => Ok(Self {
+                sender,
+                join: Mutex::new(Some(join)),
+            }),
+            Ok(Err(reason)) => {
+                let _ = join.join();
+                Err(reason)
+            }
+            Err(error) => {
+                let _ = join.join();
+                Err(format!(
+                    "Cranelift session worker did not initialize: {error}"
+                ))
+            }
+        }
+    }
+
+    fn execute(&self, request: &ExecutionRequest) -> Option<BackendExecutionResult> {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        self.sender
+            .send(CraneliftWorkerCommand::Execute(request.clone(), sender))
+            .ok()?;
+        receiver.recv().ok()
+    }
+}
+
+impl Drop for CraneliftWorker {
+    fn drop(&mut self) {
+        let _ = self.sender.send(CraneliftWorkerCommand::Shutdown);
+        if let Some(join) = self.join.get_mut().ok().and_then(Option::take) {
+            let _ = join.join();
+        }
+    }
+}
+
 pub struct OwnedExecutionSession {
     artifact: BackendArtifact,
     research: Option<(Box<ResearchBytecodePayload>, Box<SsaExecutionSession>)>,
     wasm: Option<crate::wasm::WasmModule>,
+    cranelift: Option<CraneliftWorker>,
 }
 
 impl OwnedExecutionSession {
@@ -2273,6 +2351,14 @@ impl OwnedExecutionSession {
         if !artifact.identity_is_valid() {
             return Err("backend artifact identity is invalid".to_owned());
         }
+        Self::new_admitted(artifact)
+    }
+
+    /// Prepare an artifact whose identity has already been admitted by the
+    /// language-owned embedding boundary. This keeps that boundary's exact
+    /// validation while avoiding a second full bytes/content identity hash on
+    /// every retained session open.
+    pub fn new_admitted(artifact: BackendArtifact) -> Result<Self, String> {
         let research = if artifact.backend == research_bytecode_backend()
             && artifact.artifact_kind == RESEARCH_BYTECODE_ARTIFACT_KIND
         {
@@ -2320,16 +2406,38 @@ impl OwnedExecutionSession {
         } else {
             None
         };
+        let cranelift = if research.is_none()
+            && wasm.is_none()
+            && artifact.backend.name == CRANELIFT_BACKEND_NAME
+            && artifact.artifact_kind == CRANELIFT_ARTIFACT_KIND
+        {
+            match CraneliftWorker::new(Arc::new(artifact.clone())) {
+                Ok(worker) => {
+                    mncs_model::record_counter("backend_session");
+                    mncs_model::record_counter("reused_stage");
+                    Some(worker)
+                }
+                Err(reason) => {
+                    if std::env::var_os("MNCS_RUNTIME_PROFILE").is_some() {
+                        eprintln!("mncs-backend-profile backend=mncs-cranelift prepared=false reason={reason}");
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
         Ok(Self {
             artifact,
             research,
             wasm,
+            cranelift,
         })
     }
 
     /// True when artifact-level preparation was reused (not per-call one-shot).
     pub fn reused(&self) -> bool {
-        self.research.is_some() || self.wasm.is_some()
+        self.research.is_some() || self.wasm.is_some() || self.cranelift.is_some()
     }
 
     pub fn artifact(&self) -> &BackendArtifact {
@@ -2350,6 +2458,13 @@ impl OwnedExecutionSession {
         if let Some(module) = self.wasm.as_ref() {
             mncs_model::record_counter("reused_execution");
             return execute_portable_wasm_decoded(&self.artifact, module, request);
+        }
+        if let Some(session) = self.cranelift.as_ref() {
+            mncs_model::record_counter("reused_execution");
+            if let Some(result) = session.execute(request) {
+                return result;
+            }
+            return execute_backend(&self.artifact, request);
         }
         execute_backend(&self.artifact, request)
     }

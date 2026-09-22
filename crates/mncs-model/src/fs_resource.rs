@@ -29,7 +29,7 @@
 //! source polls between bounded quiet windows. True event delivery stays
 //! future work and is recorded as such.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use crate::canonical::sha256_hex;
@@ -1176,13 +1176,29 @@ pub fn fs_mutate(
 /// ill-formed, never a default. Generic over the value-map key so the
 /// body executor (`String`) and the SSA executor (`SemanticId`) share
 /// one extraction rule.
-pub fn host_u64_by<K: Ord>(
+pub trait ExecutionValueLookup<K> {
+    fn execution_value(&self, key: &K) -> Option<&ExecutionValue>;
+}
+
+impl<K: Ord> ExecutionValueLookup<K> for BTreeMap<K, ExecutionValue> {
+    fn execution_value(&self, key: &K) -> Option<&ExecutionValue> {
+        self.get(key)
+    }
+}
+
+impl<K: Eq + std::hash::Hash> ExecutionValueLookup<K> for HashMap<K, ExecutionValue> {
+    fn execution_value(&self, key: &K) -> Option<&ExecutionValue> {
+        self.get(key)
+    }
+}
+
+pub fn host_u64_by<K, M: ExecutionValueLookup<K>>(
     operands: &[K],
-    values: &std::collections::BTreeMap<K, ExecutionValue>,
+    values: &M,
     position: usize,
 ) -> Option<u64> {
     let binding = operands.get(position)?;
-    match values.get(binding)? {
+    match values.execution_value(binding)? {
         ExecutionValue::Integer { value, ty } if ty.bits == 64 && !ty.signed => {
             u64::try_from(*value).ok()
         }

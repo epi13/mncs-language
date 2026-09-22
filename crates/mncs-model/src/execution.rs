@@ -6,7 +6,7 @@
 //! resource-bounded cases.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
 };
 
@@ -678,7 +678,7 @@ pub(crate) fn structured_view_operand(
 /// the byte-view validation but keep their native operand containers.
 pub(crate) fn structured_view_operand_ssa(
     operands: &[SemanticId],
-    values: &BTreeMap<SemanticId, ExecutionValue>,
+    values: &impl SsaValueLookup,
     position: usize,
     max_bytes: usize,
     label: &str,
@@ -687,7 +687,7 @@ pub(crate) fn structured_view_operand_ssa(
         .get(position)
         .ok_or_else(|| format!("structured {label} operand is missing"))?;
     let value = values
-        .get(binding)
+        .ssa_value(binding)
         .ok_or_else(|| format!("structured {label} operand value is unavailable"))?;
     let ExecutionValue::Sequence { values } = value else {
         return Err(format!("structured {label} operand must be a byte view"));
@@ -707,6 +707,19 @@ pub(crate) fn structured_view_operand_ssa(
             )),
         })
         .collect()
+}
+
+/// Value lookup used by the SSA structured-value helpers. The retained SSA
+/// executor uses a dense identity-slot map; the generic helper deliberately
+/// depends only on the lookup contract rather than its storage shape.
+pub(crate) trait SsaValueLookup {
+    fn ssa_value(&self, key: &SemanticId) -> Option<&ExecutionValue>;
+}
+
+impl SsaValueLookup for HashMap<SemanticId, ExecutionValue> {
+    fn ssa_value(&self, key: &SemanticId) -> Option<&ExecutionValue> {
+        self.get(key)
+    }
 }
 
 /// Verify-only SHA-256 over raw bytes (HARNESS-PRESSURE-006). Pure
@@ -7521,6 +7534,9 @@ pub(crate) fn evaluate_integer(
     if !integer_operator_supported(operator, intent) {
         return None;
     }
+    if matches!(intent, ArithmeticIntent::Wrapping) {
+        return evaluate_wrapping_integer(operator, ty, left, right);
+    }
     if matches!(operator, "and" | "or" | "xor") {
         return evaluate_bitwise(operator, ty, left, right);
     }
@@ -7548,6 +7564,46 @@ pub(crate) fn evaluate_integer(
     }
     .evaluate()
     .value
+}
+
+/// Allocation-free wrapping integer evaluation for the dominant SSA scalar
+/// path. The general `IntegerOperation` model remains authoritative for
+/// checked, saturating, trapping, and widening intent; wrapping operations
+/// use the same formulas directly without constructing a temporary owned
+/// operator string on every instruction.
+fn evaluate_wrapping_integer(
+    operator: &str,
+    ty: IntegerType,
+    left: i128,
+    right: i128,
+) -> Option<i128> {
+    match operator {
+        "add" => wrap_to_bits(left.wrapping_add(right), ty.bits, ty.signed),
+        "sub" => wrap_to_bits(left.wrapping_sub(right), ty.bits, ty.signed),
+        "mul" => wrap_to_bits(left.wrapping_mul(right), ty.bits, ty.signed),
+        "div" => (right != 0)
+            .then(|| left.wrapping_div(right))
+            .and_then(|value| wrap_to_bits(value, ty.bits, ty.signed)),
+        "mod" => (right != 0)
+            .then(|| left.wrapping_rem(right))
+            .and_then(|value| wrap_to_bits(value, ty.bits, ty.signed)),
+        "and" | "or" | "xor" => evaluate_bitwise(operator, ty, left, right),
+        "shl" | "shr" if right >= 0 => {
+            let bits = u32::from(ty.bits);
+            let count = (right as u128 % u128::from(bits)) as u32;
+            let mask = (1_u128 << bits) - 1;
+            let unsigned = (left as u128) & mask;
+            let shifted = match operator {
+                "shl" => (unsigned << count) & mask,
+                "shr" if !ty.signed => unsigned >> count,
+                "shr" => (left >> count) as u128 & mask,
+                _ => return None,
+            };
+            wrap_to_bits(i128::try_from(shifted).ok()?, ty.bits, ty.signed)
+        }
+        "shl" | "shr" => None,
+        _ => None,
+    }
 }
 
 fn evaluate_bitwise(operator: &str, ty: IntegerType, left: i128, right: i128) -> Option<i128> {
