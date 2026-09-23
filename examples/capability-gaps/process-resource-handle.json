@@ -1,0 +1,36 @@
+{
+  "artifact_kind": "mncs.capability_gap",
+  "contract_revision": "0.1",
+  "gap_id": "MNCS-LANG-64AD712CD2DE",
+  "producer": "mncs-forge",
+  "compiler_identity": "mncs-language ff5e98c; Profile 0.18",
+  "source_revision": "ff5e98c",
+  "source_artifact": "mncs-forge:src/mncs_forge/resources/pressure-reproducers/process-resource-handle.mncs",
+  "source_location": "<local-path>/process-resource-handle.mncs",
+  "requested_semantics": "run an external process under an explicit aggregate memory, swap, and process-count envelope; return bounded raw resource observations; and expose an owned handle that can interrupt an in-flight run",
+  "obstruction": "runtime",
+  "active_profile": "0.18",
+  "backends": [
+    "mncs-host-process-provider"
+  ],
+  "closest_supported_semantics": "mncs.std.process.v1::process_run(ProcessRequest), with explicit argv, bounded environment and capture, exit status, and a deadline",
+  "reproducer": "process_run(request, envelope) is rejected with MNP216 because process_run accepts exactly one typed ProcessRequest; the current synchronous result has no in-flight cancellation handle",
+  "protected_properties": [
+    "cancellation cannot be reported complete before owned work is interrupted and reaped",
+    "memory and process limits apply to the complete owned process tree",
+    "resource observations preserve unavailable and cleanup-unknown states"
+  ],
+  "approximation_prohibited": true,
+  "evidence_requirements": [
+    "Profile 0.18 accepts a source-visible generic resource request",
+    "an in-flight external process can be cancelled through its owned effect handle",
+    "provider returns bounded typed process and resource observations"
+  ],
+  "status": "FAIL",
+  "unresolved_fields": [
+    "Linux cgroup-v2 realization for aggregate memory, swap, and process limits",
+    "compatible process effect contract and compiler lowering",
+    "provider/runtime/embed support for owned cancellation and cleanup observation"
+  ],
+  "identity": "mncs:0.2:capability-gap:0d32721af1923f702bbdfae18c9c4e2a522cd90d38a8af78de66ed81d1f748c8"
+}

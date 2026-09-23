@@ -345,6 +345,23 @@ mod tests {
     }
 
     #[test]
+    fn process_resource_handle_fixture_round_trips() {
+        let raw = include_str!("../../../examples/capability-gaps/process-resource-handle.json");
+        let gap: CapabilityGap = serde_json::from_str(raw).expect("fixture parses");
+        assert!(gap.verify_identity().is_ok());
+        assert_eq!(gap.gap_id, "MNCS-LANG-64AD712CD2DE");
+        assert_eq!(gap.obstruction, GapObstruction::Runtime);
+        assert_eq!(gap.active_profile, "0.18");
+        assert_eq!(gap.status, GapStatus::Fail);
+        assert!(gap.approximation_prohibited);
+        assert_eq!(
+            gap.identity.as_str(),
+            "mncs:0.2:capability-gap:0d32721af1923f702bbdfae18c9c4e2a522cd90d38a8af78de66ed81d1f748c8"
+        );
+        assert!(!gap.source_location.contains("/home/"));
+    }
+
+    #[test]
     fn ptx_entry_annotation_fixture_round_trips() {
         let raw =
             include_str!("../../../examples/capability-gaps/ptx-kernel-entry-annotation.json");
