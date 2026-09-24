@@ -1182,7 +1182,7 @@
     ]
   },
   "compiler_inventory_identity": "sha256:c1352e7c7b1fb943a7cf8c0356c17b458ae091f1bbf6f824d705089eef3837fd",
-  "content_identity": "sha256:307b1d3ede7b1bfa30b9b19bb149a1fc831716f41b0b39f0365456bc2fb81370",
+  "content_identity": "sha256:a502671f67e5654f880b10984368c70486c2d681f863ef9f6b4eb42e46d6bfff",
   "current_profile": "0.18",
   "examples": [
     {
@@ -10513,7 +10513,7 @@
     {
       "kind": "projection_generator",
       "path": "scripts/generate_language_capabilities.py",
-      "source_identity": "sha256:b3fc8f907f3a7813a06b33fd22ca31f18fc62eea1989e1a9bc3d31f852a8d33a"
+      "source_identity": "sha256:b2d07ab99e2a657ab7d411d57d2e6af78d92dc3ae472d26f88de97c175f1c834"
     }
   ],
   "schema_version": "mncs.language-capabilities/1",

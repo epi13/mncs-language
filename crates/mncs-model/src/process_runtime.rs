@@ -15,19 +15,19 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
-        Arc, Mutex, MutexGuard,
         atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc, Mutex, MutexGuard,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
-use crate::process::{MAX_DEADLINE_MS, MAX_ENVIRONMENT_BYTES, ProcessRequest};
+use crate::process::{ProcessRequest, MAX_DEADLINE_MS, MAX_ENVIRONMENT_BYTES};
 
 const MAX_ACTIVE_EXECUTIONS: usize = 16;
 const MAX_RETAINED_EXECUTIONS: usize = 128;
 const CONTROL_COMMAND_TIMEOUT: Duration = Duration::from_millis(300);
-const START_GRACE: Duration = Duration::from_millis(600);
+const START_GRACE: Duration = Duration::from_secs(2);
 const TERMINATE_GRACE: Duration = Duration::from_millis(300);
 const REAP_POLL: Duration = Duration::from_millis(5);
 const CGROUP_ROOT: &str = "/sys/fs/cgroup";
@@ -650,16 +650,11 @@ fn start_systemd_process(
         let ready_deadline = started + START_GRACE;
         loop {
             let (properties, complete) = systemd_properties(unit);
-            if let Some(group) = properties.get("ControlGroup") {
-                if let Some(path) = cgroup_path(group) {
-                    *lock(&managed.cgroup) = Some(path);
-                }
-            }
-            if properties
-                .get("LoadState")
-                .is_some_and(|state| state == "loaded")
-                && properties.get("Id").is_some_and(|id| id == unit)
-            {
+            let control_group = ready_control_group(&properties, unit)
+                .and_then(cgroup_path)
+                .filter(|path| path.is_dir() && path.join("cgroup.events").is_file());
+            if let Some(path) = control_group {
+                *lock(&managed.cgroup) = Some(path);
                 managed.provider_ready.store(true, Ordering::Release);
                 return Ok(managed);
             }
@@ -1122,6 +1117,20 @@ fn cgroup_path(group: &str) -> Option<PathBuf> {
     path.starts_with(CGROUP_ROOT).then_some(path)
 }
 
+fn ready_control_group<'a>(properties: &'a HashMap<String, String>, unit: &str) -> Option<&'a str> {
+    if !properties
+        .get("LoadState")
+        .is_some_and(|state| state == "loaded")
+        || !properties.get("Id").is_some_and(|id| id == unit)
+    {
+        return None;
+    }
+    properties
+        .get("ControlGroup")
+        .map(String::as_str)
+        .filter(|group| !group.is_empty())
+}
+
 fn find_program(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
@@ -1170,6 +1179,26 @@ mod tests {
                 process_max: Some(32),
             },
         }
+    }
+
+    #[test]
+    fn provider_start_waits_for_the_matching_unit_control_group() {
+        let unit = "mncs-owned-test.service";
+        let mut properties = HashMap::from([
+            ("LoadState".to_owned(), "loaded".to_owned()),
+            ("Id".to_owned(), unit.to_owned()),
+            ("ControlGroup".to_owned(), String::new()),
+        ]);
+        assert_eq!(ready_control_group(&properties, unit), None);
+        properties.insert(
+            "ControlGroup".to_owned(),
+            "/user.slice/mncs-owned-test.service".to_owned(),
+        );
+        assert_eq!(
+            ready_control_group(&properties, unit),
+            Some("/user.slice/mncs-owned-test.service")
+        );
+        assert_eq!(ready_control_group(&properties, "other.service"), None);
     }
 
     #[test]

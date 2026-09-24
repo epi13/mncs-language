@@ -6,3 +6,7 @@ profile = "0.17"
 step_budget = 200000
 timeout_seconds = 60
 libraries = ["library"]
+
+[[host_grant_sets]]
+test_case_identity = "mncs:0.2:test-case:mncs.language.process_lifecycle_smoke::cancellation_is_reaped::49e715f49266e2e6544b4f2ffab9c1da24df80d0a38b2c58e35ceb7bdaf2cd8f"
+grants = [{ capability = "process_capability", locator = "/usr/bin/sleep" }]

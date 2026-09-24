@@ -38,6 +38,11 @@ def compiler_binary() -> Path:
     candidates = []
     if value := os.environ.get("MNCS_LANGUAGE_BINARY"):
         candidates.append(Path(value))
+    if value := os.environ.get("CARGO_TARGET_DIR"):
+        target_root = Path(value)
+        if not target_root.is_absolute():
+            target_root = ROOT / target_root
+        candidates.extend([target_root / "debug/mncs", target_root / "release/mncs"])
     candidates.extend(
         [
             ROOT / "target/debug/mncs",
