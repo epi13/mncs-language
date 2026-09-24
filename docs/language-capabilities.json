@@ -162,6 +162,34 @@
         "name": "process_run"
       },
       {
+        "arity": 1,
+        "capability_kind": "process_grant",
+        "effect": "process_run",
+        "introduced_profile": "0.18",
+        "name": "process_start"
+      },
+      {
+        "arity": 1,
+        "capability_kind": "process_grant",
+        "effect": "process_run",
+        "introduced_profile": "0.18",
+        "name": "process_observe"
+      },
+      {
+        "arity": 1,
+        "capability_kind": "process_grant",
+        "effect": "process_run",
+        "introduced_profile": "0.18",
+        "name": "process_cancel"
+      },
+      {
+        "arity": 1,
+        "capability_kind": "process_grant",
+        "effect": "process_run",
+        "introduced_profile": "0.18",
+        "name": "process_reap"
+      },
+      {
         "arity": 2,
         "capability_kind": "structured_artifact_grant",
         "effect": "structured_read",
@@ -697,7 +725,7 @@
         "name": "vector"
       }
     ],
-    "inventory_identity": "sha256:bcfc2d1d3d5fafe8891297f4477fe0006536600935addfde4fcb308af3050af5",
+    "inventory_identity": "sha256:c1352e7c7b1fb943a7cf8c0356c17b458ae091f1bbf6f824d705089eef3837fd",
     "profiles": [
       {
         "features": [
@@ -1026,7 +1054,7 @@
       }
     ],
     "schema_version": "mncs.language-inventory/1",
-    "source_identity": "sha256:c649fdaa10f5878555fd87ae615d11b99c13848d901d35bd989486f58a9902aa",
+    "source_identity": "sha256:68f0b5aeee05e51e0a5e4dcf12dfa4988f43c99310aad88c727f56e6449cba02",
     "syntax_features": [
       "acyclic_calls",
       "atomic_artifact_publication",
@@ -1153,8 +1181,8 @@
       }
     ]
   },
-  "compiler_inventory_identity": "sha256:bcfc2d1d3d5fafe8891297f4477fe0006536600935addfde4fcb308af3050af5",
-  "content_identity": "sha256:d9de82516aff2f3a85c5392341fbd29e0d4c2e41c20a5acb8cdcf80ebc65b35f",
+  "compiler_inventory_identity": "sha256:c1352e7c7b1fb943a7cf8c0356c17b458ae091f1bbf6f824d705089eef3837fd",
+  "content_identity": "sha256:307b1d3ede7b1bfa30b9b19bb149a1fc831716f41b0b39f0365456bc2fb81370",
   "current_profile": "0.18",
   "examples": [
     {
@@ -8497,31 +8525,85 @@
       "capabilities": [
         "process_capability"
       ],
-      "compiler_source_identity": "mncs:source:artifact:a49802f6fa888d33a3d2fedcdc59947e8d97aca1d3c5f438ac317c0c9538f693",
+      "compiler_source_identity": "mncs:source:artifact:c6b2121895ce944c184be3ebc7558d9e15ac3248346551d191f48430cc0f2e10",
       "effects": [
         {
           "capability": "process_capability",
           "effect": "process_run",
+          "target": "cancel"
+        },
+        {
+          "capability": "process_capability",
+          "effect": "process_run",
+          "target": "observe"
+        },
+        {
+          "capability": "process_capability",
+          "effect": "process_run",
+          "target": "reap"
+        },
+        {
+          "capability": "process_capability",
+          "effect": "process_run",
           "target": "run"
+        },
+        {
+          "capability": "process_capability",
+          "effect": "process_run",
+          "target": "start"
         }
       ],
       "exports": [
         "EnvironmentEntry",
+        "ProcessHandle",
+        "ProcessObservation",
         "ProcessRequest",
+        "ProcessResourceEnvelope",
         "ProcessResult",
-        "run"
+        "ProcessStartResult",
+        "ProcessStatus",
+        "cancel",
+        "observe",
+        "reap",
+        "run",
+        "start"
       ],
       "imports": [],
-      "inventory_identity": "sha256:371d690582db3513239872abdf22357d2d7c8d4f8302b22331b5b538726c62d6",
+      "inventory_identity": "sha256:ae12e473caefe2601cd7d1cb9d4c6d21050f48cde43f5c874e1abff511cb5616",
       "module": "mncs.std.process.v1",
       "path": "library/std/process.mncs",
-      "profile": "0.16",
-      "source_identity": "sha256:60d13b8850304578e9443f3779bb046226e389f732acc8efd8ed7ae9c9026b85",
+      "profile": "0.18",
+      "source_identity": "sha256:40ba08b66a095e791d6aa3b55fe67c3bb5dc3421be660bb0c6ef4d78cc9d928c",
       "symbols": [
+        {
+          "identity": "mncs:0.2:finite-type:mncs.std.process.v1::ProcessStatus",
+          "kind": "finite_type",
+          "name": "ProcessStatus"
+        },
+        {
+          "identity": "mncs:0.2:function:mncs.std.process.v1::cancel",
+          "kind": "function",
+          "name": "cancel"
+        },
+        {
+          "identity": "mncs:0.2:function:mncs.std.process.v1::observe",
+          "kind": "function",
+          "name": "observe"
+        },
+        {
+          "identity": "mncs:0.2:function:mncs.std.process.v1::reap",
+          "kind": "function",
+          "name": "reap"
+        },
         {
           "identity": "mncs:0.2:function:mncs.std.process.v1::run",
           "kind": "function",
           "name": "run"
+        },
+        {
+          "identity": "mncs:0.2:function:mncs.std.process.v1::start",
+          "kind": "function",
+          "name": "start"
         },
         {
           "identity": "mncs:0.2:record-type:mncs.std.process.v1::EnvironmentEntry::key%3A%5Bbyte%3B%20up_to%2064%5D%3Bvalue%3A%5Bbyte%3B%20up_to%201024%5D%3B",
@@ -8529,14 +8611,34 @@
           "name": "EnvironmentEntry"
         },
         {
-          "identity": "mncs:0.2:record-type:mncs.std.process.v1::ProcessRequest::argv%3A%5B%5Bbyte%3B%20up_to%201024%5D%3B%20up_to%2016%5D%3Bargv_count%3Au64%3Bcurrent_dir%3A%5Bbyte%3B%20up_to%201024%5D%3Bdeadline_ms%3Au64%3Benvironment%3A%5BEnvironmentEntry%3B%20up_to%2016%5D%3Benvironment_count%3Au64%3Bprogram%3A%5Bbyte%3B%20up_to%201024%5D%3Bstderr_limit%3Au64%3Bstdin%3A%5Bbyte%3B%20up_to%201024%5D%3Bstdout_limit%3Au64%3B",
+          "identity": "mncs:0.2:record-type:mncs.std.process.v1::ProcessHandle::token%3A%5Bbyte%3B%2032%5D%3B",
+          "kind": "record_type",
+          "name": "ProcessHandle"
+        },
+        {
+          "identity": "mncs:0.2:record-type:mncs.std.process.v1::ProcessObservation::cancellation_complete%3Abool%3Bcancellation_requested%3Abool%3Bcleanup_complete%3Abool%3Bcontainment_supported%3Abool%3Bdeadline_exceeded%3Abool%3Bduration_ms%3Au64%3Bexit_code%3Ai64%3Bhas_cleanup_result%3Abool%3Bhas_exit_code%3Abool%3Bhas_memory_high_events%3Abool%3Bhas_memory_max_events%3Abool%3Bhas_memory_peak_bytes%3Abool%3Bhas_oom_events%3Abool%3Bhas_oom_kill_events%3Abool%3Bhas_process_limit_events%3Abool%3Bhas_process_peak%3Abool%3Bhas_swap_peak_bytes%3Abool%3Bhas_tree_empty%3Abool%3Blauncher_reaped%3Abool%3Bmemory_high_events%3Au64%3Bmemory_max_events%3Au64%3Bmemory_peak_bytes%3Au64%3Bobservation_complete%3Abool%3Boom_events%3Au64%3Boom_kill_events%3Au64%3Boutput_exhausted%3Abool%3Bprocess_limit_events%3Au64%3Bprocess_peak%3Au64%3Bstatus%3AProcessStatus%3Bstderr%3A%5Bbyte%3B%20up_to%201024%5D%3Bstderr_truncated%3Abool%3Bstdout%3A%5Bbyte%3B%20up_to%201024%5D%3Bstdout_truncated%3Abool%3Bsuccess%3Abool%3Bswap_peak_bytes%3Au64%3Btree_empty%3Abool%3B",
+          "kind": "record_type",
+          "name": "ProcessObservation"
+        },
+        {
+          "identity": "mncs:0.2:record-type:mncs.std.process.v1::ProcessRequest::argv%3A%5B%5Bbyte%3B%20up_to%201024%5D%3B%20up_to%2016%5D%3Bargv_count%3Au64%3Bcurrent_dir%3A%5Bbyte%3B%20up_to%201024%5D%3Bdeadline_ms%3Au64%3Benvironment%3A%5BEnvironmentEntry%3B%20up_to%2016%5D%3Benvironment_count%3Au64%3Bprogram%3A%5Bbyte%3B%20up_to%201024%5D%3Bresources%3AProcessResourceEnvelope%3Bstderr_limit%3Au64%3Bstdin%3A%5Bbyte%3B%20up_to%201024%5D%3Bstdout_limit%3Au64%3B",
           "kind": "record_type",
           "name": "ProcessRequest"
+        },
+        {
+          "identity": "mncs:0.2:record-type:mncs.std.process.v1::ProcessResourceEnvelope::has_swap_max%3Abool%3Bmemory_high_bytes%3Au64%3Bmemory_max_bytes%3Au64%3Bprocess_max%3Au64%3Bswap_max_bytes%3Au64%3B",
+          "kind": "record_type",
+          "name": "ProcessResourceEnvelope"
         },
         {
           "identity": "mncs:0.2:record-type:mncs.std.process.v1::ProcessResult::duration_ms%3Au64%3Bexit_code%3Ai64%3Bhas_exit_code%3Abool%3Bstderr%3A%5Bbyte%3B%20up_to%201024%5D%3Bstderr_truncated%3Abool%3Bstdout%3A%5Bbyte%3B%20up_to%201024%5D%3Bstdout_truncated%3Abool%3Bsuccess%3Abool%3Btimed_out%3Abool%3B",
           "kind": "record_type",
           "name": "ProcessResult"
+        },
+        {
+          "identity": "mncs:0.2:record-type:mncs.std.process.v1::ProcessStartResult::handle%3AProcessHandle%3Bhas_handle%3Abool%3Bobservation%3AProcessObservation%3B",
+          "kind": "record_type",
+          "name": "ProcessStartResult"
         }
       ]
     },
@@ -10073,10 +10175,10 @@
   },
   "provenance": [
     {
-      "inventory_identity": "sha256:bcfc2d1d3d5fafe8891297f4477fe0006536600935addfde4fcb308af3050af5",
+      "inventory_identity": "sha256:c1352e7c7b1fb943a7cf8c0356c17b458ae091f1bbf6f824d705089eef3837fd",
       "kind": "compiler_language_inventory",
       "path": "compiler:language-inventory",
-      "source_identity": "sha256:c649fdaa10f5878555fd87ae615d11b99c13848d901d35bd989486f58a9902aa"
+      "source_identity": "sha256:68f0b5aeee05e51e0a5e4dcf12dfa4988f43c99310aad88c727f56e6449cba02"
     },
     {
       "kind": "canonical_example",
@@ -10346,7 +10448,7 @@
     {
       "kind": "library_module",
       "path": "library/std/process.mncs",
-      "source_identity": "sha256:60d13b8850304578e9443f3779bb046226e389f732acc8efd8ed7ae9c9026b85"
+      "source_identity": "sha256:40ba08b66a095e791d6aa3b55fe67c3bb5dc3421be660bb0c6ef4d78cc9d928c"
     },
     {
       "kind": "library_module",

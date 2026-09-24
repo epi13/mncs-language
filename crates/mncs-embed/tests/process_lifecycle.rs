@@ -5,11 +5,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mncs_compiler::{bundle::pinned_bundle, ReferenceCompiler};
+use mncs_compiler::{ReferenceCompiler, bundle::pinned_bundle};
 use mncs_embed::{Artifact, CallOptions, Grant, Session};
 use mncs_model::{ArtifactRepresentation, ExecutionValue};
 use mncs_syntax::{SourceArtifactKind, SourceEnvelope};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const SOURCE: &str = r#"
 mncs 0.18;
@@ -104,15 +104,38 @@ fn integer(value: u64) -> Value {
 }
 
 fn process_request(program: &str, argv: &[&str], environment: &[(&str, &str)]) -> String {
+    process_request_with_envelope(
+        program,
+        argv,
+        environment,
+        128 * 1024 * 1024,
+        256 * 1024 * 1024,
+        0,
+        true,
+        32,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_request_with_envelope(
+    program: &str,
+    argv: &[&str],
+    environment: &[(&str, &str)],
+    memory_high_bytes: u64,
+    memory_max_bytes: u64,
+    swap_max_bytes: u64,
+    has_swap_max: bool,
+    process_max: u64,
+) -> String {
     let resources = json!({
         "record": {
             "type": "ProcessResourceEnvelope",
             "fields": {
-                "memory_high_bytes": integer(128 * 1024 * 1024),
-                "memory_max_bytes": integer(256 * 1024 * 1024),
-                "swap_max_bytes": integer(0),
-                "has_swap_max": {"boolean":{"value":true}},
-                "process_max": integer(32)
+                "memory_high_bytes": integer(memory_high_bytes),
+                "memory_max_bytes": integer(memory_max_bytes),
+                "swap_max_bytes": integer(swap_max_bytes),
+                "has_swap_max": {"boolean":{"value":has_swap_max}},
+                "process_max": integer(process_max)
             }
         }
     });
@@ -349,5 +372,72 @@ fn cancellation_terminates_the_complete_owned_process_tree() {
     assert!(!observation_bool(&reaped, "success"));
     eprintln!(
         "owned process tree cancellation: request={cancel_request_ms:.3} ms, request-to-tree-zero-and-reap={cancel_to_reap_ms:.3} ms"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn mncs_process_effect_reports_tiny_cgroup_memory_exhaustion() {
+    let session = open_session();
+    let options = process_grant("/usr/bin/python3");
+    let program = "data = bytearray(64 * 1024 * 1024)\nfor offset in range(0, len(data), 4096):\n    data[offset] = 1\n";
+    let started = session
+        .call_typed_json(
+            "app.process_lifecycle_embed",
+            "start_owned",
+            &process_request_with_envelope(
+                "/usr/bin/python3",
+                &["-c", program],
+                &[],
+                0,
+                32 * 1024 * 1024,
+                0,
+                true,
+                8,
+            ),
+            &options,
+        )
+        .expect("typed bounded-memory process request");
+    assert_eq!(started.status, "returned", "{:?}", started.failure_reason);
+    let handle = process_handle(&started.returned[0]);
+    let completed = call_observation(&session, "reap_owned", handle, &options);
+
+    eprintln!(
+        "tiny cgroup exhaustion observation: status={}, memory_max_events={:?}, oom_events={:?}, oom_kill_events={:?}, memory_peak_bytes={:?}, observation_complete={}, cleanup_complete={}, tree_empty={}, launcher_reaped={}",
+        observation_status(&completed),
+        observation_unsigned(&completed, "memory_max_events"),
+        observation_unsigned(&completed, "oom_events"),
+        observation_unsigned(&completed, "oom_kill_events"),
+        observation_unsigned(&completed, "memory_peak_bytes"),
+        observation_bool(&completed, "observation_complete"),
+        observation_bool(&completed, "cleanup_complete"),
+        observation_bool(&completed, "tree_empty"),
+        observation_bool(&completed, "launcher_reaped"),
+    );
+    assert_eq!(
+        observation_status(&completed),
+        4,
+        "ResourceExhausted status"
+    );
+    assert!(!observation_bool(&completed, "success"));
+    assert!(observation_bool(&completed, "has_memory_peak_bytes"));
+    assert!(
+        observation_unsigned(&completed, "memory_peak_bytes").unwrap_or(u64::MAX)
+            <= 32 * 1024 * 1024
+    );
+    assert!(
+        observation_unsigned(&completed, "memory_peak_bytes").unwrap_or_default()
+            >= 16 * 1024 * 1024,
+        "the provider reports the enforced memory peak"
+    );
+    assert!(observation_bool(&completed, "tree_empty"));
+    assert!(observation_bool(&completed, "launcher_reaped"));
+    assert!(observation_bool(&completed, "cleanup_complete"));
+    eprintln!(
+        "tiny cgroup exhaustion: memory_peak={} bytes, memory_high_events={}, memory_max_events={}, oom_kill_events={}",
+        observation_unsigned(&completed, "memory_peak_bytes").unwrap_or_default(),
+        observation_unsigned(&completed, "memory_high_events").unwrap_or_default(),
+        observation_unsigned(&completed, "memory_max_events").unwrap_or_default(),
+        observation_unsigned(&completed, "oom_kill_events").unwrap_or_default(),
     );
 }

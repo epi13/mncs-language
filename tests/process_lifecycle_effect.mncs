@@ -1,6 +1,7 @@
 mncs 0.18;
 module mncs.language.process_lifecycle_smoke;
 use mncs.std.process.v1 as process;
+use mncs.std.process.v1;
 use mncs.test.assertions;
 use mncs.test.suite;
 
@@ -26,14 +27,30 @@ fn request() -> (result: process.ProcessRequest) {
     };
 }
 
-test cancellation_is_reaped() -> (result: TestResult) {
+fn is_running(status: process.ProcessStatus) -> (result: bool) {
+    return match status {
+        Running => true,
+        Exited => false,
+        Cancelled => false,
+        TimedOut => false,
+        ResourceExhausted => false,
+        OutputExhausted => false,
+        Unsupported => false,
+        Unknown => false
+    };
+}
+
+test cancellation_is_reaped() -> (result: TestResult)
+    capability process_capability
+    effect process_run authorized_by process_capability
+{
     let started: process.ProcessStartResult = process.start(request());
     let before: process.ProcessObservation = process.observe(started.handle);
     let requested: process.ProcessObservation = process.cancel(started.handle);
     let after: process.ProcessObservation = process.reap(started.handle);
     return from_assertion(equals_bool(
         true,
-        started.has_handle && before.observation_complete && requested.cancellation_requested &&
+        started.has_handle && is_running(before.status) && before.observation_complete && requested.cancellation_requested &&
         after.cancellation_complete && after.cleanup_complete && after.tree_empty && after.launcher_reaped,
         7101
     ));

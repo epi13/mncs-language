@@ -15,14 +15,14 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
-use crate::process::{ProcessRequest, MAX_DEADLINE_MS, MAX_ENVIRONMENT_BYTES};
+use crate::process::{MAX_DEADLINE_MS, MAX_ENVIRONMENT_BYTES, ProcessRequest};
 
 const MAX_ACTIVE_EXECUTIONS: usize = 16;
 const MAX_RETAINED_EXECUTIONS: usize = 128;
@@ -759,7 +759,39 @@ fn observe_managed(process: &ManagedProcess) -> Result<ProcessObservation, Proce
         process.provider_ready.store(true, Ordering::Release);
     }
     let cgroup = lock(&process.cgroup).clone();
-    let raw = cgroup.as_deref().map(read_cgroup_observations);
+    let mut raw = cgroup.as_deref().map(read_cgroup_observations);
+    // systemd retains the unit's peak value after it removes the transient
+    // cgroup. Preserve that provider observation rather than returning an
+    // empty metric simply because a fast terminal process outlived its cgroup
+    // directory.
+    if let Some(raw) = raw.as_mut() {
+        if raw.memory_peak_bytes.is_none() {
+            raw.memory_peak_bytes = properties
+                .get("MemoryPeak")
+                .and_then(|value| value.parse::<u64>().ok());
+        }
+        if properties
+            .get("Result")
+            .is_some_and(|result| matches!(result.as_str(), "oom" | "oom-kill"))
+        {
+            // systemd's OOM result proves a resource event, but a zero cgroup
+            // counter sampled after unit teardown conflicts with that result.
+            // Preserve the status and mark those counters unavailable rather
+            // than reporting a false zero or fabricating an exact count.
+            let mut counter_conflict = false;
+            for counter in [
+                &mut raw.memory_max_events,
+                &mut raw.oom_events,
+                &mut raw.oom_kill_events,
+            ] {
+                if *counter == Some(0) {
+                    *counter = None;
+                    counter_conflict = true;
+                }
+            }
+            raw.complete &= !counter_conflict;
+        }
+    }
     let exit_status = lock(&process.child).try_wait().map_err(|error| {
         ProcessRuntimeError::Unknown(format!("process wait observation failed: {error}"))
     })?;
@@ -801,7 +833,9 @@ fn observe_managed(process: &ManagedProcess) -> Result<ProcessObservation, Proce
             || value.oom_events.is_some_and(|n| n > 0)
             || value.oom_kill_events.is_some_and(|n| n > 0)
             || value.process_limit_events.is_some_and(|n| n > 0)
-    });
+    }) || properties
+        .get("Result")
+        .is_some_and(|result| matches!(result.as_str(), "oom" | "oom-kill"));
     let provider_ready = process.provider_ready.load(Ordering::Acquire);
     let status = if cleanup_complete.is_none() && reaped {
         ProcessLifecycleStatus::Unknown
@@ -910,7 +944,7 @@ fn make_observation(
         tree_empty,
         launcher_reaped: true,
         cleanup_complete,
-        observation_complete: control_complete && raw.is_some(),
+        observation_complete: control_complete && raw.as_ref().is_some_and(|value| value.complete),
         duration_ms: process
             .started
             .elapsed()
@@ -953,7 +987,7 @@ fn observation_from_live(
         tree_empty: raw.as_ref().and_then(|value| value.tree_empty),
         launcher_reaped: false,
         cleanup_complete,
-        observation_complete: control_complete && raw.is_some(),
+        observation_complete: control_complete && raw.as_ref().is_some_and(|value| value.complete),
         duration_ms: process
             .started
             .elapsed()
@@ -964,6 +998,7 @@ fn observation_from_live(
 
 #[derive(Debug, Default)]
 struct CgroupObservations {
+    complete: bool,
     memory_high_events: Option<u64>,
     memory_max_events: Option<u64>,
     oom_events: Option<u64>,
@@ -979,7 +1014,8 @@ fn read_cgroup_observations(path: &Path) -> CgroupObservations {
     let memory_events = read_key_values(&path.join("memory.events"));
     let pids_events = read_key_values(&path.join("pids.events"));
     let cgroup_events = read_key_values(&path.join("cgroup.events"));
-    CgroupObservations {
+    let mut observations = CgroupObservations {
+        complete: false,
         memory_high_events: memory_events.get("high").copied(),
         memory_max_events: memory_events.get("max").copied(),
         oom_events: memory_events.get("oom").copied(),
@@ -989,7 +1025,17 @@ fn read_cgroup_observations(path: &Path) -> CgroupObservations {
         swap_peak_bytes: read_number(&path.join("memory.swap.peak")),
         process_peak: read_number(&path.join("pids.peak")),
         tree_empty: cgroup_events.get("populated").map(|value| *value == 0),
-    }
+    };
+    observations.complete = observations.memory_high_events.is_some()
+        && observations.memory_max_events.is_some()
+        && observations.oom_events.is_some()
+        && observations.oom_kill_events.is_some()
+        && observations.process_limit_events.is_some()
+        && observations.memory_peak_bytes.is_some()
+        && observations.swap_peak_bytes.is_some()
+        && observations.process_peak.is_some()
+        && observations.tree_empty.is_some();
+    observations
 }
 
 fn read_number(path: &Path) -> Option<u64> {
@@ -1164,5 +1210,87 @@ mod tests {
         assert!(completed.deadline_exceeded);
         assert_eq!(completed.status, ProcessLifecycleStatus::TimedOut);
         assert_eq!(completed.cleanup_complete, Some(true));
+    }
+
+    #[test]
+    fn active_execution_limit_is_enforced_and_reaped() {
+        let runtime = ProcessRuntime::new();
+        let mut handles = Vec::with_capacity(MAX_ACTIVE_EXECUTIONS);
+        for _ in 0..MAX_ACTIVE_EXECUTIONS {
+            match runtime.start(request("/usr/bin/sleep", &["30"], 60_000)) {
+                Ok((handle, observation)) => {
+                    assert_eq!(observation.status, ProcessLifecycleStatus::Running);
+                    assert!(observation.containment_supported);
+                    handles.push(handle);
+                }
+                Err(ProcessRuntimeError::Unsupported(_)) => return,
+                Err(error) => panic!("bounded active process start failed: {error}"),
+            }
+        }
+        assert_eq!(runtime.active_count(), MAX_ACTIVE_EXECUTIONS);
+        assert!(matches!(
+            runtime.start(request("/usr/bin/true", &[], 10_000)),
+            Err(ProcessRuntimeError::Limit(_))
+        ));
+        assert_eq!(runtime.active_count(), MAX_ACTIVE_EXECUTIONS);
+
+        for handle in handles {
+            let requested = runtime.request_cancel(&handle).unwrap();
+            assert!(requested.cancellation_requested);
+            let completed = runtime.reap(&handle, Duration::from_secs(3)).unwrap();
+            assert_eq!(completed.status, ProcessLifecycleStatus::Cancelled);
+            assert_eq!(completed.cleanup_complete, Some(true));
+            assert_eq!(completed.tree_empty, Some(true));
+            assert!(completed.launcher_reaped);
+        }
+        assert_eq!(runtime.active_count(), 0);
+    }
+
+    #[test]
+    fn completed_handle_retention_is_bounded_and_eviction_fails_closed() {
+        let runtime = ProcessRuntime::new();
+        let mut handles = Vec::with_capacity(MAX_RETAINED_EXECUTIONS + 1);
+        for _ in 0..=MAX_RETAINED_EXECUTIONS {
+            let (handle, _) = match runtime.start(request("/usr/bin/true", &[], 10_000)) {
+                Ok(value) => value,
+                Err(ProcessRuntimeError::Unsupported(_)) => return,
+                Err(error) => panic!("completed process start failed: {error}"),
+            };
+            let completed = runtime.reap(&handle, Duration::from_secs(3)).unwrap();
+            assert_eq!(completed.cleanup_complete, Some(true));
+            assert_eq!(completed.tree_empty, Some(true));
+            assert!(completed.launcher_reaped);
+            handles.push(handle);
+            assert!(runtime.registry_slots.load(Ordering::Acquire) <= MAX_RETAINED_EXECUTIONS);
+            assert_eq!(runtime.active_count(), 0);
+        }
+        assert_eq!(
+            runtime.registry_slots.load(Ordering::Acquire),
+            MAX_RETAINED_EXECUTIONS
+        );
+
+        let expired = handles
+            .iter()
+            .find(|handle| {
+                matches!(
+                    runtime.observe(handle),
+                    Err(ProcessRuntimeError::UnknownHandle)
+                )
+            })
+            .expect("at least one completed handle is evicted at the retention bound");
+        assert!(matches!(
+            runtime.handle_from_token(expired.opaque_token()),
+            Err(ProcessRuntimeError::UnknownHandle)
+        ));
+        for handle in &handles {
+            match runtime.observe(handle) {
+                Ok(observation) => {
+                    assert_eq!(observation.cleanup_complete, Some(true));
+                    assert!(observation.launcher_reaped);
+                }
+                Err(ProcessRuntimeError::UnknownHandle) if handle == expired => {}
+                Err(error) => panic!("retained process observation failed: {error}"),
+            }
+        }
     }
 }
