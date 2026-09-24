@@ -14,8 +14,8 @@
       "invalidation_dependencies": ["crates/mncs-model/src/graph.rs", "mncs.semantic-impact/1"],
       "executor": {
         "provider": "mncs-language",
-        "kind": "native_first_class_test",
-        "entrypoint": "cargo test -p mncs-model"
+        "kind": "external_integration",
+        "entrypoint": "language-tests-mncs-model"
       },
       "evidence_identity": {
         "subject_fields": ["semantic_subject_identity", "subject_fingerprint"],
@@ -35,7 +35,7 @@
       "executor": {
         "provider": "mncs-language",
         "kind": "compile_experiment",
-        "entrypoint": "cargo test -p mncs-compiler"
+        "entrypoint": "language-tests-mncs-compiler"
       },
       "evidence_identity": {
         "subject_fields": ["subject_identity", "subject_fingerprint"],
@@ -54,13 +54,42 @@
       "invalidation_dependencies": ["crates/mncs-syntax/src/profile.rs"],
       "executor": {
         "provider": "mncs-language",
-        "kind": "compile_experiment",
-        "entrypoint": "cargo test --workspace"
+        "kind": "external_integration",
+        "entrypoint": "repository-canonical-tests"
       },
       "evidence_identity": {
         "subject_fields": ["profile_identity"],
         "definition_fields": ["compiler_revision"],
         "execution_fields": ["execution_identity"]
+      }
+    },
+    {
+      "identity": "mncs-language.process-lifecycle.effect-contract",
+      "title": "The native process lifecycle contract preserves bounded start, observation, cancellation, reap, and Unknown behavior",
+      "guarantee_domain": "runtime",
+      "evidence_role": "canonical_regression",
+      "lifecycle": "permanent",
+      "scope": "repository_canonical",
+      "subjects": ["mncs:0.2:program:mncs.std.process.v1"],
+      "invalidation_dependencies": [
+        "library/std/process.mncs",
+        "tests/process_lifecycle_effect.mncs",
+        "crates/mncs-model/src/process_runtime.rs",
+        "crates/mncs-model/src/ssa_execution.rs",
+        "crates/mncs-embed/src/lib.rs"
+      ],
+      "executor": {
+        "provider": "mncs-test",
+        "kind": "native_first_class_test",
+        "entrypoint": "mncs-test run",
+        "source_paths": ["tests/process_lifecycle_effect.mncs"],
+        "library_paths": ["../mncs-test/native"],
+        "verifier_identity": "mncs-test-runner/0.2.1"
+      },
+      "evidence_identity": {
+        "subject_fields": ["repository_fingerprint", "subject_fingerprint"],
+        "definition_fields": ["obligation_identity", "definition_identity"],
+        "execution_fields": ["test_case_identity", "executor_identity", "verifier_identity", "invalidation_identity"]
       }
     }
   ]
