@@ -3624,6 +3624,7 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
         AstExpr::Sha256Digest { view, .. } => calls_in_expr(view, calls),
         AstExpr::StructuredDigest { value, .. } => calls_in_expr(value, calls),
         AstExpr::ProcessRun { request, .. } => calls_in_expr(request, calls),
+        AstExpr::ProcessLifecycle { argument, .. } => calls_in_expr(argument, calls),
         AstExpr::StructuredRead { path, schema, .. } => {
             calls_in_expr(path, calls);
             calls_in_expr(schema, calls);
@@ -6748,6 +6749,81 @@ impl<'a> BodyBuilder<'a> {
         Some(ResolvedBinding::plain(id, result_ty))
     }
 
+    /// Elaborate one operation on the retained generic process lifecycle.
+    /// The runtime validates the standard nominal records and resolves the
+    /// provider-issued handle; source code cannot construct an active handle
+    /// by supplying a numeric PID.
+    fn elaborate_process_lifecycle(
+        &mut self,
+        operation: &str,
+        argument: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let (expected_argument, expected_result) = if operation == "process_start" {
+            ("ProcessRequest", "ProcessStartResult")
+        } else {
+            ("ProcessHandle", "ProcessObservation")
+        };
+        let is_standard_record = |ty: &BodyType, expected_name: &str| {
+            matches!(
+                ty,
+                BodyType::Record { identity, name }
+                    if name == expected_name
+                        && identity.declaring_module().as_deref()
+                            == Some("mncs.std.process.v1")
+            )
+        };
+        let Some(result_ty) = expected.cloned() else {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE287",
+                format!("{operation} requires {expected_result} as its result type"),
+                span,
+            ));
+            return None;
+        };
+        if !is_standard_record(&result_ty, expected_result) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE287",
+                format!("{operation} result must be mncs.std.process.v1::{expected_result}"),
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority("process_run", "MNE284", "MNE285", span, diagnostics)?;
+        let argument_binding = self.elaborate_expr(argument, None, env, diagnostics)?;
+        if !is_standard_record(&argument_binding.ty, expected_argument) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE286",
+                format!("{operation} requires mncs.std.process.v1::{expected_argument}"),
+                argument.span(),
+            ));
+            return None;
+        }
+        let id = self.new_value(operation);
+        self.push_operation(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: operation.to_owned(),
+            },
+            operands: vec![argument_binding.id],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
     /// Elaborate the `host_write(view)` intrinsic (P-006 storage slice).
     /// Bounded append-only storage through the host-capability boundary:
     /// the executor appends exactly the view's runtime bytes (at most 64
@@ -8998,6 +9074,18 @@ impl<'a> BodyBuilder<'a> {
             AstExpr::ProcessRun { request, span } => {
                 self.elaborate_process_run(request, *span, expected, env, diagnostics)
             }
+            AstExpr::ProcessLifecycle {
+                operation,
+                argument,
+                span,
+            } => self.elaborate_process_lifecycle(
+                operation,
+                argument,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
             AstExpr::StructuredRead { path, schema, span } => {
                 self.elaborate_structured_read(path, schema, *span, expected, env, diagnostics)
             }

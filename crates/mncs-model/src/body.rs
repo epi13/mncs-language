@@ -1119,6 +1119,7 @@ pub fn host_call_effect_kind(operation: &str) -> &'static str {
         "sha256_digest" => "sha256_digest",
         "structured_digest" => "structured_digest",
         "process_run" => "process_run",
+        "process_start" | "process_observe" | "process_cancel" | "process_reap" => "process_run",
         "structured_read" => "structured_read",
         "structured_read_identity" => "structured_read",
         "provider_call" => "provider_call",
@@ -1142,7 +1143,8 @@ pub fn host_call_effect_kind(operation: &str) -> &'static str {
 pub fn host_call_arity(operation: &str) -> Option<usize> {
     match operation {
         "blob_read" | "clock_read" | "fs_list_count" | "fs_generation" => Some(0),
-        "sha256_digest" | "structured_digest" | "process_run" | "blob_append"
+        "sha256_digest" | "structured_digest" | "process_run" | "process_start"
+        | "process_observe" | "process_cancel" | "process_reap" | "blob_append"
         | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_entry_size_at" | "fs_entry_mtime_at"
         | "fs_mkdir" | "fs_delete_at" | "fs_sync_at" => Some(1),
         "fs_create_file" | "fs_append_bytes_at" | "fs_rename_at" | "structured_read" => Some(2),

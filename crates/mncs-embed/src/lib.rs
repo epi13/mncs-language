@@ -550,6 +550,26 @@ impl Session {
         args_json: &str,
         options: &CallOptions,
     ) -> Result<CallOutput, EmbedError> {
+        let values: Vec<HostExecutionValue> = serde_json::from_str(args_json).map_err(|error| {
+            EmbedError::new(
+                "bad_typed_arguments",
+                format!("typed argument JSON rejected: {error}"),
+            )
+        })?;
+        self.call_typed(module, function, values, options)
+    }
+
+    /// Name-oriented retained-call boundary for hosts that already decoded
+    /// JSON. The canonical ABI values still come from the admitted artifact's
+    /// interface, so nominal identities and scalar widths remain language
+    /// owned.
+    pub fn call_typed(
+        &self,
+        module: &str,
+        function: &str,
+        values: Vec<HostExecutionValue>,
+        options: &CallOptions,
+    ) -> Result<CallOutput, EmbedError> {
         if let Some(expected) = options.expected_interface_identity.as_deref() {
             let Some(actual) = self.interface_identity() else {
                 return Err(EmbedError::new(
@@ -566,12 +586,6 @@ impl Session {
                 ));
             }
         }
-        let values: Vec<HostExecutionValue> = serde_json::from_str(args_json).map_err(|error| {
-            EmbedError::new(
-                "bad_typed_arguments",
-                format!("typed argument JSON rejected: {error}"),
-            )
-        })?;
         let arguments = mncs_codegen::resolve_typed_arguments_for_artifact(
             self.inner.artifact(),
             module,
@@ -871,7 +885,9 @@ pub unsafe extern "C" fn mncs_session_call_batch(
         module: String,
         function: String,
         #[serde(default)]
-        args: Vec<mncs_model::ExecutionValue>,
+        args: Option<Vec<mncs_model::ExecutionValue>>,
+        #[serde(default)]
+        typed_args: Option<Vec<HostExecutionValue>>,
         #[serde(default)]
         grants: Vec<Grant>,
         #[serde(default)]
@@ -903,7 +919,40 @@ pub unsafe extern "C" fn mncs_session_call_batch(
                 expected_interface_identity: None,
                 type_arguments: request.type_arguments,
             };
-            session.call(&request.module, &request.function, request.args, &options)
+            match (request.args, request.typed_args) {
+                (Some(_), Some(_)) => CallOutput {
+                    status: "invalid_request".to_owned(),
+                    returned: Vec::new(),
+                    steps: 0,
+                    effects: Vec::new(),
+                    failure_reason: Some(
+                        "batch request must provide either args or typed_args, not both".to_owned(),
+                    ),
+                    artifact_identity: session.artifact_identity().to_owned(),
+                    artifact_sha256: session.digest().to_owned(),
+                    backend: session.backend_name().to_owned(),
+                    reused_session: session.reused(),
+                },
+                (Some(arguments), None) => {
+                    session.call(&request.module, &request.function, arguments, &options)
+                }
+                (None, Some(arguments)) => session
+                    .call_typed(&request.module, &request.function, arguments, &options)
+                    .unwrap_or_else(|error| CallOutput {
+                        status: "invalid_request".to_owned(),
+                        returned: Vec::new(),
+                        steps: 0,
+                        effects: Vec::new(),
+                        failure_reason: Some(error.message),
+                        artifact_identity: session.artifact_identity().to_owned(),
+                        artifact_sha256: session.digest().to_owned(),
+                        backend: session.backend_name().to_owned(),
+                        reused_session: session.reused(),
+                    }),
+                (None, None) => {
+                    session.call(&request.module, &request.function, Vec::new(), &options)
+                }
+            }
         })
         .collect();
     if profile {

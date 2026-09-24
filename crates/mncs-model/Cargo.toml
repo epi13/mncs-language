@@ -20,3 +20,4 @@ ed25519-dalek.workspace = true
 # path; the value never crosses the portability boundary unguarded.
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+getrandom.workspace = true

@@ -1,18 +1,28 @@
-mncs 0.16;
+mncs 0.18;
 
 // mncs.std.process — the reusable typed explicit-argv process effect.
 //
-// These records are the source-level contract. The runtime owns bounded
-// spawning, environment clearing, capture, deadlines, and fail-closed
-// status realization. No field is a shell command or an implicit ambient
-// environment. Byte views are intentionally small at this first native
-// userland boundary; larger application documents should use a separate
-// bounded transport contract rather than silently widening this effect.
+// These records are the source-level process contract. The lifecycle calls
+// return a provider-issued, runtime-scoped handle; cancellation is a request
+// until `reap` establishes termination, reaping, and cleanup. Resource fields
+// are platform-neutral. Providers that cannot enforce the requested envelope
+// report unsupported/incomplete observations instead of starting uncontained
+// work. No field is a shell command or an implicit ambient environment.
 module mncs.std.process.v1;
+
+enum ProcessStatus { Running, Exited, Cancelled, TimedOut, ResourceExhausted, OutputExhausted, Unsupported, Unknown }
 
 record EnvironmentEntry {
     key: [byte; up_to 64],
     value: [byte; up_to 1024]
+}
+
+record ProcessResourceEnvelope {
+    memory_high_bytes: u64,
+    memory_max_bytes: u64,
+    swap_max_bytes: u64,
+    has_swap_max: bool,
+    process_max: u64
 }
 
 record ProcessRequest {
@@ -22,10 +32,88 @@ record ProcessRequest {
     current_dir: [byte; up_to 1024],
     environment: [EnvironmentEntry; up_to 16],
     environment_count: u64,
+    resources: ProcessResourceEnvelope,
     stdin: [byte; up_to 1024],
     stdout_limit: u64,
     stderr_limit: u64,
     deadline_ms: u64
+}
+
+record ProcessHandle {
+    token: [byte; 32]
+}
+
+record ProcessStartResult {
+    handle: ProcessHandle,
+    has_handle: bool,
+    observation: ProcessObservation
+}
+
+record ProcessObservation {
+    status: ProcessStatus,
+    exit_code: i64,
+    has_exit_code: bool,
+    success: bool,
+    stdout: [byte; up_to 1024],
+    stderr: [byte; up_to 1024],
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+    output_exhausted: bool,
+    deadline_exceeded: bool,
+    cancellation_requested: bool,
+    cancellation_complete: bool,
+    memory_high_events: u64,
+    has_memory_high_events: bool,
+    memory_max_events: u64,
+    has_memory_max_events: bool,
+    oom_events: u64,
+    has_oom_events: bool,
+    oom_kill_events: u64,
+    has_oom_kill_events: bool,
+    process_limit_events: u64,
+    has_process_limit_events: bool,
+    memory_peak_bytes: u64,
+    has_memory_peak_bytes: bool,
+    swap_peak_bytes: u64,
+    has_swap_peak_bytes: bool,
+    process_peak: u64,
+    has_process_peak: bool,
+    containment_supported: bool,
+    tree_empty: bool,
+    has_tree_empty: bool,
+    launcher_reaped: bool,
+    cleanup_complete: bool,
+    has_cleanup_result: bool,
+    observation_complete: bool,
+    duration_ms: u64
+}
+
+fn start(request: ProcessRequest) -> (result: ProcessStartResult)
+    capability process_capability
+    effect process_run authorized_by process_capability
+{
+    return process_start(request);
+}
+
+fn observe(handle: ProcessHandle) -> (result: ProcessObservation)
+    capability process_capability
+    effect process_run authorized_by process_capability
+{
+    return process_observe(handle);
+}
+
+fn cancel(handle: ProcessHandle) -> (result: ProcessObservation)
+    capability process_capability
+    effect process_run authorized_by process_capability
+{
+    return process_cancel(handle);
+}
+
+fn reap(handle: ProcessHandle) -> (result: ProcessObservation)
+    capability process_capability
+    effect process_run authorized_by process_capability
+{
+    return process_reap(handle);
 }
 
 record ProcessResult {

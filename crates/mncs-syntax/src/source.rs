@@ -689,6 +689,12 @@ pub enum AstExpr {
         request: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Asynchronous owned process lifecycle operations (Profile 0.18).
+    ProcessLifecycle {
+        operation: String,
+        argument: Box<AstExpr>,
+        span: SourceSpan,
+    },
     /// Generic type-directed bounded artifact ingress
     /// `structured_read(path, schema)` (Profile 0.18). The expected result
     /// type supplies the nominal decoder contract; path and schema carry
@@ -930,6 +936,7 @@ impl AstExpr {
             | Self::Sha256Digest { span, .. }
             | Self::StructuredDigest { span, .. }
             | Self::ProcessRun { span, .. }
+            | Self::ProcessLifecycle { span, .. }
             | Self::StructuredRead { span, .. }
             | Self::StructuredReadIdentity { span, .. }
             | Self::ProviderCall { span, .. }
@@ -3524,6 +3531,39 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
+            ("process_start", 1)
+            | ("process_observe", 1)
+            | ("process_cancel", 1)
+            | ("process_reap", 1) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_18) {
+                    self.error(
+                        "MNP238",
+                        "owned process lifecycle requires source profile 0.18 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let Some(argument) = iter.next() else {
+                    return None;
+                };
+                Some(AstExpr::ProcessLifecycle {
+                    operation: name.text.clone(),
+                    argument: Box::new(argument),
+                    span,
+                })
+            }
+            ("process_start", _)
+            | ("process_observe", _)
+            | ("process_cancel", _)
+            | ("process_reap", _) => {
+                self.error(
+                    "MNP239",
+                    "owned process lifecycle operations take exactly one typed argument",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
             ("structured_read", 2) => {
                 if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_18) {
                     self.error(
@@ -5441,6 +5481,10 @@ fn is_profile08_intrinsic(name: &str) -> bool {
             | "sha256_digest"
             | "structured_digest"
             | "process_run"
+            | "process_start"
+            | "process_observe"
+            | "process_cancel"
+            | "process_reap"
             | "structured_read"
             | "structured_read_identity"
             | "provider_call"
