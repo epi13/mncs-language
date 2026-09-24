@@ -2316,23 +2316,55 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             return ExitCode::from(3);
         }
     };
-    let batch_calls: Vec<EmbedBatchCall> = selected
+    let mut callable_references = Vec::with_capacity(selected.len());
+    for test in &selected {
+        let reference = match session.callable_reference(&test.test_case_identity) {
+            Ok(reference) => reference,
+            Err(error) => {
+                eprintln!(
+                    "error: compiler-inventoried test identity {} is absent from the loaded artifact: {}",
+                    test.test_case_identity.0, error.message
+                );
+                return ExitCode::from(3);
+            }
+        };
+        if reference.callable_identity != test.function_identity
+            || reference.declaration_identity != test.declaration_identity
+            || reference.test_case_identity.as_ref() != Some(&test.test_case_identity)
+        {
+            eprintln!(
+                "error: loaded callable binding disagrees with compiler test inventory for {}",
+                test.test_case_identity.0
+            );
+            return ExitCode::from(3);
+        }
+        callable_references.push(reference);
+    }
+    let batch_calls: Vec<EmbedBatchCall> = callable_references
         .iter()
-        .map(|test| {
-            EmbedBatchCall::new(
-                test.module.clone(),
-                test.name.clone(),
-                Vec::new(),
-                call_options.clone(),
-            )
+        .map(|reference| {
+            EmbedBatchCall::identity(reference.clone(), Vec::new(), call_options.clone())
         })
         .collect();
     let batch_outputs = session.call_batch(&batch_calls);
     let mut test_reports = Vec::with_capacity(selected.len());
     let mut transport_failure = None;
-    for (index, (test, output)) in selected.iter().zip(batch_outputs).enumerate() {
+    for (index, ((test, callable_reference), output)) in selected
+        .iter()
+        .zip(callable_references.iter())
+        .zip(batch_outputs)
+        .enumerate()
+    {
+        let callable_invocation = output.invoked_callable.clone();
+        if callable_invocation.as_ref() != Some(callable_reference) {
+            transport_failure = Some(format!(
+                "identity dispatcher omitted or changed the callable receipt for {}",
+                test.test_case_identity.0
+            ));
+        }
         let request = serde_json::json!({
             "schema_version": "0.1",
+            "callable_reference": callable_reference,
             "target": {"module": test.module, "function": test.name},
             "arguments": [],
             "step_budget": options.step_budget
@@ -2433,6 +2465,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
                 "module": test.module,
                 "qualified_name": test.qualified_name,
                 "profile": test.profile,
+                "signature_identity": callable_reference.signature_identity,
                 "semantic_fingerprint": test.semantic_fingerprint,
                 "subject_identity": test.subject_identity,
                 "subject_fingerprint": test.subject_fingerprint
@@ -2449,6 +2482,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
                 "source": {"path": source_path, "sha256": source_sha256, "span": test.source_span},
                 "request": {"schema_version": "0.1", "sha256": request_artifact.as_ref().and_then(|artifact| artifact.get("sha256")), "artifact": request_artifact}
             },
+            "callable_invocation": callable_invocation,
             "native_result": native_result,
             "projection": projection,
             "execution": output

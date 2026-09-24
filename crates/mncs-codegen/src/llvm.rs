@@ -10,17 +10,17 @@ use std::fmt::Write;
 use mncs_model::{
     ArithmeticIntent, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
     BackendIdentity, BackendResult, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SsaModule,
-    TargetContractRef, TargetLoweringPlan, TransformationStatus, SSA_SCHEMA_VERSION,
+    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SSA_SCHEMA_VERSION,
+    SsaModule, TargetContractRef, TargetLoweringPlan, TransformationStatus,
 };
 
 use crate::native::{
-    argv_from_request, compile_and_run_with_call_file_full, host_matches_triple, host_triple,
-    probe_clang, probe_llc, NativeExecutable, ToolchainIdentity,
+    NativeExecutable, ToolchainIdentity, argv_from_request, compile_and_run_with_call_file_full,
+    host_matches_triple, host_triple, probe_clang, probe_llc,
 };
 use crate::scalar::{
-    abi_bits, llvm_type, lower_to_scalar, ScalarBlock, ScalarFunction, ScalarInst, ScalarModule,
-    ScalarTerm, ScalarTy, ScalarValue,
+    ScalarBlock, ScalarFunction, ScalarInst, ScalarModule, ScalarTerm, ScalarTy, ScalarValue,
+    abi_bits, llvm_type, lower_to_scalar,
 };
 use crate::support::NATIVE_ARENA_BYTES as NATIVE_ARENA_LEN;
 use crate::support::{
@@ -91,7 +91,7 @@ impl LlvmStatefulSession<'_> {
         ) {
             Ok(entry) => entry,
             Err(reason) => {
-                return execution_failure(result, ExecutionStatus::InvalidRequest, reason)
+                return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
             }
         };
         let Some(contract) = crate::support::entry_value_contract(
@@ -141,7 +141,7 @@ impl LlvmStatefulSession<'_> {
         let entry_depth = match crate::support::depth_seed_for_request(request) {
             Ok(seed) => seed,
             Err(reason) => {
-                return execution_failure(result, ExecutionStatus::InvalidRequest, reason)
+                return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
             }
         };
         let driver = llvm_driver(
@@ -172,7 +172,7 @@ impl LlvmStatefulSession<'_> {
             None => match argv_from_request(request) {
                 Ok(args) => args,
                 Err(reason) => {
-                    return execution_failure(result, ExecutionStatus::Unsupported, reason)
+                    return execution_failure(result, ExecutionStatus::Unsupported, reason);
                 }
             },
         };
@@ -539,6 +539,7 @@ pub fn lower_llvm(
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
+    .with_callable_bindings(crate::language_owned_callable_bindings(program))
     .with_composite_value_contracts(crate::support::composite_value_contracts(program))
     .with_interface_identity(crate::language_owned_interface_identity(program))
     .with_generic_entrypoints(crate::support::generic_entrypoint_records(program))
@@ -1579,8 +1580,14 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     8,
                     "seq-replace-dst",
                 );
-                let _ = writeln!(out, "  %rsgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %rsaddr{tag}_{lane}");
-                let _ = writeln!(out, "  %rdgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %rdaddr{tag}_{lane}");
+                let _ = writeln!(
+                    out,
+                    "  %rsgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %rsaddr{tag}_{lane}"
+                );
+                let _ = writeln!(
+                    out,
+                    "  %rdgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %rdaddr{tag}_{lane}"
+                );
                 let _ = writeln!(
                     out,
                     "  %rslot{tag}_{lane} = load {raw_ty}, ptr %rsgep{tag}_{lane}"
@@ -1619,7 +1626,10 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 8,
                 "seq-replace-idx",
             );
-            let _ = writeln!(out, "  %rige{store_tag} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %riaddr{store_tag}");
+            let _ = writeln!(
+                out,
+                "  %rige{store_tag} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %riaddr{store_tag}"
+            );
             let _ = writeln!(out, "  store {raw_ty} %{element}, ptr %rige{store_tag}");
         }
         ScalarInst::SequenceCopy {
@@ -1727,7 +1737,10 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     "  %csaddr{tag}_{lane} = add i64 {src_base}, %csoff{tag}_{lane}"
                 );
                 let _ = writeln!(out, "  %cdbase{tag}_{lane} = add i64 %{dbv}, {offset}");
-                let _ = writeln!(out, "  %csuse{tag}_{lane} = select i1 %cin{tag}_{lane}, i64 %csaddr{tag}_{lane}, i64 %cdbase{tag}_{lane}");
+                let _ = writeln!(
+                    out,
+                    "  %csuse{tag}_{lane} = select i1 %cin{tag}_{lane}, i64 %csaddr{tag}_{lane}, i64 %cdbase{tag}_{lane}"
+                );
                 emit_arena_guard(out, split, &format!("csuse{tag}_{lane}"), 8, "seq-copy-src");
                 emit_arena_guard(
                     out,
@@ -1736,8 +1749,14 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     8,
                     "seq-copy-dst",
                 );
-                let _ = writeln!(out, "  %csgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %csuse{tag}_{lane}");
-                let _ = writeln!(out, "  %cdgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %cdbase{tag}_{lane}");
+                let _ = writeln!(
+                    out,
+                    "  %csgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %csuse{tag}_{lane}"
+                );
+                let _ = writeln!(
+                    out,
+                    "  %cdgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %cdbase{tag}_{lane}"
+                );
                 let _ = writeln!(
                     out,
                     "  %csval{tag}_{lane} = load {raw_ty}, ptr %csgep{tag}_{lane}"
@@ -1746,10 +1765,16 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     out,
                     "  %cdval{tag}_{lane} = load {raw_ty}, ptr %cdgep{tag}_{lane}"
                 );
-                let _ = writeln!(out, "  %cval{tag}_{lane} = select i1 %cin{tag}_{lane}, {raw_ty} %csval{tag}_{lane}, {raw_ty} %cdval{tag}_{lane}");
+                let _ = writeln!(
+                    out,
+                    "  %cval{tag}_{lane} = select i1 %cin{tag}_{lane}, {raw_ty} %csval{tag}_{lane}, {raw_ty} %cdval{tag}_{lane}"
+                );
                 let _ = writeln!(out, "  %cddst{tag}_{lane} = add i64 %cal{tag}, {offset}");
                 emit_arena_guard(out, split, &format!("cddst{tag}_{lane}"), 8, "seq-copy-out");
-                let _ = writeln!(out, "  %cdgepo{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %cddst{tag}_{lane}");
+                let _ = writeln!(
+                    out,
+                    "  %cdgepo{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %cddst{tag}_{lane}"
+                );
                 let _ = writeln!(
                     out,
                     "  store {raw_ty} %cval{tag}_{lane}, ptr %cdgepo{tag}_{lane}"

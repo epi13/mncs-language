@@ -14,15 +14,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use mncs_model::{
     BackendArtifact, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
     BackendIdentity, BackendResult, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SsaModule,
-    TargetContractRef, TargetLoweringPlan, TransformationStatus, SSA_SCHEMA_VERSION,
+    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SSA_SCHEMA_VERSION,
+    SsaModule, TargetContractRef, TargetLoweringPlan, TransformationStatus,
 };
 
 use crate::support::{
     artifact_ref, empty_execution, execution_failure, failed, function_names, unknown,
     validate_realizable_ssa, validate_selected_ssa,
 };
-use crate::{support, BackendAdapter, BackendExecutionResult};
+use crate::{BackendAdapter, BackendExecutionResult, support};
 
 /// Static description of one externally realized target family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,8 +51,7 @@ pub const RISCV32_SPEC: ExternalTargetSpec = ExternalTargetSpec {
     filetype: "obj",
     format: "application/x-elf; arch=riscv32",
     artifact_kind: "elf_object_riscv32",
-    execution_note:
-        "artifact generation plus external ELF validation; no RISC-V emulator is installed on this host",
+    execution_note: "artifact generation plus external ELF validation; no RISC-V emulator is installed on this host",
 };
 
 pub const EBPF_SPEC: ExternalTargetSpec = ExternalTargetSpec {
@@ -64,8 +63,7 @@ pub const EBPF_SPEC: ExternalTargetSpec = ExternalTargetSpec {
     filetype: "obj",
     format: "application/x-elf; arch=ebpf",
     artifact_kind: "elf_object_ebpf",
-    execution_note:
-        "artifact generation plus external disassembly validation; no kernel verifier was run on this host",
+    execution_note: "artifact generation plus external disassembly validation; no kernel verifier was run on this host",
 };
 
 pub const PTX64_SPEC: ExternalTargetSpec = ExternalTargetSpec {
@@ -77,8 +75,7 @@ pub const PTX64_SPEC: ExternalTargetSpec = ExternalTargetSpec {
     filetype: "asm",
     format: "text/x-ptx; arch=nvptx64",
     artifact_kind: "ptx_module",
-    execution_note:
-        "PTX generation only; no ptxas or CUDA driver is installed on this host so GPU execution cannot be observed",
+    execution_note: "PTX generation only; no ptxas or CUDA driver is installed on this host so GPU execution cannot be observed",
 };
 
 impl ExternalTargetSpec {
@@ -641,7 +638,7 @@ pub fn lower_external(
                     code: "CGX411",
                     message: format!("artifact failed structural validation: {reason}"),
                 },
-            )
+            );
         }
     };
     let mut assumptions = vec![
@@ -679,6 +676,7 @@ pub fn lower_external(
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(support::function_value_contracts(program))
+    .with_callable_bindings(crate::language_owned_callable_bindings(program))
     .with_composite_value_contracts(support::composite_value_contracts(program))
     .with_interface_identity(crate::language_owned_interface_identity(program))
     .with_generic_entrypoints(support::generic_entrypoint_records(program));
@@ -849,7 +847,7 @@ mod concurrency_tests {
 
     use std::collections::HashSet;
 
-    use super::{RealizeError, RISCV32_SPEC};
+    use super::{RISCV32_SPEC, RealizeError};
 
     /// Minimal IR accepted by `llc -mtriple=riscv32 -mattr=+m -filetype=obj`.
     const PROBE_IR: &str = "define i32 @probe_min(i32 %a, i32 %b) {\nentry:\n  %c = icmp sgt i32 %a, %b\n  %m = select i1 %c, i32 %b, i32 %a\n  ret i32 %m\n}\n";

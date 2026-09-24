@@ -73,7 +73,8 @@ pub use capability_gap::{
 };
 pub use cfg::{Cfg, CfgBlock, CFG_SCHEMA_VERSION};
 pub use compiler::{
-    AbiTypeRef, ArtifactRepresentation, BackendArtifact, BackendCapabilityManifest,
+    AbiTypeRef, ArtifactRepresentation, BackendArtifact, BackendCallableBinding,
+    BackendCapabilityManifest,
     BackendConfiguration, BackendEvidence, BackendFunctionValueContract, BackendIdentity,
     BackendResult, BackendValueContract, BuildHostIdentity, CompilationEmissions,
     CompilationEvidenceBundle, CompilationRequest, CompilationResult, CompilationStatus,

@@ -18,29 +18,29 @@ mod support;
 mod wasm;
 
 use std::collections::BTreeMap;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Instant;
 
 use mncs_model::{
-    execute_ssa_module, execute_ssa_module_prevalidated,
-    execute_stateful_case_with_checkpoint_scoped, stateful_prefix_identity, ArtifactRepresentation,
-    BackendArtifact, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
-    BackendFunctionValueContract, BackendIdentity, BackendResult, BackendValueContract,
-    BodyExecutionSession, BodyType, CompilerArtifactRef, CompilerDiagnostic,
+    ArtifactRepresentation, BACKEND_ARTIFACT_SCHEMA_VERSION, BackendArtifact,
+    BackendCapabilityManifest, BackendConfiguration, BackendEvidence, BackendFunctionValueContract,
+    BackendIdentity, BackendResult, BackendValueContract, BodyExecutionSession, BodyType,
+    COMPILER_ARTIFACT_SCHEMA_VERSION, CompilerArtifactRef, CompilerDiagnostic,
     CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult,
     ExecutionStatus, ExecutionTarget, ExecutionValue, HostExecutionValue, HostGrant, IntegerType,
-    Program, SemanticId, SsaExecutionSession, SsaModule, StatefulCallResult, StatefulExecutionCase,
-    StatefulExecutionCheckpoint, StatefulExecutionResult, TargetContractRef, TargetLoweringPlan,
-    TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
     LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
-    PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET, SSA_SCHEMA_VERSION,
+    PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET, Program, SSA_SCHEMA_VERSION,
+    SemanticId, SsaExecutionSession, SsaModule, StatefulCallResult, StatefulExecutionCase,
+    StatefulExecutionCheckpoint, StatefulExecutionResult, TargetContractRef, TargetLoweringPlan,
+    TransformationStatus, execute_ssa_module, execute_ssa_module_prevalidated,
+    execute_stateful_case_with_checkpoint_scoped, stateful_prefix_identity,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::lower::lower_module;
 use crate::support::{function_value_contracts, validate_realizable_ssa};
-use crate::wasm::{decode_module, encode_module, execute_function_typed, WASM_MAGIC, WASM_VERSION};
+use crate::wasm::{WASM_MAGIC, WASM_VERSION, decode_module, encode_module, execute_function_typed};
 
 pub const PORTABLE_WASM_FORMAT: &str = "application/wasm; mncs-portable-wasm-mvp-0.1";
 pub const PORTABLE_WASM_ARTIFACT_KIND: &str = "wasm_module";
@@ -107,6 +107,8 @@ pub struct CompiledInstantiationAbi {
 #[derive(Debug, Clone, Serialize)]
 pub struct LanguageOwnedFunctionAbi {
     pub function_identity: SemanticId,
+    pub declaration_identity: SemanticId,
+    pub signature_identity: String,
     pub declaring_module: String,
     pub name: String,
     pub inputs: Vec<BackendValueContract>,
@@ -119,6 +121,10 @@ pub struct LanguageOwnedFunctionAbi {
     /// "value": N}` for `Nat`, `{"kind": "type", "type": "<semantic
     /// name>"}` for `Type`) against the `target` module and this `name`.
     pub generic_params: Vec<mncs_model::GenericParam>,
+    pub effects: Vec<mncs_model::Effect>,
+    pub capabilities: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_case_identity: Option<SemanticId>,
     /// True exactly when `generic_params` is non-empty: the entry runs
     /// only through a compiled specialization selected by explicit
     /// `type_arguments`, never bare.
@@ -134,23 +140,62 @@ struct LanguageOwnedAbiMaterial<'a> {
     host_abi_version: &'a str,
     typed_call_schema_version: &'a str,
     module: &'a str,
-    functions: &'a BTreeMap<String, LanguageOwnedFunctionAbi>,
+    functions: &'a BTreeMap<String, LanguageOwnedFunctionIdentityMaterial<'a>>,
     composites: &'a BTreeMap<String, BackendValueContract>,
 }
 
+/// The aggregate interface identity preserves its established contract
+/// material. Per-callable declaration, effect, and signature metadata is
+/// exposed alongside the ABI for identity-bound calls, while each callable's
+/// own `signature_identity` protects those additional facts independently.
+#[derive(Serialize)]
+struct LanguageOwnedFunctionIdentityMaterial<'a> {
+    function_identity: &'a SemanticId,
+    declaring_module: &'a str,
+    name: &'a str,
+    inputs: &'a [BackendValueContract],
+    outputs: &'a [BackendValueContract],
+    input_names: &'a [String],
+    output_names: &'a [String],
+    generic_params: &'a [mncs_model::GenericParam],
+    requires_type_arguments: bool,
+    compiled_instantiations: &'a [CompiledInstantiationAbi],
+}
+
 /// Return the identity of the language-owned callable interface for a
-/// validated program.  This is deliberately the same material emitted by
-/// `mncs abi`; every host binding and every fresh backend artifact therefore
-/// names one canonical interface rather than maintaining a second hash
-/// recipe in the host language.
+/// validated program. The aggregate hash keeps the established `mncs abi`
+/// contract fields stable; supplemental compiler identity/effect metadata is
+/// protected by each callable's `signature_identity`. Every host binding and
+/// fresh backend artifact therefore shares one aggregate interface identity
+/// and one precise per-callable boundary.
 pub fn language_owned_interface_identity(program: &Program) -> String {
     let (functions, composites) = language_owned_abi_contracts(program);
+    let identity_functions = functions
+        .iter()
+        .map(|(key, function)| {
+            (
+                key.clone(),
+                LanguageOwnedFunctionIdentityMaterial {
+                    function_identity: &function.function_identity,
+                    declaring_module: &function.declaring_module,
+                    name: &function.name,
+                    inputs: &function.inputs,
+                    outputs: &function.outputs,
+                    input_names: &function.input_names,
+                    output_names: &function.output_names,
+                    requires_type_arguments: function.requires_type_arguments,
+                    generic_params: &function.generic_params,
+                    compiled_instantiations: &function.compiled_instantiations,
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let material = LanguageOwnedAbiMaterial {
         schema_version: LANGUAGE_OWNED_ABI_SCHEMA_VERSION,
         host_abi_version: HOST_ABI_VERSION,
         typed_call_schema_version: TYPED_CALL_SCHEMA_VERSION,
         module: &program.module,
-        functions: &functions,
+        functions: &identity_functions,
         composites: &composites,
     };
     mncs_model::sha256_hex(
@@ -172,6 +217,13 @@ pub fn language_owned_abi_contracts(
 ) {
     let (value_contracts, composites) = language_owned_value_contracts(program);
     let mut functions = BTreeMap::new();
+    let identities = program.semantic_identities();
+    let test_cases = identities
+        .objects
+        .iter()
+        .filter(|record| record.kind == mncs_model::IdentityKind::TestCase)
+        .map(|record| record.identity.clone())
+        .collect::<Vec<_>>();
 
     for function in &program.functions {
         let Some(contract) = value_contracts.get(&function.name) else {
@@ -179,6 +231,42 @@ pub fn language_owned_abi_contracts(
         };
         let function_identity =
             mncs_model::function_id(function.identity_namespace(&program.module), &function.name);
+        let declaring_module = function.identity_namespace(&program.module).to_owned();
+        let declaration_identity = if function.is_test {
+            mncs_model::test_declaration_id(&declaring_module, &function.name)
+        } else {
+            function_identity.clone()
+        };
+        let test_case_identity = function.is_test.then(|| {
+            let prefix = format!("mncs:0.2:test-case:{declaring_module}::{}::", function.name);
+            test_cases
+                .iter()
+                .find(|identity| identity.0.starts_with(&prefix))
+                .expect("compiler test declaration has one test-case identity")
+                .clone()
+        });
+        let mut effects = function.effects.clone();
+        effects.sort_by(|left, right| {
+            (&left.kind, &left.target, &left.capability).cmp(&(
+                &right.kind,
+                &right.target,
+                &right.capability,
+            ))
+        });
+        effects.dedup();
+        let mut capabilities = function.capabilities.clone();
+        capabilities.sort();
+        capabilities.dedup();
+        let signature_identity = mncs_model::BackendCallableBinding::signature_identity_for(
+            &function_identity,
+            &declaration_identity,
+            &declaring_module,
+            &function.name,
+            contract,
+            &function.generic_params,
+            &effects,
+            &capabilities,
+        );
         // Instantiations of this declaration, in declaration-independent
         // order: the host addresses them through `type_arguments`, never
         // by guessing specialization entry names.
@@ -241,7 +329,9 @@ pub fn language_owned_abi_contracts(
         });
         let declaration = LanguageOwnedFunctionAbi {
             function_identity,
-            declaring_module: function.identity_namespace(&program.module).to_owned(),
+            declaration_identity,
+            signature_identity,
+            declaring_module,
             name: function.name.clone(),
             inputs: contract.inputs.clone(),
             outputs: contract.outputs.clone(),
@@ -249,6 +339,9 @@ pub fn language_owned_abi_contracts(
             output_names: contract.output_names.clone(),
             requires_type_arguments: !function.generic_params.is_empty(),
             generic_params: function.generic_params.clone(),
+            effects,
+            capabilities,
+            test_case_identity,
             compiled_instantiations,
         };
 
@@ -262,6 +355,87 @@ pub fn language_owned_abi_contracts(
     }
 
     (functions, composites)
+}
+
+/// Build the compiler-owned identity map embedded in each artifact. Generated
+/// generic specialization bodies are deliberately omitted: generic
+/// declarations keep one stable callable identity and use the artifact's
+/// generic-entrypoint table for type-argument binding.
+pub fn language_owned_callable_bindings(
+    program: &Program,
+) -> Vec<mncs_model::BackendCallableBinding> {
+    let contracts = function_value_contracts(program);
+    let identities = program.semantic_identities();
+    let test_cases = identities
+        .objects
+        .iter()
+        .filter(|record| record.kind == mncs_model::IdentityKind::TestCase)
+        .map(|record| record.identity.clone())
+        .collect::<Vec<_>>();
+    let specialization_ids = program
+        .generic_specializations
+        .iter()
+        .map(|record| record.specialization_function.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut bindings = Vec::new();
+    for function in &program.functions {
+        let module = function.identity_namespace(&program.module).to_owned();
+        let callable_identity = mncs_model::function_id(&module, &function.name);
+        if specialization_ids.contains(&callable_identity) {
+            continue;
+        }
+        let Some(contract) = contracts.get(&format!("{module}::{}", function.name)) else {
+            continue;
+        };
+        let declaration_identity = if function.is_test {
+            mncs_model::test_declaration_id(&module, &function.name)
+        } else {
+            callable_identity.clone()
+        };
+        let test_case_identity = function.is_test.then(|| {
+            let prefix = format!("mncs:0.2:test-case:{module}::{}::", function.name);
+            test_cases
+                .iter()
+                .find(|identity| identity.0.starts_with(&prefix))
+                .expect("compiler test declaration has one test-case identity")
+                .clone()
+        });
+        let mut effects = function.effects.clone();
+        effects.sort_by(|left, right| {
+            (&left.kind, &left.target, &left.capability).cmp(&(
+                &right.kind,
+                &right.target,
+                &right.capability,
+            ))
+        });
+        effects.dedup();
+        let mut capabilities = function.capabilities.clone();
+        capabilities.sort();
+        capabilities.dedup();
+        let signature_identity = mncs_model::BackendCallableBinding::signature_identity_for(
+            &callable_identity,
+            &declaration_identity,
+            &module,
+            &function.name,
+            contract,
+            &function.generic_params,
+            &effects,
+            &capabilities,
+        );
+        bindings.push(mncs_model::BackendCallableBinding {
+            callable_identity,
+            declaration_identity,
+            signature_identity,
+            module,
+            function: function.name.clone(),
+            test_case_identity,
+            generic_params: function.generic_params.clone(),
+            effects,
+            capabilities,
+        });
+    }
+    bindings.sort_by(|left, right| left.callable_identity.cmp(&right.callable_identity));
+    bindings
 }
 
 /// Resolve name-oriented host values against a function contract.  This is
@@ -298,6 +472,31 @@ pub fn resolve_typed_arguments_for_artifact(
         ));
     };
     resolve_typed_arguments(contract, &artifact.composite_value_contracts, values)
+}
+
+/// Resolve a compiled callable entry and validate canonical runtime values
+/// against its artifact-owned typed contract before the executor starts the
+/// function body.
+pub fn validate_execution_arguments_for_artifact(
+    artifact: &BackendArtifact,
+    module: &str,
+    function: &str,
+    type_arguments: &[mncs_model::ExecutionTypeArgument],
+    values: &[ExecutionValue],
+) -> Result<(String, String), String> {
+    let (entry_module, entry_function) =
+        support::resolve_request_entry(artifact, module, function, type_arguments)?;
+    let Some(contract) = support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &entry_module,
+        &entry_function,
+    ) else {
+        return Err(format!(
+            "typed call target {entry_module}::{entry_function} has no language-owned value contract"
+        ));
+    };
+    support::validate_execution_arguments(contract, &artifact.composite_value_contracts, values)?;
+    Ok((entry_module, entry_function))
 }
 
 /// Resolve a typed call against a validated source program.  This path is
@@ -362,16 +561,16 @@ pub trait BackendAdapter {
 pub struct PortableWasmAdapter;
 pub struct ResearchBytecodeAdapter;
 
-pub use c11::{C11Adapter, C11_ARTIFACT_KIND, C11_BACKEND_NAME};
-pub use cranelift_backend::{CraneliftAdapter, CRANELIFT_ARTIFACT_KIND, CRANELIFT_BACKEND_NAME};
-pub use llvm::{LlvmAdapter, LLVM_ARTIFACT_KIND, LLVM_BACKEND_NAME};
+pub use c11::{C11_ARTIFACT_KIND, C11_BACKEND_NAME, C11Adapter};
+pub use cranelift_backend::{CRANELIFT_ARTIFACT_KIND, CRANELIFT_BACKEND_NAME, CraneliftAdapter};
+pub use llvm::{LLVM_ARTIFACT_KIND, LLVM_BACKEND_NAME, LlvmAdapter};
 pub use matrix::{
-    backend_family_matrix, profile_support_for, with_experiment_status, BackendFamilyMatrix,
-    BackendMatrixRow, BackendProfileSupport,
+    BackendFamilyMatrix, BackendMatrixRow, BackendProfileSupport, backend_family_matrix,
+    profile_support_for, with_experiment_status,
 };
 pub use promises::{
-    integer_no_overflow_promise, proof_backed_no_overflow_certificate, LoweringPromise,
-    PROOF_RANGE_METHOD,
+    LoweringPromise, PROOF_RANGE_METHOD, integer_no_overflow_promise,
+    proof_backed_no_overflow_certificate,
 };
 
 pub fn backend_names() -> Vec<&'static str> {
@@ -927,6 +1126,7 @@ pub fn lower_selected_ssa(
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
+    .with_callable_bindings(language_owned_callable_bindings(program))
     .with_composite_value_contracts(crate::support::composite_value_contracts(program))
     .with_interface_identity(crate::language_owned_interface_identity(program))
     .with_generic_entrypoints(crate::support::generic_entrypoint_records(program));
@@ -1052,6 +1252,7 @@ pub fn lower_research_bytecode(
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
+    .with_callable_bindings(language_owned_callable_bindings(program))
     .with_composite_value_contracts(crate::support::composite_value_contracts(program))
     .with_interface_identity(crate::language_owned_interface_identity(program))
     .with_generic_entrypoints(crate::support::generic_entrypoint_records(program));
@@ -2419,7 +2620,9 @@ impl OwnedExecutionSession {
                 }
                 Err(reason) => {
                     if std::env::var_os("MNCS_RUNTIME_PROFILE").is_some() {
-                        eprintln!("mncs-backend-profile backend=mncs-cranelift prepared=false reason={reason}");
+                        eprintln!(
+                            "mncs-backend-profile backend=mncs-cranelift prepared=false reason={reason}"
+                        );
                     }
                     None
                 }
@@ -3298,19 +3501,25 @@ mod tests {
         assert!(wasm.identity_is_valid());
         assert!(bytecode.identity_is_valid());
         assert_ne!(wasm.backend, bytecode.backend);
-        assert!(bytecode
+        assert!(
+            bytecode
             .artifact_kinds
-            .contains(RESEARCH_BYTECODE_ARTIFACT_KIND));
-        assert!(!bytecode
+                .contains(RESEARCH_BYTECODE_ARTIFACT_KIND)
+        );
+        assert!(
+            !bytecode
             .artifact_kinds
-            .contains(PORTABLE_WASM_ARTIFACT_KIND));
+                .contains(PORTABLE_WASM_ARTIFACT_KIND)
+        );
         let matrix = backend_family_matrix();
         // Five in-tree realizations plus three external-LLVM target families.
         assert_eq!(matrix.backends.len(), 8);
-        assert!(matrix
+        assert!(
+            matrix
             .planned_unimplemented
             .iter()
-            .any(|name| name.contains("spir-v")));
+                .any(|name| name.contains("spir-v"))
+        );
         assert!(backend_adapter("mncs-riscv32").is_some());
         assert!(backend_adapter("mncs-ebpf").is_some());
         assert!(backend_adapter("mncs-ptx64").is_some());
@@ -3386,10 +3595,12 @@ mod tests {
         let plan = portable_wasm_plan(selected.clone());
         let result = lower_selected_ssa(&program, &ssa, selected, &plan);
         assert_eq!(result.status, TransformationStatus::Fail);
-        assert!(result
+        assert!(
+            result
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "CGN103"));
+                .any(|diagnostic| diagnostic.code == "CGN103")
+        );
     }
 
     #[test]
@@ -3398,10 +3609,12 @@ mod tests {
         let artifact = result.artifact.unwrap();
         let ir = String::from_utf8(artifact.bytes().unwrap()).unwrap();
         assert!(ir.contains("llvm.sadd.with.overflow") || ir.contains("with.overflow"));
-        assert!(artifact
+        assert!(
+            artifact
             .assumptions
             .iter()
-            .any(|assumption| assumption.contains("withheld")));
+                .any(|assumption| assumption.contains("withheld"))
+        );
         assert!(!ir.contains(" add nsw i32"));
     }
 
@@ -3461,10 +3674,12 @@ mod tests {
             mncs_model::BackendPromise::NonAliasing,
             mncs_model::BackendPromise::Relaxation,
         ] {
-            assert!(artifact
+            assert!(
+                artifact
                 .promise_decisions
                 .iter()
-                .any(|decision| decision.promise == promise && !decision.permitted));
+                    .any(|decision| decision.promise == promise && !decision.permitted)
+            );
         }
         let mut tampered = artifact.clone();
         tampered.promise_decisions[0]

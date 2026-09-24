@@ -8,13 +8,13 @@
 use std::collections::BTreeSet;
 
 use mncs_model::{
-    finite_type_id, function_id, module_id, program_id, record_type_id, test_case_id,
-    test_declaration_id, Effect, GenericParam, GenericParamKind, SemanticId, Value,
+    Effect, GenericParam, GenericParamKind, SemanticId, Value, finite_type_id, function_id,
+    module_id, program_id, record_type_id, test_case_id, test_declaration_id,
 };
-use mncs_syntax::{source_profile_registry_snapshot, SourceSpan};
+use mncs_syntax::{SourceSpan, source_profile_registry_snapshot};
 use serde::Serialize;
 
-use crate::{fingerprint, SourceFrontEndResult};
+use crate::{SourceFrontEndResult, fingerprint};
 
 pub const LANGUAGE_INVENTORY_SCHEMA_VERSION: &str = "mncs.language-inventory/1";
 pub const DECLARATION_INVENTORY_SCHEMA_VERSION: &str = "mncs.declaration-inventory/1";
@@ -85,6 +85,10 @@ pub struct DeclarationInventoryEntry {
 pub struct CallableInventoryEntry {
     pub declaration_identity: SemanticId,
     pub callable_identity: SemanticId,
+    /// Per-declaration typed signature identity emitted by elaborated
+    /// inventories. Syntax-only projections cannot resolve imported nominal
+    /// types and therefore serialize `null` here.
+    pub signature_identity: Option<String>,
     pub callable_kind: String,
     pub module: String,
     pub name: String,
@@ -540,6 +544,7 @@ pub fn declaration_inventory(front_end: &SourceFrontEndResult) -> Option<Declara
     }
 
     let mut callables = Vec::new();
+    let abi_functions = mncs_codegen::language_owned_abi_contracts(&program).0;
     for ast_function in &ast.functions {
         let Some(function) = program.functions.iter().find(|candidate| {
             candidate.home_module.is_none() && candidate.name == ast_function.name.text
@@ -547,6 +552,10 @@ pub fn declaration_inventory(front_end: &SourceFrontEndResult) -> Option<Declara
             continue;
         };
         let callable_identity = function_id(&program.module, &function.name);
+        let signature_identity = abi_functions
+            .values()
+            .find(|entry| entry.function_identity == callable_identity)
+            .map(|entry| entry.signature_identity.clone());
         let declaration_identity = if function.is_test {
             test_declaration_id(&program.module, &function.name)
         } else {
@@ -569,6 +578,7 @@ pub fn declaration_inventory(front_end: &SourceFrontEndResult) -> Option<Declara
         callables.push(CallableInventoryEntry {
             declaration_identity,
             callable_identity,
+            signature_identity,
             callable_kind: if function.is_test { "test" } else { "function" }.to_owned(),
             module: program.module.clone(),
             name: function.name.clone(),
@@ -744,6 +754,7 @@ pub fn declaration_inventory_from_ast(
         callables.push(CallableInventoryEntry {
             declaration_identity,
             callable_identity,
+            signature_identity: None,
             callable_kind: if function.is_test { "test" } else { "function" }.to_owned(),
             module: module.clone(),
             name: function.name.text.clone(),
@@ -793,10 +804,11 @@ mod tests {
         let left = language_inventory();
         let right = language_inventory();
         assert_eq!(left, right);
-        assert!(left
-            .intrinsics
+        assert!(
+            left.intrinsics
             .iter()
-            .all(|intrinsic| !intrinsic.name.starts_with("elaborate_")));
+                .all(|intrinsic| !intrinsic.name.starts_with("elaborate_"))
+        );
         assert_eq!(
             left.current_profile,
             left.profiles.last().expect("registry is non-empty").version

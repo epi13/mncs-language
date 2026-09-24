@@ -24,7 +24,8 @@ use mncs_codegen::OwnedExecutionSession;
 use mncs_model::{
     BackendArtifact, EffectExecutionPolicy, ExecutionPolicy, ExecutionRequest, ExecutionStatus,
     ExecutionTarget, ExecutionTypeArgument, ExecutionValue, HostExecutionValue,
-    HostGenericSeedRequest, HostGrant, EXECUTION_REQUEST_SCHEMA_VERSION, HOST_GRANT_MAX_BYTES,
+    HostGenericSeedRequest, HostGrant, SemanticId, EXECUTION_REQUEST_SCHEMA_VERSION,
+    HOST_GRANT_MAX_BYTES,
 };
 use serde::{Deserialize, Serialize};
 
@@ -88,6 +89,12 @@ impl Artifact {
                 format!("artifact JSON rejected: {error}"),
             )
         })?;
+        if let Some(identity) = artifact.ambiguous_callable_identity() {
+            return Err(EmbedError::new(
+                "ambiguous_callable_identity",
+                format!("backend artifact declares callable identity {identity} more than once"),
+            ));
+        }
         if !artifact.identity_is_valid() {
             return Err(EmbedError::new(
                 "invalid_identity",
@@ -316,13 +323,31 @@ impl CallOptions {
     }
 }
 
+/// A compiler-owned callable resolved in one exact loaded artifact.
+/// References are revision-bound even when the callable declaration and its
+/// signature remain stable across body changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallableReference {
+    pub artifact_identity: SemanticId,
+    pub callable_identity: SemanticId,
+    pub declaration_identity: SemanticId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_case_identity: Option<SemanticId>,
+    pub signature_identity: String,
+}
+
 /// One typed invocation in a retained-session batch.  The Rust API keeps
 /// values typed; the JSON/C ABI batch below is only the external
 /// interoperability projection of the same operation.
 #[derive(Debug, Clone)]
+pub enum BatchCallTarget {
+    Named { module: String, function: String },
+    Callable(CallableReference),
+}
+
+#[derive(Debug, Clone)]
 pub struct BatchCall {
-    pub module: String,
-    pub function: String,
+    pub target: BatchCallTarget,
     pub arguments: Vec<ExecutionValue>,
     pub options: CallOptions,
 }
@@ -335,8 +360,22 @@ impl BatchCall {
         options: CallOptions,
     ) -> Self {
         Self {
-            module: module.into(),
-            function: function.into(),
+            target: BatchCallTarget::Named {
+                module: module.into(),
+                function: function.into(),
+            },
+            arguments,
+            options,
+        }
+    }
+
+    pub fn identity(
+        reference: CallableReference,
+        arguments: Vec<ExecutionValue>,
+        options: CallOptions,
+    ) -> Self {
+        Self {
+            target: BatchCallTarget::Callable(reference),
             arguments,
             options,
         }
@@ -358,6 +397,8 @@ pub struct CallOutput {
     pub artifact_sha256: String,
     pub backend: String,
     pub reused_session: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invoked_callable: Option<CallableReference>,
 }
 
 /// A retained execution session for one verified artifact. Artifact-level
@@ -399,6 +440,245 @@ impl Session {
         self.inner.artifact().interface_identity.as_deref()
     }
 
+    /// Resolve one compiler-issued callable, declaration, or test-case
+    /// identity from this loaded artifact. The returned reference records
+    /// the exact artifact revision and signature that established ownership.
+    pub fn callable_reference(
+        &self,
+        identity: &SemanticId,
+    ) -> Result<CallableReference, EmbedError> {
+        let artifact = self.inner.artifact();
+        let matches = artifact
+            .callable_bindings
+            .iter()
+            .filter(|binding| {
+                &binding.callable_identity == identity
+                    || &binding.declaration_identity == identity
+                    || binding.test_case_identity.as_ref() == Some(identity)
+            })
+            .collect::<Vec<_>>();
+        let binding = match matches.as_slice() {
+            [] if artifact.callable_bindings.is_empty() => {
+                return Err(EmbedError::new(
+                    "missing_callable_metadata",
+                    "loaded artifact predates compiler-owned callable bindings; recompile it",
+                ));
+            }
+            [] => {
+                return Err(EmbedError::new(
+                    "unknown_callable_identity",
+                    format!("callable identity {identity} is not present in the loaded artifact"),
+                ));
+            }
+            [binding] => *binding,
+            _ => {
+                return Err(EmbedError::new(
+                    "ambiguous_callable_identity",
+                    format!("callable identity {identity} resolves to multiple declarations"),
+                ));
+            }
+        };
+        Ok(CallableReference {
+            artifact_identity: artifact.identity.clone(),
+            callable_identity: binding.callable_identity.clone(),
+            declaration_identity: binding.declaration_identity.clone(),
+            test_case_identity: binding.test_case_identity.clone(),
+            signature_identity: binding.signature_identity.clone(),
+        })
+    }
+
+    /// Execute one compiler-owned callable reference using the same runtime,
+    /// typed value membrane, generic specialization table, grants, and effect
+    /// policy as named invocation.
+    pub fn call_identity(
+        &self,
+        reference: &CallableReference,
+        arguments: Vec<ExecutionValue>,
+        options: &CallOptions,
+    ) -> Result<CallOutput, EmbedError> {
+        let binding = self.verify_callable_reference(reference)?;
+        self.validate_expected_interface_identity(options)?;
+        self.validate_binding_arguments(binding, &arguments, &options.type_arguments)?;
+        let mut output = self.call(&binding.module, &binding.function, arguments, options);
+        output.invoked_callable = Some(reference.clone());
+        Ok(output)
+    }
+
+    /// Name-oriented typed values dispatched by compiler-owned callable
+    /// identity. Values are resolved and checked against the selected
+    /// declaration before execution begins.
+    pub fn call_identity_typed(
+        &self,
+        reference: &CallableReference,
+        values: Vec<HostExecutionValue>,
+        options: &CallOptions,
+    ) -> Result<CallOutput, EmbedError> {
+        let binding = self.verify_callable_reference(reference)?;
+        self.validate_expected_interface_identity(options)?;
+        self.validate_generic_arguments(binding, &options.type_arguments)?;
+        let arguments = mncs_codegen::resolve_typed_arguments_for_artifact(
+            self.inner.artifact(),
+            &binding.module,
+            &binding.function,
+            &options.type_arguments,
+            &values,
+        )
+        .map_err(|error| EmbedError::new("bad_typed_arguments", error))?;
+        self.call_identity(reference, arguments, options)
+    }
+
+    fn validate_expected_interface_identity(
+        &self,
+        options: &CallOptions,
+    ) -> Result<(), EmbedError> {
+        if let Some(expected) = options.expected_interface_identity.as_deref() {
+            let Some(actual) = self.interface_identity() else {
+                return Err(EmbedError::new(
+                    "stale_interface",
+                    "artifact has no language-owned interface identity; regenerate the host binding",
+                ));
+            };
+            if expected != actual {
+                return Err(EmbedError::new(
+                    "stale_interface",
+                    format!(
+                        "interface identity mismatch: expected {expected}, loaded {actual}; regenerate the host binding"
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_callable_reference(
+        &self,
+        reference: &CallableReference,
+    ) -> Result<&mncs_model::BackendCallableBinding, EmbedError> {
+        let artifact = self.inner.artifact();
+        if reference.artifact_identity != artifact.identity {
+            return Err(EmbedError::new(
+                "artifact_identity_mismatch",
+                format!(
+                    "callable reference belongs to artifact {}, loaded artifact is {}",
+                    reference.artifact_identity, artifact.identity
+                ),
+            ));
+        }
+        let mut matches = artifact
+            .callable_bindings
+            .iter()
+            .filter(|binding| binding.callable_identity == reference.callable_identity);
+        let Some(binding) = matches.next() else {
+            return Err(EmbedError::new(
+                "unknown_callable_identity",
+                format!(
+                    "callable identity {} is not present in the loaded artifact",
+                    reference.callable_identity
+                ),
+            ));
+        };
+        if matches.next().is_some() {
+            return Err(EmbedError::new(
+                "ambiguous_callable_identity",
+                format!(
+                    "callable identity {} resolves to multiple declarations",
+                    reference.callable_identity
+                ),
+            ));
+        }
+        if binding.declaration_identity != reference.declaration_identity
+            || binding.test_case_identity != reference.test_case_identity
+        {
+            return Err(EmbedError::new(
+                "stale_declaration_identity",
+                format!(
+                    "callable {} has a different declaration or test-case identity in the loaded artifact",
+                    reference.callable_identity
+                ),
+            ));
+        }
+        if binding.signature_identity != reference.signature_identity {
+            return Err(EmbedError::new(
+                "signature_identity_mismatch",
+                format!(
+                    "callable {} signature identity mismatch",
+                    reference.callable_identity
+                ),
+            ));
+        }
+        Ok(binding)
+    }
+
+    fn validate_binding_arguments(
+        &self,
+        binding: &mncs_model::BackendCallableBinding,
+        arguments: &[ExecutionValue],
+        type_arguments: &[ExecutionTypeArgument],
+    ) -> Result<(), EmbedError> {
+        self.validate_generic_arguments(binding, type_arguments)?;
+        mncs_codegen::validate_execution_arguments_for_artifact(
+            self.inner.artifact(),
+            &binding.module,
+            &binding.function,
+            type_arguments,
+            arguments,
+        )
+        .map(|_| ())
+        .map_err(|error| EmbedError::new("invalid_callable_arguments", error))
+    }
+
+    fn validate_generic_arguments(
+        &self,
+        binding: &mncs_model::BackendCallableBinding,
+        type_arguments: &[ExecutionTypeArgument],
+    ) -> Result<(), EmbedError> {
+        if binding.generic_params.len() != type_arguments.len() {
+            let message = if binding.generic_params.is_empty() {
+                format!(
+                    "callable {} takes no generic type arguments, received {}",
+                    binding.callable_identity,
+                    type_arguments.len()
+                )
+            } else if type_arguments.is_empty() {
+                format!(
+                    "callable {} requires {} generic type argument(s)",
+                    binding.callable_identity,
+                    binding.generic_params.len()
+                )
+            } else {
+                format!(
+                    "callable {} expects {} generic type argument(s), received {}",
+                    binding.callable_identity,
+                    binding.generic_params.len(),
+                    type_arguments.len()
+                )
+            };
+            return Err(EmbedError::new("invalid_type_arguments", message));
+        }
+        for (parameter, argument) in binding.generic_params.iter().zip(type_arguments) {
+            let matches = matches!(
+                (parameter.kind, argument),
+                (
+                    mncs_model::GenericParamKind::Type,
+                    ExecutionTypeArgument::Type { .. }
+                ) | (
+                    mncs_model::GenericParamKind::Nat,
+                    ExecutionTypeArgument::Nat { .. }
+                )
+            );
+            if !matches {
+                return Err(EmbedError::new(
+                    "invalid_type_arguments",
+                    format!(
+                        "generic parameter {} expects {:?}, received a different type-argument kind",
+                        parameter.name, parameter.kind
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Execute one named entrypoint with canonical ABI values. A
     /// zero `step_budget` in `options` selects the default bound.
     /// Generic entrypoints run through the explicit `type_arguments`
@@ -422,6 +702,19 @@ impl Session {
         options: &CallOptions,
         provider_runtime: Option<&dyn mncs_model::ProviderRuntime>,
     ) -> CallOutput {
+        if let Some(binding) = self
+            .inner
+            .artifact()
+            .callable_bindings
+            .iter()
+            .find(|binding| binding.module == module && binding.function == function)
+        {
+            if let Err(error) =
+                self.validate_binding_arguments(binding, &arguments, &options.type_arguments)
+            {
+                return self.invalid_call_output(error.message);
+            }
+        }
         let profile = std::env::var_os("MNCS_RUNTIME_PROFILE").is_some();
         let request_started = Instant::now();
         let step_budget = if options.step_budget == 0 {
@@ -478,6 +771,7 @@ impl Session {
             artifact_sha256: self.digest().to_owned(),
             backend: self.backend_name().to_owned(),
             reused_session: self.reused(),
+            invoked_callable: None,
         };
         if profile {
             eprintln!(
@@ -488,6 +782,21 @@ impl Session {
             );
         }
         output
+    }
+
+    fn invalid_call_output(&self, message: String) -> CallOutput {
+        CallOutput {
+            status: "invalid_request".to_owned(),
+            returned: Vec::new(),
+            steps: 0,
+            effects: Vec::new(),
+            failure_reason: Some(message),
+            artifact_identity: self.artifact_identity().to_owned(),
+            artifact_sha256: self.digest().to_owned(),
+            backend: self.backend_name().to_owned(),
+            reused_session: self.reused(),
+            invoked_callable: None,
+        }
     }
 
     /// Execute one named entrypoint with a generic admitted provider
@@ -513,13 +822,13 @@ impl Session {
     pub fn call_batch(&self, calls: &[BatchCall]) -> Vec<CallOutput> {
         calls
             .iter()
-            .map(|call| {
-                self.call(
-                    &call.module,
-                    &call.function,
-                    call.arguments.clone(),
-                    &call.options,
-                )
+            .map(|call| match &call.target {
+                BatchCallTarget::Named { module, function } => {
+                    self.call(module, function, call.arguments.clone(), &call.options)
+                }
+                BatchCallTarget::Callable(reference) => self
+                    .call_identity(reference, call.arguments.clone(), &call.options)
+                    .unwrap_or_else(|error| self.invalid_call_output(error.message)),
             })
             .collect()
     }
@@ -848,9 +1157,11 @@ pub unsafe extern "C" fn mncs_session_call(
 
 /// Execute many entrypoints sequentially on one session with one boundary
 /// crossing; `requests_json` is a JSON array of
-/// `{module, function, args, grants?, step_budget?, type_arguments?}`
-/// objects (`type_arguments` selects a compiled generic specialization
-/// exactly like `ExecutionRequest.type_arguments`). Returns the
+/// `{module, function, args|typed_args, ...}` or
+/// `{callable_reference, args|typed_args, ...}` objects. Identity references
+/// bind the callable, declaration, signature, and exact artifact revision;
+/// generic `type_arguments` select an artifact-compiled specialization just
+/// like `ExecutionRequest.type_arguments`. Returns the
 /// JSON array of [`CallOutput`] documents in request order, or NULL on
 /// failure. This is the stable-boundary batch API for hosts that issue
 /// hundreds of kernel calls per build (index PRESS-010): per-call
@@ -882,8 +1193,12 @@ pub unsafe extern "C" fn mncs_session_call_batch(
     }
     #[derive(serde::Deserialize)]
     struct BatchRequest {
-        module: String,
-        function: String,
+        #[serde(default)]
+        module: Option<String>,
+        #[serde(default)]
+        function: Option<String>,
+        #[serde(default)]
+        callable_reference: Option<CallableReference>,
         #[serde(default)]
         args: Option<Vec<mncs_model::ExecutionValue>>,
         #[serde(default)]
@@ -919,39 +1234,48 @@ pub unsafe extern "C" fn mncs_session_call_batch(
                 expected_interface_identity: None,
                 type_arguments: request.type_arguments,
             };
+            let named_target = match (request.module, request.function) {
+                (Some(module), Some(function)) => Some((module, function)),
+                (None, None) => None,
+                _ => {
+                    return session.invalid_call_output(
+                        "batch request must provide both module and function".to_owned(),
+                    );
+                }
+            };
+            if named_target.is_some() == request.callable_reference.is_some() {
+                return session.invalid_call_output(
+                    "batch request must provide exactly one of a named target or callable_reference"
+                        .to_owned(),
+                );
+            }
+            let run_raw =
+                |arguments| match (named_target.as_ref(), request.callable_reference.as_ref()) {
+                    (Some((module, function)), None) => {
+                        session.call(module, function, arguments, &options)
+                    }
+                    (None, Some(reference)) => session
+                        .call_identity(reference, arguments, &options)
+                        .unwrap_or_else(|error| session.invalid_call_output(error.message)),
+                    _ => unreachable!("target shape validated above"),
+                };
+            let run_typed =
+                |arguments| match (named_target.as_ref(), request.callable_reference.as_ref()) {
+                    (Some((module, function)), None) => session
+                        .call_typed(module, function, arguments, &options)
+                        .unwrap_or_else(|error| session.invalid_call_output(error.message)),
+                    (None, Some(reference)) => session
+                        .call_identity_typed(reference, arguments, &options)
+                        .unwrap_or_else(|error| session.invalid_call_output(error.message)),
+                    _ => unreachable!("target shape validated above"),
+                };
             match (request.args, request.typed_args) {
-                (Some(_), Some(_)) => CallOutput {
-                    status: "invalid_request".to_owned(),
-                    returned: Vec::new(),
-                    steps: 0,
-                    effects: Vec::new(),
-                    failure_reason: Some(
-                        "batch request must provide either args or typed_args, not both".to_owned(),
-                    ),
-                    artifact_identity: session.artifact_identity().to_owned(),
-                    artifact_sha256: session.digest().to_owned(),
-                    backend: session.backend_name().to_owned(),
-                    reused_session: session.reused(),
-                },
-                (Some(arguments), None) => {
-                    session.call(&request.module, &request.function, arguments, &options)
-                }
-                (None, Some(arguments)) => session
-                    .call_typed(&request.module, &request.function, arguments, &options)
-                    .unwrap_or_else(|error| CallOutput {
-                        status: "invalid_request".to_owned(),
-                        returned: Vec::new(),
-                        steps: 0,
-                        effects: Vec::new(),
-                        failure_reason: Some(error.message),
-                        artifact_identity: session.artifact_identity().to_owned(),
-                        artifact_sha256: session.digest().to_owned(),
-                        backend: session.backend_name().to_owned(),
-                        reused_session: session.reused(),
-                    }),
-                (None, None) => {
-                    session.call(&request.module, &request.function, Vec::new(), &options)
-                }
+                (Some(_), Some(_)) => session.invalid_call_output(
+                    "batch request must provide either args or typed_args, not both".to_owned(),
+                ),
+                (Some(arguments), None) => run_raw(arguments),
+                (None, Some(arguments)) => run_typed(arguments),
+                (None, None) => run_raw(Vec::new()),
             }
         })
         .collect();

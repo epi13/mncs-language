@@ -331,6 +331,7 @@ pub fn lower_cranelift(
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
+    .with_callable_bindings(crate::language_owned_callable_bindings(program))
     .with_composite_value_contracts(crate::support::composite_value_contracts(program))
     .with_interface_identity(crate::language_owned_interface_identity(program))
     .with_generic_entrypoints(crate::support::generic_entrypoint_records(program))

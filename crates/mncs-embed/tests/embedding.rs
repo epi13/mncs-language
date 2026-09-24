@@ -288,7 +288,7 @@ fn seeded_artifacts_serve_generic_entrypoints_in_process() {
     assert!(
         bare.failure_reason
             .as_deref()
-            .is_some_and(|reason| reason.contains("requires explicit type_arguments")),
+            .is_some_and(|reason| reason.contains("requires 1 generic type argument(s)")),
         "{bare:?}"
     );
     // Unseeded artifact plus type arguments fails closed: the

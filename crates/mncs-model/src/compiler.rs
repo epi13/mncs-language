@@ -1044,6 +1044,123 @@ pub struct BackendFunctionValueContract {
     pub output_names: Vec<String>,
 }
 
+/// Compiler-owned binding from a stable semantic callable identity to the
+/// entry and typed declaration metadata present in one backend artifact.
+/// `callable_identity` is stable across body revisions; `signature_identity`
+/// protects the typed boundary, while the enclosing artifact identity binds
+/// a runtime reference to the exact loaded program revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendCallableBinding {
+    pub callable_identity: SemanticId,
+    pub declaration_identity: SemanticId,
+    pub signature_identity: String,
+    pub module: String,
+    pub function: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_case_identity: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generic_params: Vec<crate::GenericParam>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<crate::Effect>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct CallableSignatureMaterial<'a> {
+    schema_version: &'static str,
+    callable_identity: &'a SemanticId,
+    declaration_identity: &'a SemanticId,
+    module: &'a str,
+    function: &'a str,
+    contract: &'a BackendFunctionValueContract,
+    generic_params: &'a [crate::GenericParam],
+    effects: &'a [crate::Effect],
+    capabilities: &'a [String],
+}
+
+impl BackendCallableBinding {
+    /// Reproduce the compiler-owned per-callable interface identity from the
+    /// exact typed artifact contract. Body contents are intentionally absent:
+    /// `BackendArtifact.identity` binds the reference to the concrete body.
+    pub fn signature_identity_for(
+        callable_identity: &SemanticId,
+        declaration_identity: &SemanticId,
+        module: &str,
+        function: &str,
+        contract: &BackendFunctionValueContract,
+        generic_params: &[crate::GenericParam],
+        effects: &[crate::Effect],
+        capabilities: &[String],
+    ) -> String {
+        let material = CallableSignatureMaterial {
+            schema_version: "mncs.callable-signature/1",
+            callable_identity,
+            declaration_identity,
+            module,
+            function,
+            contract,
+            generic_params,
+            effects,
+            capabilities,
+        };
+        format!(
+            "sha256:{}",
+            sha256_hex(&serde_json::to_vec(&material).expect("callable signature is serializable"))
+        )
+    }
+
+    fn identity_is_valid(
+        &self,
+        contracts: &BTreeMap<String, BackendFunctionValueContract>,
+    ) -> bool {
+        if self.module.trim().is_empty() || self.function.trim().is_empty() {
+            return false;
+        }
+        let expected_callable = crate::function_id(&self.module, &self.function);
+        if self.callable_identity != expected_callable {
+            return false;
+        }
+        let expected_declaration = if self.test_case_identity.is_some() {
+            crate::test_declaration_id(&self.module, &self.function)
+        } else {
+            expected_callable
+        };
+        if self.declaration_identity != expected_declaration {
+            return false;
+        }
+        let Some(contract) = contracts.get(&format!("{}::{}", self.module, self.function)) else {
+            return false;
+        };
+        let mut effects = self.effects.clone();
+        effects.sort_by(|left, right| {
+            (&left.kind, &left.target, &left.capability).cmp(&(
+                &right.kind,
+                &right.target,
+                &right.capability,
+            ))
+        });
+        effects.dedup();
+        let mut capabilities = self.capabilities.clone();
+        capabilities.sort();
+        capabilities.dedup();
+        if effects != self.effects || capabilities != self.capabilities {
+            return false;
+        }
+        let expected_signature = Self::signature_identity_for(
+            &self.callable_identity,
+            &self.declaration_identity,
+            &self.module,
+            &self.function,
+            contract,
+            &self.generic_params,
+            &self.effects,
+            &self.capabilities,
+        );
+        self.signature_identity == expected_signature
+    }
+}
+
 /// A semantic type reference carried by ABI value contracts. Serializes
 /// transparently as the resolved [`crate::BodyType`]; deserializes from
 /// either the typed shape (current artifacts) or a bare spelling string
@@ -1444,6 +1561,11 @@ pub struct BackendArtifact {
     pub interface_identity: Option<String>,
     #[serde(default)]
     pub function_value_contracts: BTreeMap<String, BackendFunctionValueContract>,
+    /// Exact callable declarations available to identity-bound invocation.
+    /// Empty on legacy artifacts; current compiler emissions bind these rows
+    /// into the artifact identity together with the value contracts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub callable_bindings: Vec<BackendCallableBinding>,
     /// Logical composite types referenced by this artifact's signatures,
     /// keyed by semantic type name. Makes artifacts self-describing so
     /// execution can marshal record/payload values without the program.
@@ -1568,6 +1690,7 @@ impl BackendArtifact {
             exports,
             interface_identity: None,
             function_value_contracts: BTreeMap::new(),
+            callable_bindings: Vec::new(),
             composite_value_contracts: BTreeMap::new(),
             assumptions,
             obligations_generated,
@@ -1624,6 +1747,29 @@ impl BackendArtifact {
         self.function_value_contracts = function_value_contracts;
         self.identity = identified("backend-artifact", &self.without_identity());
         self
+    }
+
+    /// Bind compiler-owned semantic callable identities to this artifact.
+    /// The rows are sorted before they become identity material so build
+    /// order cannot affect artifact identity.
+    pub fn with_callable_bindings(
+        mut self,
+        mut callable_bindings: Vec<BackendCallableBinding>,
+    ) -> Self {
+        callable_bindings
+            .sort_by(|left, right| left.callable_identity.cmp(&right.callable_identity));
+        self.callable_bindings = callable_bindings;
+        self.identity = identified("backend-artifact", &self.without_identity());
+        self
+    }
+
+    /// Return a duplicated callable identity before generic artifact identity
+    /// validation so the admission boundary can report ambiguity precisely.
+    pub fn ambiguous_callable_identity(&self) -> Option<&SemanticId> {
+        let mut seen = BTreeSet::new();
+        self.callable_bindings
+            .iter()
+            .find_map(|binding| (!seen.insert(&binding.callable_identity)).then_some(&binding.callable_identity))
     }
 
     /// Bind this artifact to the language-owned callable interface that
@@ -1709,7 +1855,8 @@ impl BackendArtifact {
         let structural_valid = self.backend.identity_is_valid()
             && self.input.identity_is_valid()
             && self.target.identity_is_valid()
-            && !self.artifact_kind.trim().is_empty();
+            && !self.artifact_kind.trim().is_empty()
+            && self.callable_metadata_is_valid();
         if profile {
             eprintln!(
                 "mncs-artifact-profile phase=structural_identity elapsed_ns={}",
@@ -1745,6 +1892,19 @@ impl BackendArtifact {
         }
     }
 
+    fn callable_metadata_is_valid(&self) -> bool {
+        let mut previous: Option<&SemanticId> = None;
+        for binding in &self.callable_bindings {
+            if previous.is_some_and(|identity| identity >= &binding.callable_identity)
+                || !binding.identity_is_valid(&self.function_value_contracts)
+            {
+                return false;
+            }
+            previous = Some(&binding.callable_identity);
+        }
+        true
+    }
+
     fn without_identity(&self) -> BackendArtifactMaterial<'_> {
         BackendArtifactMaterial {
             schema_version: &self.schema_version,
@@ -1758,6 +1918,7 @@ impl BackendArtifact {
             exports: &self.exports,
             interface_identity: &self.interface_identity,
             function_value_contracts: &self.function_value_contracts,
+            callable_bindings: &self.callable_bindings,
             composite_value_contracts: &self.composite_value_contracts,
             assumptions: &self.assumptions,
             obligations_generated: &self.obligations_generated,
@@ -1809,6 +1970,8 @@ struct BackendArtifactMaterial<'a> {
     exports: &'a [String],
     interface_identity: &'a Option<String>,
     function_value_contracts: &'a BTreeMap<String, BackendFunctionValueContract>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    callable_bindings: &'a Vec<BackendCallableBinding>,
     composite_value_contracts: &'a BTreeMap<String, BackendValueContract>,
     assumptions: &'a [String],
     obligations_generated: &'a [SemanticId],
@@ -2721,9 +2884,10 @@ mod tests {
             Some(backend),
             vec!["ABI evidence".to_owned()],
         );
-        assert!(plan
-            .assumptions_introduced
-            .contains(&"backend trap mapping is unverified".to_owned()));
+        assert!(
+            plan.assumptions_introduced
+                .contains(&"backend trap mapping is unverified".to_owned())
+        );
         assert!(plan.identity_is_valid());
         let mut laundered = plan;
         laundered.assumptions_introduced.clear();

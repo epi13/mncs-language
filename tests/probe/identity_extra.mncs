@@ -1,0 +1,7 @@
+mncs 0.18;
+
+module probe.identity_extra;
+
+fn times_two(value: i64) -> (result: i64) {
+    return value * 2;
+}

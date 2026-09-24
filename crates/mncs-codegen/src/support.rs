@@ -5,11 +5,11 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use mncs_model::{
-    AbiTypeRef, ArtifactRepresentation, BackendArtifact, BackendFunctionValueContract,
-    BackendIdentity, BackendResult, BackendValueContract, BodyType, CompilerArtifactRef,
-    CompilerDiagnostic, CompilerDiagnosticKind, ExecutionFailure, ExecutionRequest,
-    ExecutionStatus, ExecutionValue, HostExecutionValue, IntegerType, Program, SequenceBound,
-    SsaModule, TransformationStatus, TypeSyntax, BACKEND_ARTIFACT_SCHEMA_VERSION,
+    AbiTypeRef, ArtifactRepresentation, BACKEND_ARTIFACT_SCHEMA_VERSION, BackendArtifact,
+    BackendFunctionValueContract, BackendIdentity, BackendResult, BackendValueContract, BodyType,
+    CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind, ExecutionFailure,
+    ExecutionRequest, ExecutionStatus, ExecutionValue, HostExecutionValue, IntegerType, Program,
+    SequenceBound, SsaModule, TransformationStatus, TypeSyntax,
 };
 use sha2::{Digest, Sha256};
 
@@ -1047,6 +1047,26 @@ pub(crate) fn resolve_host_arguments(
             Ok(resolved)
         })
         .collect()
+}
+
+/// Validate canonical runtime values against one compiler-owned callable
+/// contract before execution begins.
+pub(crate) fn validate_execution_arguments(
+    contract: &BackendFunctionValueContract,
+    composites: &BTreeMap<String, BackendValueContract>,
+    values: &[ExecutionValue],
+) -> Result<(), String> {
+    if contract.inputs.len() != values.len() {
+        return Err(format!(
+            "call argument count mismatch: expected {} argument(s), received {}",
+            contract.inputs.len(),
+            values.len()
+        ));
+    }
+    for (index, (declared, value)) in contract.inputs.iter().zip(values).enumerate() {
+        check_contract_value(declared, value, composites, &format!("argument {index}"))?;
+    }
+    Ok(())
 }
 
 fn resolve_host_value(

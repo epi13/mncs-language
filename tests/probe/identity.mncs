@@ -1,0 +1,19 @@
+mncs 0.18;
+
+module probe.identity;
+use probe.identity_extra;
+
+fn plus_one(value: i64) -> (result: i64) {
+    return value + 1;
+}
+
+fn echo<T>(value: T) -> (result: T) {
+    return value;
+}
+
+fn read_clock() -> (result: u64)
+    capability ticker
+    effect clock_read authorized_by ticker
+{
+    return clock_read();
+}

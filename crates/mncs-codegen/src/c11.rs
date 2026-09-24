@@ -10,17 +10,17 @@ use std::fmt::Write;
 use mncs_model::{
     ArithmeticIntent, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
     BackendIdentity, BackendResult, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SsaModule,
-    TargetContractRef, TargetLoweringPlan, TransformationStatus, SSA_SCHEMA_VERSION,
+    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SSA_SCHEMA_VERSION,
+    SsaModule, TargetContractRef, TargetLoweringPlan, TransformationStatus,
 };
 
 use crate::composite::SlotWidth;
 use crate::native::{
-    argv_from_request, compile_and_run_with_call_file_full, probe_clang, probe_gcc,
-    NativeExecutable, ToolchainIdentity,
+    NativeExecutable, ToolchainIdentity, argv_from_request, compile_and_run_with_call_file_full,
+    probe_clang, probe_gcc,
 };
 use crate::scalar::{
-    c_type, lower_to_scalar, ScalarFunction, ScalarInst, ScalarModule, ScalarTerm, ScalarTy,
+    ScalarFunction, ScalarInst, ScalarModule, ScalarTerm, ScalarTy, c_type, lower_to_scalar,
 };
 use crate::support::{
     artifact_ref, empty_execution, execution_failure, function_names, function_value_contracts,
@@ -78,7 +78,7 @@ impl C11StatefulSession<'_> {
         ) {
             Ok(entry) => entry,
             Err(reason) => {
-                return execution_failure(result, ExecutionStatus::InvalidRequest, reason)
+                return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
             }
         };
         let Some(contract) = crate::support::entry_value_contract(
@@ -129,7 +129,7 @@ impl C11StatefulSession<'_> {
         let entry_depth = match crate::support::depth_seed_for_request(request) {
             Ok(seed) => seed,
             Err(reason) => {
-                return execution_failure(result, ExecutionStatus::InvalidRequest, reason)
+                return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
             }
         };
         let driver = c_driver(
@@ -160,7 +160,7 @@ impl C11StatefulSession<'_> {
             None => match argv_from_request(request) {
                 Ok(argv) => argv,
                 Err(reason) => {
-                    return execution_failure(result, ExecutionStatus::Unsupported, reason)
+                    return execution_failure(result, ExecutionStatus::Unsupported, reason);
                 }
             },
         };
@@ -504,6 +504,7 @@ pub fn lower_c11(
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
+    .with_callable_bindings(crate::language_owned_callable_bindings(program))
     .with_composite_value_contracts(crate::support::composite_value_contracts(program))
     .with_interface_identity(crate::language_owned_interface_identity(program))
     .with_generic_entrypoints(crate::support::generic_entrypoint_records(program))
@@ -800,7 +801,11 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                     } else {
                         format!("(mncs_w << {count}) & {mask}")
                     };
-                    let _ = writeln!(out, "      {{ uint64_t mncs_w = (uint64_t)(uint64_t){lhs_n}; mncs_w = {expression}; {dest_n} = ({})mncs_w; }}", c_type(dest.ty));
+                    let _ = writeln!(
+                        out,
+                        "      {{ uint64_t mncs_w = (uint64_t)(uint64_t){lhs_n}; mncs_w = {expression}; {dest_n} = ({})mncs_w; }}",
+                        c_type(dest.ty)
+                    );
                 } else if signed {
                     // Arithmetic right shift without relying on C's
                     // implementation-defined `>>` for negatives:

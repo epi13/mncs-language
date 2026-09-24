@@ -19,10 +19,11 @@
   "$defs": {
     "callable": {
       "type": "object",
-      "required": ["declaration_identity", "callable_identity", "callable_kind", "module", "name", "qualified_name", "source_span", "profile", "generic_params", "inputs", "outputs", "effects", "capabilities", "exported"],
+      "required": ["declaration_identity", "callable_identity", "signature_identity", "callable_kind", "module", "name", "qualified_name", "source_span", "profile", "generic_params", "inputs", "outputs", "effects", "capabilities", "exported"],
       "properties": {
         "declaration_identity": {"type": "string"},
         "callable_identity": {"type": "string"},
+        "signature_identity": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
         "callable_kind": {"type": "string"},
         "module": {"type": "string"},
         "name": {"type": "string"},
