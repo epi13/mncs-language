@@ -49,7 +49,7 @@ impl ProcessRequest {
         }
     }
 
-    fn validate(&self) -> Result<(), ProcessError> {
+    pub(crate) fn validate(&self) -> Result<(), ProcessError> {
         if self.program.trim().is_empty() {
             return Err(ProcessError::Invalid(
                 "program must not be empty".to_owned(),

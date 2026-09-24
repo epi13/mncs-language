@@ -614,9 +614,59 @@
         "removed": []
       },
       "to_profile": "0.18"
+    },
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [],
+        "removed": []
+      },
+      "current_content_identity": "sha256:307b1d3ede7b1bfa30b9b19bb149a1fc831716f41b0b39f0365456bc2fb81370",
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "exports": {
+        "added": [
+          "mncs.std.process.v1::ProcessHandle",
+          "mncs.std.process.v1::ProcessObservation",
+          "mncs.std.process.v1::ProcessResourceEnvelope",
+          "mncs.std.process.v1::ProcessStartResult",
+          "mncs.std.process.v1::ProcessStatus",
+          "mncs.std.process.v1::cancel",
+          "mncs.std.process.v1::observe",
+          "mncs.std.process.v1::reap",
+          "mncs.std.process.v1::start"
+        ],
+        "removed": []
+      },
+      "from_profile": "0.18",
+      "intrinsics": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "modules": {
+        "added": [],
+        "changed": [
+          "mncs.std.process.v1"
+        ],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:d9de82516aff2f3a85c5392341fbd29e0d4c2e41c20a5acb8cdcf80ebc65b35f",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "to_profile": "0.18"
     }
   ],
-  "history_identity": "sha256:48a1e53c3ad86391d43b2beafbbadb73754a50e2b8bdf8c08a974632c9ce3aea",
+  "history_identity": "sha256:1f8601310d20e091fe769db346a332f11926985e6b14d827fc3bd122714d90c7",
   "retention": 8,
   "schema_version": "mncs.language-capability-deltas/1"
 }

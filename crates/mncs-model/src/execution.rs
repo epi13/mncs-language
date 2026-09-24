@@ -833,13 +833,13 @@ fn process_u64(value: &ExecutionValue, field: &str) -> Result<u64, String> {
 pub(crate) fn process_request_from_value(
     program: &Program,
     value: &ExecutionValue,
-) -> Result<crate::process::ProcessRequest, String> {
+) -> Result<crate::process_runtime::OwnedProcessRequest, String> {
     validate_standard_process_record(program, value, "ProcessRequest")?;
     let Some(program_value) = record_field(value, "program") else {
         return Err("process request is missing program".to_owned());
     };
-    let program = process_text(program_value, "program")?;
-    if program.is_empty() {
+    let request_program = process_text(program_value, "program")?;
+    if request_program.is_empty() {
         return Err("process request program must not be empty".to_owned());
     }
     let argv_value =
@@ -940,7 +940,7 @@ pub(crate) fn process_request_from_value(
         "deadline_ms",
     )?;
     let request = crate::process::ProcessRequest {
-        program,
+        program: request_program,
         argv,
         current_dir,
         environment,
@@ -951,7 +951,35 @@ pub(crate) fn process_request_from_value(
             .map_err(|_| "stderr_limit does not fit the host usize".to_owned())?,
         deadline_ms,
     };
-    Ok(request)
+    let resources_value = record_field(value, "resources")
+        .ok_or_else(|| "process request is missing its resource envelope".to_owned())?;
+    validate_standard_process_record(program, resources_value, "ProcessResourceEnvelope")?;
+    let optional_limit = |name: &str| -> Result<Option<u64>, String> {
+        let value = process_u64(
+            record_field(resources_value, name)
+                .ok_or_else(|| format!("process resource envelope is missing {name}"))?,
+            name,
+        )?;
+        Ok((value != 0).then_some(value))
+    };
+    let has_swap_max = match record_field(resources_value, "has_swap_max") {
+        Some(ExecutionValue::Boolean { value }) => *value,
+        _ => return Err("process resource envelope has invalid has_swap_max".to_owned()),
+    };
+    let swap_max_bytes = process_u64(
+        record_field(resources_value, "swap_max_bytes")
+            .ok_or_else(|| "process resource envelope is missing swap_max_bytes".to_owned())?,
+        "swap_max_bytes",
+    )?;
+    Ok(crate::process_runtime::OwnedProcessRequest {
+        process: request,
+        resources: crate::process_runtime::ProcessResourceEnvelope {
+            memory_high_bytes: optional_limit("memory_high_bytes")?,
+            memory_max_bytes: optional_limit("memory_max_bytes")?,
+            swap_max_bytes: has_swap_max.then_some(swap_max_bytes),
+            process_max: optional_limit("process_max")?,
+        },
+    })
 }
 
 fn process_bytes_value(bytes: &[u8]) -> ExecutionValue {
@@ -964,6 +992,231 @@ fn process_bytes_value(bytes: &[u8]) -> ExecutionValue {
             .collect::<Vec<_>>()
             .into(),
     }
+}
+
+pub(crate) fn process_handle_from_value(
+    program: &Program,
+    value: &ExecutionValue,
+    runtime: &crate::process_runtime::ProcessRuntime,
+) -> Result<crate::process_runtime::OwnedProcessHandle, String> {
+    validate_standard_process_record(program, value, "ProcessHandle")?;
+    let bytes = process_bytes(
+        record_field(value, "token")
+            .ok_or_else(|| "process handle is missing its opaque token".to_owned())?,
+        "process handle token",
+    )?;
+    let token: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| "process handle token must contain exactly 32 bytes".to_owned())?;
+    runtime
+        .handle_from_token(token)
+        .map_err(|error| error.to_string())
+}
+
+fn process_handle_value(
+    program: &Program,
+    result_type: &BodyType,
+    token: [u8; 32],
+) -> Result<ExecutionValue, String> {
+    let BodyType::Record { identity, name } = result_type else {
+        return Err("process handle result is not a nominal record type".to_owned());
+    };
+    validate_standard_process_record_type(program, identity, name, "ProcessHandle")?;
+    Ok(ExecutionValue::Record {
+        type_identity: identity.clone(),
+        name: name.clone(),
+        fields: vec![("token".to_owned(), process_bytes_value(&token))].into(),
+    })
+}
+
+pub(crate) fn process_start_result_value(
+    program: &Program,
+    result_type: &BodyType,
+    token: [u8; 32],
+    has_handle: bool,
+    observation: &crate::process_runtime::ProcessObservation,
+) -> Result<ExecutionValue, String> {
+    let BodyType::Record { identity, name } = result_type else {
+        return Err("process_start result is not a nominal record type".to_owned());
+    };
+    validate_standard_process_record_type(program, identity, name, "ProcessStartResult")?;
+    let declaration = program
+        .record_types
+        .iter()
+        .find(|record| record.identity == *identity)
+        .ok_or_else(|| "process_start result record declaration is unavailable".to_owned())?;
+    let handle_type = standard_record_type(program, "ProcessHandle")
+        .ok_or_else(|| "standard ProcessHandle type is not linked".to_owned())?;
+    let observation_type = standard_record_type(program, "ProcessObservation")
+        .ok_or_else(|| "standard ProcessObservation type is not linked".to_owned())?;
+    let mut fields = Vec::with_capacity(declaration.fields.len());
+    for field in &declaration.fields {
+        let value = match field.name.as_str() {
+            "handle" => process_handle_value(program, &handle_type, token)?,
+            "has_handle" => ExecutionValue::Boolean { value: has_handle },
+            "observation" => process_observation_value(program, &observation_type, observation)?,
+            _ => {
+                return Err(format!(
+                    "ProcessStartResult has unknown field {:?}",
+                    field.name
+                ))
+            }
+        };
+        fields.push((field.name.clone(), value));
+    }
+    Ok(ExecutionValue::Record {
+        type_identity: identity.clone(),
+        name: name.clone(),
+        fields: fields.into(),
+    })
+}
+
+pub(crate) fn process_observation_value(
+    program: &Program,
+    result_type: &BodyType,
+    observation: &crate::process_runtime::ProcessObservation,
+) -> Result<ExecutionValue, String> {
+    let BodyType::Record { identity, name } = result_type else {
+        return Err("process observation result is not a nominal record type".to_owned());
+    };
+    validate_standard_process_record_type(program, identity, name, "ProcessObservation")?;
+    let declaration = program
+        .record_types
+        .iter()
+        .find(|record| record.identity == *identity)
+        .ok_or_else(|| "process observation record declaration is unavailable".to_owned())?;
+    if observation.stdout.len() > MAX_SEQUENCE_BOUND as usize
+        || observation.stderr.len() > MAX_SEQUENCE_BOUND as usize
+    {
+        return Err(format!(
+            "process observation output exceeds the {}-byte source record bound",
+            MAX_SEQUENCE_BOUND
+        ));
+    }
+    let mut fields = Vec::with_capacity(declaration.fields.len());
+    for field in &declaration.fields {
+        let value =
+            process_observation_field(program, &field.name, observation).ok_or_else(|| {
+                format!(
+                    "process observation contains unsupported field {:?}",
+                    field.name
+                )
+            })?;
+        fields.push((field.name.clone(), value));
+    }
+    Ok(ExecutionValue::Record {
+        type_identity: identity.clone(),
+        name: name.clone(),
+        fields: fields.into(),
+    })
+}
+
+fn process_observation_field(
+    program: &Program,
+    name: &str,
+    observation: &crate::process_runtime::ProcessObservation,
+) -> Option<ExecutionValue> {
+    let unsigned = |value: u64| ExecutionValue::Integer {
+        value: i128::from(value),
+        ty: IntegerType {
+            bits: 64,
+            signed: false,
+        },
+    };
+    let boolean = |value| ExecutionValue::Boolean { value };
+    let optional_unsigned = |value: Option<u64>| (value.unwrap_or_default(), value.is_some());
+    Some(match name {
+        "status" => process_status_value(program, observation.status)?,
+        "exit_code" => ExecutionValue::Integer {
+            value: i128::from(observation.exit_code.unwrap_or_default()),
+            ty: IntegerType {
+                bits: 64,
+                signed: true,
+            },
+        },
+        "has_exit_code" => boolean(observation.exit_code.is_some()),
+        "success" => boolean(
+            observation.status == crate::process_runtime::ProcessLifecycleStatus::Exited
+                && observation.exit_code == Some(0),
+        ),
+        "stdout" => process_bytes_value(&observation.stdout),
+        "stderr" => process_bytes_value(&observation.stderr),
+        "stdout_truncated" => boolean(observation.stdout_truncated),
+        "stderr_truncated" => boolean(observation.stderr_truncated),
+        "output_exhausted" => boolean(observation.output_exhausted),
+        "timed_out" | "deadline_exceeded" => boolean(observation.deadline_exceeded),
+        "cancellation_requested" => boolean(observation.cancellation_requested),
+        "cancellation_complete" => boolean(observation.cancellation_complete),
+        "memory_high_events" => unsigned(optional_unsigned(observation.memory_high_events).0),
+        "has_memory_high_events" => boolean(optional_unsigned(observation.memory_high_events).1),
+        "memory_max_events" => unsigned(optional_unsigned(observation.memory_max_events).0),
+        "has_memory_max_events" => boolean(optional_unsigned(observation.memory_max_events).1),
+        "oom_events" => unsigned(optional_unsigned(observation.oom_events).0),
+        "has_oom_events" => boolean(optional_unsigned(observation.oom_events).1),
+        "oom_kill_events" => unsigned(optional_unsigned(observation.oom_kill_events).0),
+        "has_oom_kill_events" => boolean(optional_unsigned(observation.oom_kill_events).1),
+        "process_limit_events" => unsigned(optional_unsigned(observation.process_limit_events).0),
+        "has_process_limit_events" => {
+            boolean(optional_unsigned(observation.process_limit_events).1)
+        }
+        "memory_peak_bytes" => unsigned(optional_unsigned(observation.memory_peak_bytes).0),
+        "has_memory_peak_bytes" => boolean(optional_unsigned(observation.memory_peak_bytes).1),
+        "swap_peak_bytes" => unsigned(optional_unsigned(observation.swap_peak_bytes).0),
+        "has_swap_peak_bytes" => boolean(optional_unsigned(observation.swap_peak_bytes).1),
+        "process_peak" => unsigned(optional_unsigned(observation.process_peak).0),
+        "has_process_peak" => boolean(optional_unsigned(observation.process_peak).1),
+        "containment_supported" => boolean(observation.containment_supported),
+        "tree_empty" => boolean(observation.tree_empty.unwrap_or_default()),
+        "has_tree_empty" => boolean(observation.tree_empty.is_some()),
+        "launcher_reaped" => boolean(observation.launcher_reaped),
+        "cleanup_complete" => boolean(observation.cleanup_complete.unwrap_or_default()),
+        "has_cleanup_result" => boolean(observation.cleanup_complete.is_some()),
+        "observation_complete" => boolean(observation.observation_complete),
+        "duration_ms" => unsigned(observation.duration_ms),
+        _ => return None,
+    })
+}
+
+fn process_status_value(
+    program: &Program,
+    status: crate::process_runtime::ProcessLifecycleStatus,
+) -> Option<ExecutionValue> {
+    use crate::process_runtime::ProcessLifecycleStatus as Status;
+    let variant_name = match status {
+        Status::Running => "Running",
+        Status::Exited => "Exited",
+        Status::Cancelled => "Cancelled",
+        Status::TimedOut => "TimedOut",
+        Status::ResourceExhausted => "ResourceExhausted",
+        Status::OutputExhausted => "OutputExhausted",
+        Status::Unsupported => "Unsupported",
+        Status::Unknown => "Unknown",
+    };
+    let finite = program.finite_types.iter().find(|finite| {
+        finite.name == "ProcessStatus"
+            && standard_finite_module(&finite.identity).as_deref() == Some("mncs.std.process.v1")
+    })?;
+    let variant = finite
+        .variants
+        .iter()
+        .find(|variant| variant.name == variant_name)?;
+    Some(ExecutionValue::Finite {
+        type_identity: finite.identity.clone(),
+        variant_identity: variant.identity.clone(),
+        discriminant: variant.discriminant,
+        payload: Vec::new().into(),
+    })
+}
+
+fn standard_record_type(program: &Program, name: &str) -> Option<BodyType> {
+    let record = program.record_types.iter().find(|record| {
+        record.name == name
+            && standard_record_module(&record.identity).as_deref() == Some("mncs.std.process.v1")
+    })?;
+    Some(BodyType::Record {
+        identity: record.identity.clone(),
+        name: record.name.clone(),
+    })
 }
 
 fn process_result_field(
@@ -1113,9 +1366,57 @@ fn validate_standard_process_record_type(
             "environment",
             "environment_count",
             "program",
+            "resources",
             "stderr_limit",
             "stdin",
             "stdout_limit",
+        ],
+        "ProcessResourceEnvelope" => &[
+            "has_swap_max",
+            "memory_high_bytes",
+            "memory_max_bytes",
+            "process_max",
+            "swap_max_bytes",
+        ],
+        "ProcessHandle" => &["token"],
+        "ProcessStartResult" => &["handle", "has_handle", "observation"],
+        "ProcessObservation" => &[
+            "cancellation_complete",
+            "cancellation_requested",
+            "cleanup_complete",
+            "containment_supported",
+            "deadline_exceeded",
+            "duration_ms",
+            "exit_code",
+            "has_cleanup_result",
+            "has_exit_code",
+            "has_memory_high_events",
+            "has_memory_max_events",
+            "has_memory_peak_bytes",
+            "has_oom_events",
+            "has_oom_kill_events",
+            "has_process_limit_events",
+            "has_process_peak",
+            "has_swap_peak_bytes",
+            "has_tree_empty",
+            "launcher_reaped",
+            "memory_high_events",
+            "memory_max_events",
+            "memory_peak_bytes",
+            "observation_complete",
+            "oom_events",
+            "oom_kill_events",
+            "output_exhausted",
+            "process_limit_events",
+            "process_peak",
+            "status",
+            "stderr",
+            "stderr_truncated",
+            "stdout",
+            "stdout_truncated",
+            "success",
+            "swap_peak_bytes",
+            "tree_empty",
         ],
         "ProcessResult" => &[
             "duration_ms",
@@ -1154,6 +1455,32 @@ fn validate_standard_process_record_type(
         element: Box::new(BodyType::Byte),
         bound,
     };
+    let standard_record = |record_name: &str| {
+        program
+            .record_types
+            .iter()
+            .find(|record| {
+                record.name == record_name
+                    && standard_record_module(&record.identity).as_deref()
+                        == Some("mncs.std.process.v1")
+            })
+            .map(|record| BodyType::Record {
+                identity: record.identity.clone(),
+                name: record.name.clone(),
+            })
+    };
+    let status_type = program
+        .finite_types
+        .iter()
+        .find(|finite| {
+            finite.name == "ProcessStatus"
+                && standard_finite_module(&finite.identity).as_deref()
+                    == Some("mncs.std.process.v1")
+        })
+        .map(|finite| BodyType::Finite {
+            identity: finite.identity.clone(),
+            name: finite.name.clone(),
+        });
     let expected_type = |field: &str| -> Option<BodyType> {
         match expected_name {
             "ProcessRequest" => match field {
@@ -1181,9 +1508,65 @@ fn validate_standard_process_record_type(
                         bound: SequenceBound::UpTo(16),
                     })
                 }
+                "resources" => standard_record("ProcessResourceEnvelope"),
                 "stdin" => Some(byte_view(SequenceBound::UpTo(1024))),
                 "argv_count" | "environment_count" | "stdout_limit" | "stderr_limit"
                 | "deadline_ms" => Some(u64_type.clone()),
+                _ => None,
+            },
+            "ProcessResourceEnvelope" => match field {
+                "memory_high_bytes" | "memory_max_bytes" | "swap_max_bytes" | "process_max" => {
+                    Some(u64_type.clone())
+                }
+                "has_swap_max" => Some(bool_type.clone()),
+                _ => None,
+            },
+            "ProcessHandle" => match field {
+                "token" => Some(byte_view(SequenceBound::Exact(32))),
+                _ => None,
+            },
+            "ProcessStartResult" => match field {
+                "handle" => standard_record("ProcessHandle"),
+                "has_handle" => Some(bool_type.clone()),
+                "observation" => standard_record("ProcessObservation"),
+                _ => None,
+            },
+            "ProcessObservation" => match field {
+                "status" => status_type.clone(),
+                "exit_code" => Some(i64_type.clone()),
+                "stdout" | "stderr" => Some(byte_view(SequenceBound::UpTo(1024))),
+                "duration_ms"
+                | "memory_high_events"
+                | "memory_max_events"
+                | "oom_events"
+                | "oom_kill_events"
+                | "process_limit_events"
+                | "memory_peak_bytes"
+                | "swap_peak_bytes"
+                | "process_peak" => Some(u64_type.clone()),
+                "success"
+                | "has_exit_code"
+                | "stdout_truncated"
+                | "stderr_truncated"
+                | "output_exhausted"
+                | "deadline_exceeded"
+                | "cancellation_requested"
+                | "cancellation_complete"
+                | "has_memory_high_events"
+                | "has_memory_max_events"
+                | "has_oom_events"
+                | "has_oom_kill_events"
+                | "has_process_limit_events"
+                | "has_memory_peak_bytes"
+                | "has_swap_peak_bytes"
+                | "has_process_peak"
+                | "containment_supported"
+                | "tree_empty"
+                | "has_tree_empty"
+                | "launcher_reaped"
+                | "cleanup_complete"
+                | "has_cleanup_result"
+                | "observation_complete" => Some(bool_type.clone()),
                 _ => None,
             },
             "ProcessResult" => match field {
@@ -1223,6 +1606,12 @@ fn validate_standard_process_record_type(
 
 fn standard_record_module(identity: &SemanticId) -> Option<String> {
     let prefix = "mncs:0.2:record-type:";
+    let encoded = identity.0.strip_prefix(prefix)?.split("::").next()?;
+    Some(crate::identity::decode_component(encoded)?)
+}
+
+fn standard_finite_module(identity: &SemanticId) -> Option<String> {
+    let prefix = "mncs:0.2:finite-type:";
     let encoded = identity.0.strip_prefix(prefix)?.split("::").next()?;
     Some(crate::identity::decode_component(encoded)?)
 }
@@ -3480,6 +3869,8 @@ pub struct BodyExecutionSession<'a> {
     valid: bool,
     program_identity: Option<SemanticId>,
     program_fingerprint: Option<String>,
+    process_runtime: crate::process_runtime::ProcessRuntime,
+    lifecycle_enabled: bool,
 }
 
 impl<'a> BodyExecutionSession<'a> {
@@ -3503,6 +3894,8 @@ impl<'a> BodyExecutionSession<'a> {
             valid,
             program_identity,
             program_fingerprint,
+            process_runtime: crate::process_runtime::ProcessRuntime::new(),
+            lifecycle_enabled: true,
         }
     }
 
@@ -3546,7 +3939,9 @@ impl<'a> BodyExecutionSession<'a> {
 }
 
 pub fn execute(program: &Program, request: &ExecutionRequest) -> ExecutionResult {
-    BodyExecutionSession::new(program).execute(request)
+    let mut session = BodyExecutionSession::new(program);
+    session.lifecycle_enabled = false;
+    session.execute(request)
 }
 
 /// Execute one semantic request and retain a bounded, native observation
@@ -3558,7 +3953,8 @@ pub fn execute_observed(
     request: &ExecutionRequest,
     policy: &ExecutionObservationPolicy,
 ) -> ObservedExecutionResult {
-    let session = BodyExecutionSession::new(program);
+    let mut session = BodyExecutionSession::new(program);
+    session.lifecycle_enabled = false;
     let mut recorder = ObservationRecorder::new(
         session.program_identity.as_ref(),
         session.program_fingerprint.as_deref(),
@@ -6033,6 +6429,220 @@ fn execute_operation(
                     }
                 }
             }
+            if matches!(
+                operation_id.as_str(),
+                "process_start" | "process_observe" | "process_cancel" | "process_reap"
+            ) {
+                if !session.lifecycle_enabled {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        Some(identity.clone()),
+                        "owned process lifecycle requires a retained execution session".to_owned(),
+                    );
+                    return Some(result.clone());
+                }
+                if observing {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        Some(identity.clone()),
+                        "owned process lifecycle requires the explicit realize policy".to_owned(),
+                    );
+                    return Some(result.clone());
+                }
+                let Some(argument) = operation
+                    .operands
+                    .first()
+                    .and_then(|operand| values.get(operand))
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        format!("{operation_id} requires one typed process argument"),
+                    );
+                    return Some(result.clone());
+                };
+                let Some(result_type) = operation.results.first().map(|value| &value.ty) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        format!("{operation_id} has no result binding"),
+                    );
+                    return Some(result.clone());
+                };
+                let (returned, target, provenance) = if operation_id == "process_start" {
+                    let request = match process_request_from_value(program, argument) {
+                        Ok(request) => request,
+                        Err(reason) => {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                Some(identity.clone()),
+                                reason,
+                            );
+                            return Some(result.clone());
+                        }
+                    };
+                    let target = request.process.program.clone();
+                    if !grant.locator.is_empty() && grant.locator != target {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            "process capability grant does not authorize the requested executable"
+                                .to_owned(),
+                        );
+                        return Some(result.clone());
+                    }
+                    let (token, has_handle, observation, reason) = match session
+                        .process_runtime
+                        .start(request)
+                    {
+                        Ok((handle, observation)) => {
+                            (handle.opaque_token(), true, observation, None)
+                        }
+                        Err(crate::process_runtime::ProcessRuntimeError::Invalid(reason)) => {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                Some(identity.clone()),
+                                reason,
+                            );
+                            return Some(result.clone());
+                        }
+                        Err(crate::process_runtime::ProcessRuntimeError::Unsupported(reason)) => (
+                            [0; 32],
+                            false,
+                            crate::process_runtime::ProcessObservation::incomplete(
+                                crate::process_runtime::ProcessLifecycleStatus::Unsupported,
+                            ),
+                            Some(reason),
+                        ),
+                        Err(crate::process_runtime::ProcessRuntimeError::Limit(reason)) => (
+                            [0; 32],
+                            false,
+                            crate::process_runtime::ProcessObservation::incomplete(
+                                crate::process_runtime::ProcessLifecycleStatus::ResourceExhausted,
+                            ),
+                            Some(reason),
+                        ),
+                        Err(error) => (
+                            [0; 32],
+                            false,
+                            crate::process_runtime::ProcessObservation::incomplete(
+                                crate::process_runtime::ProcessLifecycleStatus::Unknown,
+                            ),
+                            Some(error.to_string()),
+                        ),
+                    };
+                    let value = match process_start_result_value(
+                        program,
+                        result_type,
+                        token,
+                        has_handle,
+                        &observation,
+                    ) {
+                        Ok(value) => value,
+                        Err(reason) => {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                Some(identity.clone()),
+                                reason,
+                            );
+                            return Some(result.clone());
+                        }
+                    };
+                    (
+                        value,
+                        target,
+                        format!(
+                            "process:start:status={:?}:has_handle={has_handle}:detail={}",
+                            observation.status,
+                            reason.unwrap_or_default()
+                        ),
+                    )
+                } else {
+                    match process_handle_from_value(program, argument, &session.process_runtime) {
+                        Err(_) => {
+                            let observation =
+                                crate::process_runtime::ProcessObservation::incomplete(
+                                    crate::process_runtime::ProcessLifecycleStatus::Unknown,
+                                );
+                            let value =
+                                match process_observation_value(program, result_type, &observation)
+                                {
+                                    Ok(value) => value,
+                                    Err(reason) => {
+                                        result.fail(
+                                            ExecutionStatus::InvalidRequest,
+                                            Some(identity.clone()),
+                                            reason,
+                                        );
+                                        return Some(result.clone());
+                                    }
+                                };
+                            (
+                                value,
+                                "unknown-owned-process".to_owned(),
+                                "process:unknown-handle".to_owned(),
+                            )
+                        }
+                        Ok(handle) => {
+                            let target = match session.process_runtime.program_for_handle(&handle) {
+                                Ok(program_name) => program_name,
+                                Err(_) => "unknown-owned-process".to_owned(),
+                            };
+                            if !grant.locator.is_empty() && grant.locator != target {
+                                result.fail(
+                                    ExecutionStatus::InvalidRequest,
+                                    Some(identity.clone()),
+                                    "process capability grant does not authorize the owned executable"
+                                        .to_owned(),
+                                );
+                                return Some(result.clone());
+                            }
+                            let observation = match operation_id.as_str() {
+                                "process_observe" => session.process_runtime.observe(&handle),
+                                "process_cancel" => session.process_runtime.request_cancel(&handle),
+                                "process_reap" => session.process_runtime.wait(&handle),
+                                _ => unreachable!(),
+                            }
+                            .unwrap_or_else(|_| {
+                                crate::process_runtime::ProcessObservation::incomplete(
+                                    crate::process_runtime::ProcessLifecycleStatus::Unknown,
+                                )
+                            });
+                            let value =
+                                match process_observation_value(program, result_type, &observation)
+                                {
+                                    Ok(value) => value,
+                                    Err(reason) => {
+                                        result.fail(
+                                            ExecutionStatus::InvalidRequest,
+                                            Some(identity.clone()),
+                                            reason,
+                                        );
+                                        return Some(result.clone());
+                                    }
+                                };
+                            (
+                                value,
+                                target,
+                                format!(
+                                    "process:{operation_id}:status={:?}:cleanup={:?}",
+                                    observation.status, observation.cleanup_complete
+                                ),
+                            )
+                        }
+                    }
+                };
+                let output_id = operation.results[0].id.clone();
+                values.insert(output_id, returned);
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: operation_id.to_owned(),
+                    target,
+                    capability: capability.clone(),
+                    provenance: Some(provenance),
+                });
+                return None;
+            }
             if operation_id == "process_run" {
                 if observing {
                     result.fail(
@@ -6065,7 +6675,8 @@ fn execute_operation(
                         return Some(result.clone());
                     }
                 };
-                if !grant.locator.is_empty() && grant.locator != process_request.program {
+                let process_target = process_request.process.program.clone();
+                if !grant.locator.is_empty() && grant.locator != process_target {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         Some(identity.clone()),
@@ -6074,10 +6685,43 @@ fn execute_operation(
                     );
                     return Some(result.clone());
                 }
-                let process_result = match crate::process::run_bounded(&process_request) {
-                    Ok(process_result) => process_result,
-                    Err(crate::process::ProcessError::Invalid(reason))
-                    | Err(crate::process::ProcessError::Limit(reason)) => {
+                let process_result = match session.process_runtime.start(process_request) {
+                    Ok((handle, _started)) => match session.process_runtime.wait(&handle) {
+                        Ok(observation) if observation.cleanup_complete == Some(true) => {
+                            crate::process::ProcessResult {
+                                status: crate::process::ExitStatus {
+                                    code: observation.exit_code,
+                                    success: observation.status
+                                        == crate::process_runtime::ProcessLifecycleStatus::Exited
+                                        && observation.exit_code == Some(0),
+                                },
+                                stdout: observation.stdout,
+                                stderr: observation.stderr,
+                                stdout_truncated: observation.stdout_truncated,
+                                stderr_truncated: observation.stderr_truncated,
+                                timed_out: observation.deadline_exceeded,
+                                duration_ms: observation.duration_ms,
+                            }
+                        }
+                        Ok(_) => {
+                            result.fail(
+                                ExecutionStatus::Unsupported,
+                                Some(identity.clone()),
+                                "process completion or cleanup could not be established".to_owned(),
+                            );
+                            return Some(result.clone());
+                        }
+                        Err(error) => {
+                            result.fail(
+                                ExecutionStatus::Unsupported,
+                                Some(identity.clone()),
+                                error.to_string(),
+                            );
+                            return Some(result.clone());
+                        }
+                    },
+                    Err(crate::process_runtime::ProcessRuntimeError::Invalid(reason))
+                    | Err(crate::process_runtime::ProcessRuntimeError::Limit(reason)) => {
                         result.fail(
                             ExecutionStatus::InvalidRequest,
                             Some(identity.clone()),
@@ -6087,7 +6731,7 @@ fn execute_operation(
                     }
                     Err(error) => {
                         result.fail(
-                            ExecutionStatus::RuntimeFailure,
+                            ExecutionStatus::Unsupported,
                             Some(identity.clone()),
                             error.to_string(),
                         );
@@ -6118,7 +6762,7 @@ fn execute_operation(
                 result.effects.push(ExecutionEffectEvent {
                     operation: identity.clone(),
                     kind: "process_run".to_owned(),
-                    target: process_request.program,
+                    target: process_target,
                     capability: capability.clone(),
                     provenance: Some(format!(
                         "process:exit={:?}:stdout_sha256:{}:stderr_sha256:{}",

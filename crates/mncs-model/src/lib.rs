@@ -26,6 +26,7 @@ mod ir;
 mod machine_intent;
 mod obligations;
 pub mod process;
+pub mod process_runtime;
 mod proof_dep;
 mod proof_kernel;
 mod proof_transport;

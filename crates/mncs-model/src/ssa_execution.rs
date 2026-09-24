@@ -691,6 +691,7 @@ pub fn execute_ssa_module(
         None,
         0,
         None,
+        None,
         MAX_SSA_TRACE_ENTRIES,
         &mut profile,
     );
@@ -720,6 +721,7 @@ pub fn execute_ssa_module_prevalidated(
         None,
         0,
         None,
+        None,
         MAX_SSA_TRACE_ENTRIES,
         &mut profile,
     );
@@ -742,6 +744,7 @@ pub struct SsaExecutionSession {
     program_fingerprint: String,
     module_fingerprint: String,
     validation_receipt: EvidenceReceipt,
+    process_runtime: crate::process_runtime::ProcessRuntime,
 }
 
 impl SsaExecutionSession {
@@ -834,6 +837,7 @@ impl SsaExecutionSession {
             program_fingerprint,
             module_fingerprint,
             validation_receipt,
+            process_runtime: crate::process_runtime::ProcessRuntime::new(),
         })
     }
 
@@ -860,6 +864,7 @@ impl SsaExecutionSession {
             None,
             0,
             None,
+            Some(&self.process_runtime),
             MAX_SSA_TRACE_ENTRIES,
             &mut profile,
         );
@@ -891,6 +896,7 @@ impl SsaExecutionSession {
             None,
             0,
             Some(provider_runtime),
+            Some(&self.process_runtime),
             MAX_SSA_TRACE_ENTRIES,
             &mut profile,
         );
@@ -939,6 +945,7 @@ impl SsaExecutionSession {
             Some(arguments),
             0,
             None,
+            Some(&self.process_runtime),
             MAX_SSA_TRACE_ENTRIES,
             &mut profile,
         );
@@ -959,6 +966,7 @@ fn execute_ssa_module_with_validation(
     owned_arguments: Option<Vec<ExecutionValue>>,
     call_depth: u64,
     provider_runtime: Option<&dyn crate::ProviderRuntime>,
+    process_runtime: Option<&crate::process_runtime::ProcessRuntime>,
     trace_limit: usize,
     profile: &mut RuntimeProfile,
 ) -> SsaExecutionResult {
@@ -1147,6 +1155,7 @@ fn execute_ssa_module_with_validation(
         call_depth,
         trace_limit,
         provider_runtime,
+        process_runtime,
         profile,
     ) else {
         return result;
@@ -1170,6 +1179,7 @@ fn execute_prepared_function(
     call_depth: u64,
     trace_limit: usize,
     provider_runtime: Option<&dyn crate::ProviderRuntime>,
+    process_runtime: Option<&crate::process_runtime::ProcessRuntime>,
     profile: &mut RuntimeProfile,
 ) -> Option<Vec<ExecutionValue>> {
     let depth_limit = request
@@ -1285,6 +1295,7 @@ fn execute_prepared_function(
                 Some(prepared),
                 call_depth,
                 provider_runtime,
+                process_runtime,
                 trace_limit,
                 profile,
             ) {
@@ -1526,6 +1537,7 @@ fn execute_instruction(
     prepared: Option<&PreparedSsaProgram>,
     call_depth: u64,
     provider_runtime: Option<&dyn crate::ProviderRuntime>,
+    process_runtime: Option<&crate::process_runtime::ProcessRuntime>,
     trace_limit: usize,
     profile: &mut RuntimeProfile,
 ) -> bool {
@@ -3176,6 +3188,7 @@ fn execute_instruction(
                 call_depth + 1,
                 trace_limit,
                 provider_runtime,
+                process_runtime,
                 profile,
             );
             RuntimeProfile::add_elapsed(
@@ -3780,6 +3793,213 @@ fn execute_instruction(
                     }
                 }
             }
+            if matches!(
+                operation.as_str(),
+                "process_start" | "process_observe" | "process_cancel" | "process_reap"
+            ) {
+                if observing {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        instruction_identity(instruction),
+                        "owned process lifecycle requires the explicit realize policy",
+                    );
+                    return true;
+                }
+                let Some(argument) = instruction
+                    .inputs
+                    .first()
+                    .and_then(|input| values.get(input))
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        format!("{operation} requires one typed process argument"),
+                    );
+                    return true;
+                };
+                let Some(output) = instruction.outputs.first() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        format!("{operation} has no result binding"),
+                    );
+                    return true;
+                };
+                let returned = if operation == "process_start" {
+                    let owned_request =
+                        match crate::execution::process_request_from_value(program, argument) {
+                            Ok(request) => request,
+                            Err(reason) => {
+                                result.fail(
+                                    ExecutionStatus::InvalidRequest,
+                                    instruction_identity(instruction),
+                                    reason,
+                                );
+                                return true;
+                            }
+                        };
+                    let target = owned_request.process.program.clone();
+                    if !grant.locator.is_empty() && grant.locator != target {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            "process capability grant does not authorize the requested executable",
+                        );
+                        return true;
+                    }
+                    let (token, has_handle, observation, detail) = if let Some(runtime) =
+                        process_runtime
+                    {
+                        match runtime.start(owned_request) {
+                                Ok((handle, observation)) => {
+                                    (handle.opaque_token(), true, observation, String::new())
+                                }
+                                Err(crate::process_runtime::ProcessRuntimeError::Invalid(reason)) => {
+                                    result.fail(
+                                        ExecutionStatus::InvalidRequest,
+                                        instruction_identity(instruction),
+                                        reason,
+                                    );
+                                    return true;
+                                }
+                                Err(crate::process_runtime::ProcessRuntimeError::Limit(reason)) => (
+                                    [0; 32],
+                                    false,
+                                    crate::process_runtime::ProcessObservation::incomplete(
+                                        crate::process_runtime::ProcessLifecycleStatus::ResourceExhausted,
+                                    ),
+                                    reason,
+                                ),
+                                Err(crate::process_runtime::ProcessRuntimeError::Unsupported(reason)) => (
+                                    [0; 32],
+                                    false,
+                                    crate::process_runtime::ProcessObservation::incomplete(
+                                        crate::process_runtime::ProcessLifecycleStatus::Unsupported,
+                                    ),
+                                    reason,
+                                ),
+                                Err(error) => (
+                                    [0; 32],
+                                    false,
+                                    crate::process_runtime::ProcessObservation::incomplete(
+                                        crate::process_runtime::ProcessLifecycleStatus::Unknown,
+                                    ),
+                                    error.to_string(),
+                                ),
+                            }
+                    } else {
+                        (
+                            [0; 32],
+                            false,
+                            crate::process_runtime::ProcessObservation::incomplete(
+                                crate::process_runtime::ProcessLifecycleStatus::Unsupported,
+                            ),
+                            "retained process lifecycle is unavailable in a one-shot session"
+                                .to_owned(),
+                        )
+                    };
+                    match crate::execution::process_start_result_value(
+                        program,
+                        &output.ty,
+                        token,
+                        has_handle,
+                        &observation,
+                    ) {
+                        Ok(value) => {
+                            result.effects.push(ExecutionEffectEvent {
+                                operation: instruction_identity(instruction).unwrap_or_else(|| {
+                                    SemanticId(format!("host-call:{capability}"))
+                                }),
+                                kind: "process_start".to_owned(),
+                                target,
+                                capability: capability.clone(),
+                                provenance: Some(format!(
+                                    "process:start:status={:?}:has_handle={has_handle}:detail={detail}",
+                                    observation.status
+                                )),
+                            });
+                            value
+                        }
+                        Err(reason) => {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                instruction_identity(instruction),
+                                reason,
+                            );
+                            return true;
+                        }
+                    }
+                } else {
+                    let handle = process_runtime.and_then(|runtime| {
+                        crate::execution::process_handle_from_value(program, argument, runtime)
+                            .ok()
+                            .map(|handle| (runtime, handle))
+                    });
+                    let (target, observation) = if let Some((runtime, handle)) = handle {
+                        let target = runtime
+                            .program_for_handle(&handle)
+                            .unwrap_or_else(|_| "unknown-owned-process".to_owned());
+                        if !grant.locator.is_empty() && grant.locator != target {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                instruction_identity(instruction),
+                                "process capability grant does not authorize the owned executable",
+                            );
+                            return true;
+                        }
+                        let observation = match operation.as_str() {
+                            "process_observe" => runtime.observe(&handle),
+                            "process_cancel" => runtime.request_cancel(&handle),
+                            "process_reap" => runtime.wait(&handle),
+                            _ => unreachable!(),
+                        }
+                        .unwrap_or_else(|_| {
+                            crate::process_runtime::ProcessObservation::incomplete(
+                                crate::process_runtime::ProcessLifecycleStatus::Unknown,
+                            )
+                        });
+                        (target, observation)
+                    } else {
+                        (
+                            "unknown-owned-process".to_owned(),
+                            crate::process_runtime::ProcessObservation::incomplete(
+                                crate::process_runtime::ProcessLifecycleStatus::Unknown,
+                            ),
+                        )
+                    };
+                    match crate::execution::process_observation_value(
+                        program,
+                        &output.ty,
+                        &observation,
+                    ) {
+                        Ok(value) => {
+                            result.effects.push(ExecutionEffectEvent {
+                                operation: instruction_identity(instruction).unwrap_or_else(|| {
+                                    SemanticId(format!("host-call:{capability}"))
+                                }),
+                                kind: operation.clone(),
+                                target,
+                                capability: capability.clone(),
+                                provenance: Some(format!(
+                                    "process:{operation}:status={:?}:cleanup={:?}",
+                                    observation.status, observation.cleanup_complete
+                                )),
+                            });
+                            value
+                        }
+                        Err(reason) => {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                instruction_identity(instruction),
+                                reason,
+                            );
+                            return true;
+                        }
+                    }
+                };
+                values.insert_ref(&output.identity, returned);
+                return false;
+            }
             if operation == "process_run" {
                 if observing {
                     result.fail(
@@ -3813,7 +4033,8 @@ fn execute_instruction(
                             return true;
                         }
                     };
-                if !grant.locator.is_empty() && grant.locator != process_request.program {
+                let program_name = process_request.process.program.clone();
+                if !grant.locator.is_empty() && grant.locator != program_name {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         instruction_identity(instruction),
@@ -3821,10 +4042,49 @@ fn execute_instruction(
                     );
                     return true;
                 }
-                let process_result = match crate::process::run_bounded(&process_request) {
-                    Ok(process_result) => process_result,
-                    Err(crate::process::ProcessError::Invalid(reason))
-                    | Err(crate::process::ProcessError::Limit(reason)) => {
+                let temporary_runtime = process_runtime
+                    .is_none()
+                    .then(crate::process_runtime::ProcessRuntime::new);
+                let runtime = process_runtime
+                    .or(temporary_runtime.as_ref())
+                    .expect("one of the process runtimes is present");
+                let process_result = match runtime.start(process_request) {
+                    Ok((handle, _)) => match runtime.wait(&handle) {
+                        Ok(observation) if observation.cleanup_complete == Some(true) => {
+                            crate::process::ProcessResult {
+                                status: crate::process::ExitStatus {
+                                    code: observation.exit_code,
+                                    success: observation.status
+                                        == crate::process_runtime::ProcessLifecycleStatus::Exited
+                                        && observation.exit_code == Some(0),
+                                },
+                                stdout: observation.stdout,
+                                stderr: observation.stderr,
+                                stdout_truncated: observation.stdout_truncated,
+                                stderr_truncated: observation.stderr_truncated,
+                                timed_out: observation.deadline_exceeded,
+                                duration_ms: observation.duration_ms,
+                            }
+                        }
+                        Ok(_) => {
+                            result.fail(
+                                ExecutionStatus::Unsupported,
+                                instruction_identity(instruction),
+                                "process completion or cleanup could not be established",
+                            );
+                            return true;
+                        }
+                        Err(error) => {
+                            result.fail(
+                                ExecutionStatus::Unsupported,
+                                instruction_identity(instruction),
+                                error.to_string(),
+                            );
+                            return true;
+                        }
+                    },
+                    Err(crate::process_runtime::ProcessRuntimeError::Invalid(reason))
+                    | Err(crate::process_runtime::ProcessRuntimeError::Limit(reason)) => {
                         result.fail(
                             ExecutionStatus::InvalidRequest,
                             instruction_identity(instruction),
@@ -3834,7 +4094,7 @@ fn execute_instruction(
                     }
                     Err(error) => {
                         result.fail(
-                            ExecutionStatus::RuntimeFailure,
+                            ExecutionStatus::Unsupported,
                             instruction_identity(instruction),
                             error.to_string(),
                         );
@@ -3864,7 +4124,6 @@ fn execute_instruction(
                         return true;
                     }
                 };
-                let program_name = process_request.program.clone();
                 values.insert_ref(&output.identity, returned);
                 result.effects.push(ExecutionEffectEvent {
                     operation: instruction_identity(instruction).unwrap_or_else(|| {

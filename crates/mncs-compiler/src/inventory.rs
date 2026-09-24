@@ -342,6 +342,10 @@ fn compiler_operations() -> Vec<CompilerOperation> {
             "0.16",
         ),
         ("process_run", 1, "process_run", "process_grant", "0.16"),
+        ("process_start", 1, "process_run", "process_grant", "0.18"),
+        ("process_observe", 1, "process_run", "process_grant", "0.18"),
+        ("process_cancel", 1, "process_run", "process_grant", "0.18"),
+        ("process_reap", 1, "process_run", "process_grant", "0.18"),
         (
             "structured_read",
             2,
