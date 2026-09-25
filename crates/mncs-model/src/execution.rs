@@ -7376,7 +7376,12 @@ fn record_fields_match(
         .enumerate()
         .all(|(declared_index, received_index)| {
             let declared = &declaration.fields[declared_index];
-            value_matches_named_type(program, &fields[*received_index].1, &declared.field_type)
+            value_matches_named_type(
+                program,
+                &fields[*received_index].1,
+                &declared.field_type,
+                &declaration.identity.declaring_module().unwrap_or_default(),
+            )
         })
 }
 
@@ -7390,16 +7395,24 @@ fn finite_payload_matches(
     variant_identity: &SemanticId,
     payload: &[(String, ExecutionValue)],
 ) -> bool {
-    let Some(declared_payload) = program
+    let Some((declared_payload, module)) = program
         .finite_types
         .iter()
         .find(|decl| nominal_identity_matches(&decl.identity, &decl.name, type_identity))
         .and_then(|finite_type| {
-            finite_type.variants.iter().find(|variant| {
-                nominal_identity_matches(&variant.identity, &variant.name, variant_identity)
-            })
+            finite_type
+                .variants
+                .iter()
+                .find(|variant| {
+                    nominal_identity_matches(&variant.identity, &variant.name, variant_identity)
+                })
+                .map(|variant| {
+                    (
+                        variant.payload.clone(),
+                        finite_type.identity.declaring_module().unwrap_or_default(),
+                    )
+                })
         })
-        .map(|variant| variant.payload.clone())
     else {
         return payload.is_empty();
     };
@@ -7417,72 +7430,27 @@ fn finite_payload_matches(
         .enumerate()
         .all(|(declared_index, received_index)| {
             let declared = &declared_payload[declared_index];
-            value_matches_named_type(program, &payload[*received_index].1, &declared.field_type)
+            value_matches_named_type(
+                program,
+                &payload[*received_index].1,
+                &declared.field_type,
+                &module,
+            )
         })
 }
 
-fn value_matches_named_type(program: &Program, value: &ExecutionValue, name: &str) -> bool {
-    if let Some(finite) = program.finite_types.iter().find(|decl| {
-        nominal_identity_matches(&decl.identity, &decl.name, &SemanticId(name.to_owned()))
-    }) {
-        return value_matches_type(
-            program,
-            value,
-            &BodyType::Finite {
-                identity: finite.identity.clone(),
-                name: finite.name.clone(),
-            },
-        );
-    }
-    if let Some(record) = program.record_types.iter().find(|decl| {
-        nominal_identity_matches(&decl.identity, &decl.name, &SemanticId(name.to_owned()))
-    }) {
-        return match value {
-            ExecutionValue::Record {
-                type_identity,
-                fields,
-                ..
-            } => {
-                nominal_identity_matches(&record.identity, &record.name, type_identity)
-                    && record_fields_match(program, &record.identity, fields)
-            }
-            _ => false,
-        };
-    }
-    // Record fields may contain bounded sequences of nominal records. Resolve
-    // the sequence element through the linked program so ABI validation does
-    // not leave `HistoryEvent` as an opaque Named type.
-    let derived = BodyType::from_program(program, name);
-    if !matches!(derived, BodyType::Named(_)) {
-        return value_matches_type(program, value, &derived);
-    }
-    if name == "bool" {
-        return matches!(value, ExecutionValue::Boolean { .. });
-    }
-    if let Some(finite) = program.finite_types.iter().find(|decl| decl.name == name) {
-        return value_matches_type(
-            program,
-            value,
-            &BodyType::Finite {
-                identity: finite.identity.clone(),
-                name: finite.name.clone(),
-            },
-        );
-    }
-    if let Some(record) = program.record_types.iter().find(|decl| decl.name == name) {
-        return match value {
-            ExecutionValue::Record {
-                type_identity,
-                fields,
-                ..
-            } => {
-                nominal_identity_matches(&record.identity, &record.name, type_identity)
-                    && record_fields_match(program, &record.identity, fields)
-            }
-            _ => false,
-        };
-    }
-    false
+fn value_matches_named_type(
+    program: &Program,
+    value: &ExecutionValue,
+    name: &str,
+    module: &str,
+) -> bool {
+    // Resolve every nested field in the namespace that declared its parent
+    // nominal type. A linked program may contain several records with the
+    // same short name, so a global first-match can reject a valid imported
+    // value when the caller declares a same-named local record.
+    let derived = BodyType::from_program_in_module(program, name, module);
+    !matches!(derived, BodyType::Named(_)) && value_matches_type(program, value, &derived)
 }
 
 fn constant_value(value: i128, ty: &BodyType) -> Option<ExecutionValue> {
@@ -8509,7 +8477,12 @@ mod tests {
             values: Arc::new(vec![point(), point()]),
         };
 
-        assert!(value_matches_named_type(&program, &value, "[Point; 2]"));
+        assert!(value_matches_named_type(
+            &program,
+            &value,
+            "[Point; 2]",
+            "test"
+        ));
     }
 
     #[test]

@@ -784,6 +784,97 @@ fn profile_09_unqualified_duplicate_nominal_exports_fail_closed() {
 }
 
 #[test]
+fn profile_018_retained_session_calls_imported_internal_recursive_record_function() {
+    let resolver = MapResolver::default().with(
+        "lib.machine",
+        r#"
+mncs 0.13;
+module lib.machine;
+enum Expr { Name { start: u64, end: u64 }, Integer { start: u64, end: u64, value: u64, overflow: bool }, Boolean { start: u64, end: u64, value: bool }, Binary { op: u64, left: Expr, right: Expr, start: u64, end: u64 }, Call { name_start: u64, name_end: u64, args: ExprList, start: u64, end: u64 }, Project { base: Expr, field_start: u64, field_end: u64, start: u64, end: u64, path: bool } }
+enum ExprList { ENil, ECons { head: Expr, tail: ExprList } }
+enum Stmt { Let { name_start: u64, name_end: u64, type_start: u64, type_end: u64, type_kind: u64, value: Expr, start: u64, end: u64 }, If { cond: Expr, then_b: StmtList, else_b: StmtList, start: u64, end: u64 }, Fail { mode_start: u64, mode_end: u64, start: u64, end: u64 }, Return { value: Expr, start: u64, end: u64 } }
+enum StmtList { SNil, SCons { head: Stmt, tail: StmtList } }
+record Frame { cond: Expr, cond_start: u64, cond_end: u64, then_list: StmtList, parent: StmtList, phase: u64 }
+enum FrameList { YNil, YCons { head: Frame, tail: FrameList } }
+enum FrameHolder { Wrap { frame: Frame } }
+record BlockState { cursor: u64, ok: bool, err_start: u64, err_end: u64, list: StmtList, frames: FrameList, done: bool, mode: u64 }
+fn block_step(s0: [byte; up_to 64], s1: [byte; up_to 64], s2: [byte; up_to 64], s3: [byte; up_to 64], total: u64, state: BlockState) -> (result: BlockState) { return BlockState { ..state, cursor: state.cursor + 1 }; }
+fn has_frame(value: FrameHolder) -> (result: bool) { return true; }
+fn parse(s0: [byte; up_to 64], s1: [byte; up_to 64], s2: [byte; up_to 64], s3: [byte; up_to 64], total: u64) -> (result: bool) {
+    let expr: Expr = Expr.Name { start: 0, end: 1 };
+    let stmt: Stmt = Stmt.Return { value: expr, start: 0, end: 1 };
+    let body: StmtList = StmtList.SCons { head: stmt, tail: StmtList.SNil };
+    let frame: Frame = Frame { cond: expr, cond_start: 0, cond_end: 1, then_list: body, parent: StmtList.SNil, phase: 0 };
+    let frames: FrameList = FrameList.YCons { head: frame, tail: FrameList.YNil };
+    let state: BlockState = BlockState { cursor: 0, ok: true, err_start: 0, err_end: 0, list: body, frames: frames, done: true, mode: 1 };
+    let first: BlockState = block_step(s0, s1, s2, s3, total, state);
+    let copied: BlockState = block_step(s0, s1, s2, s3, total, first);
+    let held: bool = has_frame(FrameHolder.Wrap { frame: frame });
+    return copied.done && held;
+}
+"#,
+    ).with(
+        "lib.facade",
+        "mncs 0.13;\nmodule lib.facade;\nuse lib.machine as m;\nfn run(s0: [byte; up_to 64], s1: [byte; up_to 64], s2: [byte; up_to 64], s3: [byte; up_to 64], total: u64) -> (result: bool) { return m.parse(s0, s1, s2, s3, total); }\n",
+    );
+    let source = "mncs 0.18;\nmodule app.machine;\nuse lib.facade as facade;\nrecord Frame { marker: bool }\nfn marker() -> (result: bool) { let own: Frame = Frame { marker: true }; return own.marker; }\nfn main(s0: [byte; up_to 64], s1: [byte; up_to 64], s2: [byte; up_to 64], s3: [byte; up_to 64], total: u64) -> (result: bool) { return facade.run(s0, s1, s2, s3, total); }\n";
+    let root = resolver.envelope("root", source.to_owned());
+    let front_end = ReferenceCompiler::default().front_end_with_resolver(root, &resolver);
+    assert!(front_end.is_valid(), "{:#?}", front_end.diagnostics);
+    let program = front_end.program.expect("linked program");
+    let request = mncs_model::ExecutionRequest {
+        schema_version: mncs_model::EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
+        target: mncs_model::ExecutionTarget {
+            module: "app.machine".to_owned(),
+            function: "main".to_owned(),
+        },
+        arguments: vec![
+            mncs_model::ExecutionValue::Sequence {
+                values: Vec::new().into(),
+            },
+            mncs_model::ExecutionValue::Sequence {
+                values: Vec::new().into(),
+            },
+            mncs_model::ExecutionValue::Sequence {
+                values: Vec::new().into(),
+            },
+            mncs_model::ExecutionValue::Sequence {
+                values: Vec::new().into(),
+            },
+            mncs_model::ExecutionValue::Integer {
+                value: 0,
+                ty: mncs_model::IntegerType {
+                    bits: 64,
+                    signed: false,
+                },
+            },
+        ],
+        step_budget: 256,
+        policy: mncs_model::ExecutionPolicy::default(),
+        host_grants: Vec::new(),
+        type_arguments: Vec::new(),
+        call_depth_budget: None,
+    };
+    let session = mncs_model::BodyExecutionSession::new(&program);
+    let result = session.execute(&request);
+    assert_eq!(
+        result.status,
+        mncs_model::ExecutionStatus::Returned,
+        "{result:?}"
+    );
+    assert_eq!(
+        result.returned,
+        vec![mncs_model::ExecutionValue::Boolean { value: true }]
+    );
+    let ssa = mncs_model::execute_ssa(&program, &request);
+    assert_eq!(ssa.status, mncs_model::ExecutionStatus::Returned, "{ssa:?}");
+    assert_eq!(
+        ssa.returned,
+        vec![mncs_model::ExecutionValue::Boolean { value: true }]
+    );
+}
+
+#[test]
 fn profile_09_alias_collisions_and_missing_members_are_diagnostics() {
     let resolver = MapResolver::default()
         .with("lib.left", &duplicate_export_module("lib.left", "convert"))
