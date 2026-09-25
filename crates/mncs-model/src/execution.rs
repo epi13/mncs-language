@@ -544,6 +544,7 @@ pub enum HostExecutionValue {
     },
     Finite {
         #[serde(rename = "type")]
+        #[serde(default, skip_serializing_if = "String::is_empty")]
         type_name: String,
         variant: String,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -551,6 +552,7 @@ pub enum HostExecutionValue {
     },
     Record {
         #[serde(rename = "type")]
+        #[serde(default, skip_serializing_if = "String::is_empty")]
         type_name: String,
         fields: BTreeMap<String, HostExecutionValue>,
     },

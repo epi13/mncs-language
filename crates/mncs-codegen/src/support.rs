@@ -1049,6 +1049,271 @@ pub(crate) fn resolve_host_arguments(
         .collect()
 }
 
+/// Materialize external structured JSON under one exact compiler-owned
+/// composite contract. JSON is only a transport syntax here: the recursive
+/// resolver below still supplies every MNCS primitive type, nominal
+/// identity, enum discriminant, canonical field order, and sequence bound.
+/// Unknown JSON shapes are refused and never become an MNCS dynamic value.
+pub(crate) fn project_structured_composite(
+    artifact: &BackendArtifact,
+    type_identity: &mncs_model::SemanticId,
+    value: &serde_json::Value,
+) -> Result<ExecutionValue, String> {
+    let host = structured_json_value(value, "value")?;
+    project_host_composite(artifact, type_identity, &host)
+}
+
+pub(crate) fn project_host_composite(
+    artifact: &BackendArtifact,
+    type_identity: &mncs_model::SemanticId,
+    host: &HostExecutionValue,
+) -> Result<ExecutionValue, String> {
+    let mut matches = artifact
+        .composite_value_contracts
+        .values()
+        .filter(|contract| composite_type_identity(contract) == Some(type_identity));
+    let Some(contract) = matches.next() else {
+        return Err(format!(
+            "MNCS_STRUCTURED_PROJECTION unknown composite type identity {type_identity} in artifact {}",
+            artifact.identity
+        ));
+    };
+    if matches.any(|candidate| candidate != contract) {
+        return Err(format!(
+            "MNCS_STRUCTURED_PROJECTION ambiguous composite type identity {type_identity}"
+        ));
+    }
+    if !matches!(contract, BackendValueContract::Record { .. } | BackendValueContract::Finite { .. }) {
+        return Err(format!(
+            "MNCS_STRUCTURED_PROJECTION type identity {type_identity} is not a declared record or finite type"
+        ));
+    }
+    let resolved = resolve_host_value(
+        contract,
+        host,
+        &artifact.composite_value_contracts,
+        "value",
+    )?;
+    check_contract_value(
+        contract,
+        &resolved,
+        &artifact.composite_value_contracts,
+        "value",
+    )?;
+    Ok(resolved)
+}
+
+/// Serialize one checked nominal value using the same artifact metadata that
+/// established its contract. Finite values use compiler-emitted variant
+/// names, records use declared field names, and bounded collections retain
+/// their logical order. No consumer needs a parallel schema or discriminant
+/// table to publish a projected result.
+pub(crate) fn serialize_composite_value(
+    artifact: &BackendArtifact,
+    type_identity: &mncs_model::SemanticId,
+    value: &ExecutionValue,
+) -> Result<serde_json::Value, String> {
+    let mut matches = artifact
+        .composite_value_contracts
+        .values()
+        .filter(|contract| composite_type_identity(contract) == Some(type_identity));
+    let Some(contract) = matches.next() else {
+        return Err(format!(
+            "MNCS_STRUCTURED_PROJECTION unknown composite type identity {type_identity} in artifact {}",
+            artifact.identity
+        ));
+    };
+    if matches.any(|candidate| candidate != contract) {
+        return Err(format!(
+            "MNCS_STRUCTURED_PROJECTION ambiguous composite type identity {type_identity}"
+        ));
+    }
+    check_contract_value(
+        contract,
+        value,
+        &artifact.composite_value_contracts,
+        "value",
+    )?;
+    execution_value_json(value, &artifact.composite_value_contracts, "value")
+}
+
+fn execution_value_json(
+    value: &ExecutionValue,
+    composites: &BTreeMap<String, BackendValueContract>,
+    path: &str,
+) -> Result<serde_json::Value, String> {
+    use serde_json::Value;
+    match value {
+        ExecutionValue::Integer { value, .. } | ExecutionValue::Byte { value } => {
+            serde_json::Number::from_i128(*value)
+                .map(Value::Number)
+                .ok_or_else(|| format!("MNCS_STRUCTURED_PROJECTION {path}: integer is outside JSON number range"))
+        }
+        ExecutionValue::Float { bits, .. } => serde_json::Number::from_f64(f64::from_bits(*bits))
+            .map(Value::Number)
+            .ok_or_else(|| format!("MNCS_STRUCTURED_PROJECTION {path}: float is not finite")),
+        ExecutionValue::Boolean { value } => Ok(Value::Bool(*value)),
+        ExecutionValue::Finite {
+            type_identity,
+            variant_identity,
+            discriminant,
+            payload,
+        } => {
+            let Some(BackendValueContract::Finite {
+                type_identity: expected_type,
+                variants,
+                variant_names,
+                ..
+            }) = BackendValueContract::find_nominal_contract(composites, type_identity)
+            else {
+                return Err(format!(
+                    "MNCS_STRUCTURED_PROJECTION {path}: finite contract {type_identity} is missing"
+                ));
+            };
+            if expected_type != type_identity || variants.get(discriminant) != Some(variant_identity) {
+                return Err(format!(
+                    "MNCS_STRUCTURED_PROJECTION {path}: finite identity does not match its artifact contract"
+                ));
+            }
+            let variant = variant_names.get(discriminant).ok_or_else(|| {
+                format!(
+                    "MNCS_STRUCTURED_PROJECTION {path}: finite contract has no public name for discriminant {discriminant}"
+                )
+            })?;
+            if payload.is_empty() {
+                Ok(Value::String(variant.clone()))
+            } else {
+                let mut fields = serde_json::Map::new();
+                for (name, field) in payload.iter() {
+                    fields.insert(
+                        name.clone(),
+                        execution_value_json(field, composites, &format!("{path}.{name}"))?,
+                    );
+                }
+                let mut object = serde_json::Map::new();
+                object.insert("variant".to_owned(), Value::String(variant.clone()));
+                object.insert("payload".to_owned(), Value::Object(fields));
+                Ok(Value::Object(object))
+            }
+        }
+        ExecutionValue::Record {
+            type_identity,
+            fields,
+            ..
+        } => {
+            let Some(BackendValueContract::Record {
+                type_identity: expected_type,
+                fields: declared,
+                ..
+            }) = BackendValueContract::find_nominal_contract(composites, type_identity)
+            else {
+                return Err(format!(
+                    "MNCS_STRUCTURED_PROJECTION {path}: record contract {type_identity} is missing"
+                ));
+            };
+            if expected_type != type_identity {
+                return Err(format!(
+                    "MNCS_STRUCTURED_PROJECTION {path}: record identity does not match its artifact contract"
+                ));
+            }
+            let values: BTreeMap<_, _> = fields.iter().map(|(name, value)| (name, value)).collect();
+            let mut object = serde_json::Map::new();
+            for (name, _) in declared {
+                let field = values.get(name).ok_or_else(|| {
+                    format!("MNCS_STRUCTURED_PROJECTION {path}: canonical record omitted field {name:?}")
+                })?;
+                object.insert(
+                    name.clone(),
+                    execution_value_json(field, composites, &format!("{path}.{name}"))?,
+                );
+            }
+            Ok(Value::Object(object))
+        }
+        ExecutionValue::Sequence { values } | ExecutionValue::Vector { values } => values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| execution_value_json(value, composites, &format!("{path}[{index}]")))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        ExecutionValue::Mask { lanes } => Ok(Value::Array(
+            lanes.iter().copied().map(Value::Bool).collect(),
+        )),
+    }
+}
+
+fn composite_type_identity(contract: &BackendValueContract) -> Option<&mncs_model::SemanticId> {
+    match contract {
+        BackendValueContract::Finite { type_identity, .. }
+        | BackendValueContract::Record { type_identity, .. } => Some(type_identity),
+        _ => None,
+    }
+}
+
+/// Convert only the syntactic JSON leaves into the existing host request
+/// representation. This conversion is deliberately contract-neutral; the
+/// same `resolve_host_value` path used by typed calls performs all MNCS
+/// interpretation and validation.
+fn structured_json_value(
+    value: &serde_json::Value,
+    path: &str,
+) -> Result<HostExecutionValue, String> {
+    match value {
+        serde_json::Value::Null => Err(format!(
+            "MNCS_STRUCTURED_PROJECTION {path}: null has no declared MNCS value"
+        )),
+        serde_json::Value::Bool(value) => Ok(HostExecutionValue::Boolean { value: *value }),
+        serde_json::Value::Number(value) => {
+            if let Some(value) = value.as_i64() {
+                Ok(HostExecutionValue::Integer {
+                    value: i128::from(value),
+                })
+            } else if let Some(value) = value.as_u64() {
+                Ok(HostExecutionValue::Integer {
+                    value: i128::from(value),
+                })
+            } else if let Some(value) = value.as_f64() {
+                if value.is_finite() {
+                    Ok(HostExecutionValue::Float { value })
+                } else {
+                    Err(format!(
+                        "MNCS_STRUCTURED_PROJECTION {path}: non-finite number is invalid"
+                    ))
+                }
+            } else {
+                Err(format!(
+                    "MNCS_STRUCTURED_PROJECTION {path}: number cannot be represented"
+                ))
+            }
+        }
+        // A JSON string is only an enum label at a finite-typed contract
+        // position. Every other declared type rejects this request shape.
+        serde_json::Value::String(variant) => Ok(HostExecutionValue::Finite {
+            type_name: String::new(),
+            variant: variant.clone(),
+            payload: BTreeMap::new(),
+        }),
+        serde_json::Value::Array(values) => Ok(HostExecutionValue::Sequence {
+            values: values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| structured_json_value(value, &format!("{path}[{index}]")))
+                .collect::<Result<Vec<_>, _>>()?,
+        }),
+        serde_json::Value::Object(fields) => Ok(HostExecutionValue::Record {
+            type_name: String::new(),
+            fields: fields
+                .iter()
+                .map(|(name, value)| {
+                    Ok((
+                        name.clone(),
+                        structured_json_value(value, &format!("{path}.{name}"))?,
+                    ))
+                })
+                .collect::<Result<BTreeMap<_, _>, String>>()?,
+        }),
+    }
+}
+
 /// Validate canonical runtime values against one compiler-owned callable
 /// contract before execution begins.
 pub(crate) fn validate_execution_arguments(
@@ -1096,7 +1361,10 @@ fn resolve_host_value(
                     "MNCS_TYPED_VALUE {path}: expected finite {name}, received a different host value"
                 ));
             };
-            if type_name != &type_identity.0 && (name.is_empty() || type_name != name) {
+            if !type_name.is_empty()
+                && type_name != &type_identity.0
+                && (name.is_empty() || type_name != name)
+            {
                 return Err(format!(
                     "MNCS_TYPED_VALUE {path}: finite type {type_name:?} does not name expected {name:?} ({type_identity})"
                 ));
@@ -1170,7 +1438,10 @@ fn resolve_host_value(
                     "MNCS_TYPED_VALUE {path}: expected record {name}, received a different host value"
                 ));
             };
-            if type_name != &type_identity.0 && (name.is_empty() || type_name != name) {
+            if !type_name.is_empty()
+                && type_name != &type_identity.0
+                && (name.is_empty() || type_name != name)
+            {
                 return Err(format!(
                     "MNCS_TYPED_VALUE {path}: record type {type_name:?} does not name expected {name:?} ({type_identity})"
                 ));
@@ -1440,6 +1711,16 @@ fn resolve_host_declared_type(
             })
         }
         (BodyType::Byte, HostExecutionValue::Byte { value }) => {
+            if !(0..=255).contains(value) {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: byte value {value} is outside 0..=255"
+                ));
+            }
+            Ok(ExecutionValue::Byte { value: *value })
+        }
+        // JSON has one integer syntax; a byte-typed contract supplies the
+        // narrower unsigned domain for this untagged transport number.
+        (BodyType::Byte, HostExecutionValue::Integer { value }) => {
             if !(0..=255).contains(value) {
                 return Err(format!(
                     "MNCS_TYPED_VALUE {path}: byte value {value} is outside 0..=255"

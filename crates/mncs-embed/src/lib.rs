@@ -17,7 +17,7 @@
 //! The C ABI (`mncs_session_*`) is the stable boundary for non-Rust hosts
 //! (including Python via ctypes): JSON in, JSON out, no Rust layout.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use mncs_codegen::OwnedExecutionSession;
@@ -336,6 +336,34 @@ pub struct CallableReference {
     pub signature_identity: String,
 }
 
+/// A nominal composite target resolved in one exact compiler artifact.
+/// The enclosing artifact identity binds this type identity to the exact
+/// contract revision that supplied its fields, variants, and bounds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompositeReference {
+    pub artifact_identity: SemanticId,
+    pub type_identity: SemanticId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompositeKind {
+    Record,
+    Finite,
+}
+
+/// Compiler-owned nominal metadata available from one loaded artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompositeTypeInfo {
+    pub reference: CompositeReference,
+    pub name: String,
+    pub kind: CompositeKind,
+    /// Compiler-declared finite labels in discriminant order. Records carry
+    /// an empty list; callers never maintain an external variant table.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variants: Vec<String>,
+}
+
 /// One typed invocation in a retained-session batch.  The Rust API keeps
 /// values typed; the JSON/C ABI batch below is only the external
 /// interoperability projection of the same operation.
@@ -438,6 +466,214 @@ impl Session {
 
     pub fn interface_identity(&self) -> Option<&str> {
         self.inner.artifact().interface_identity.as_deref()
+    }
+
+    /// Enumerate the artifact's unique nominal composites. The returned
+    /// references bind each compiler-issued type identity to this artifact
+    /// revision; name aliases are never exposed as additional types.
+    pub fn composite_types(&self) -> Result<Vec<CompositeTypeInfo>, EmbedError> {
+        let artifact = self.inner.artifact();
+        let mut unique = BTreeMap::new();
+        for contract in artifact.composite_value_contracts.values() {
+            let (type_identity, name, kind, variants) = match contract {
+                mncs_model::BackendValueContract::Record {
+                    type_identity,
+                    name,
+                    ..
+                } => (type_identity, name, CompositeKind::Record, Vec::new()),
+                mncs_model::BackendValueContract::Finite {
+                    type_identity,
+                    name,
+                    variant_names,
+                    ..
+                } => (
+                    type_identity,
+                    name,
+                    CompositeKind::Finite,
+                    variant_names.values().cloned().collect(),
+                ),
+                _ => continue,
+            };
+            if let Some((previous_contract, previous_name, previous_kind, previous_variants)) =
+                unique.get(type_identity)
+            {
+                if *previous_contract != contract
+                    || *previous_name != name
+                    || *previous_kind != kind
+                    || *previous_variants != variants
+                {
+                    return Err(EmbedError::new(
+                        "ambiguous_composite_identity",
+                        format!(
+                            "composite identity {type_identity} resolves to different contracts"
+                        ),
+                    ));
+                }
+                continue;
+            }
+            unique.insert(type_identity.clone(), (contract, name, kind, variants));
+        }
+        Ok(unique
+            .into_iter()
+            .map(|(type_identity, (_contract, name, kind, variants))| CompositeTypeInfo {
+                reference: CompositeReference {
+                    artifact_identity: artifact.identity.clone(),
+                    type_identity,
+                },
+                name: name.clone(),
+                kind,
+                variants: variants.clone(),
+            })
+            .collect())
+    }
+
+    /// Resolve an exact compiler-issued nominal identity in this artifact.
+    pub fn composite_reference(
+        &self,
+        type_identity: &SemanticId,
+    ) -> Result<CompositeReference, EmbedError> {
+        self.composite_contract(type_identity)?;
+        Ok(CompositeReference {
+            artifact_identity: self.inner.artifact().identity.clone(),
+            type_identity: type_identity.clone(),
+        })
+    }
+
+    /// Resolve a compiler-owned display name only when it is unique in the
+    /// loaded artifact. The returned reference contains the nominal identity
+    /// and artifact revision used by every subsequent projection.
+    pub fn composite_reference_by_name(
+        &self,
+        name: &str,
+    ) -> Result<CompositeReference, EmbedError> {
+        let matches = self
+            .composite_types()?
+            .into_iter()
+            .filter(|item| item.name == name)
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [item] => Ok(item.reference.clone()),
+            [] => Err(EmbedError::new(
+                "unknown_composite_name",
+                format!("composite name {name:?} is not present in the loaded artifact"),
+            )),
+            _ => Err(EmbedError::new(
+                "ambiguous_composite_name",
+                format!("composite name {name:?} resolves to multiple nominal identities"),
+            )),
+        }
+    }
+
+    /// Materialize bounded structured transport data under one declared
+    /// record or finite type. All semantic interpretation comes from the
+    /// artifact's existing composite value contract, then the same runtime
+    /// validator used by typed calls checks the canonical value.
+    pub fn project_value(
+        &self,
+        reference: &CompositeReference,
+        value: &serde_json::Value,
+    ) -> Result<ExecutionValue, EmbedError> {
+        let artifact = self.verify_composite_reference(reference)?;
+        mncs_codegen::project_structured_value_for_artifact(
+            artifact,
+            &reference.type_identity,
+            value,
+        )
+        .map_err(|error| EmbedError::new("bad_structured_projection", error))
+    }
+
+    /// Project the established name-oriented host value form through the
+    /// same artifact-bound contract resolver used by typed callable calls.
+    pub fn project_host_value(
+        &self,
+        reference: &CompositeReference,
+        value: &HostExecutionValue,
+    ) -> Result<ExecutionValue, EmbedError> {
+        let artifact = self.verify_composite_reference(reference)?;
+        mncs_codegen::project_host_value_for_artifact(
+            artifact,
+            &reference.type_identity,
+            value,
+        )
+        .map_err(|error| EmbedError::new("bad_structured_projection", error))
+    }
+
+    /// Publish a typed nominal value as deterministic structured JSON using
+    /// the same artifact-bound contract that materialized or validated it.
+    pub fn serialize_value(
+        &self,
+        reference: &CompositeReference,
+        value: &ExecutionValue,
+    ) -> Result<serde_json::Value, EmbedError> {
+        let artifact = self.verify_composite_reference(reference)?;
+        mncs_codegen::serialize_composite_value_for_artifact(
+            artifact,
+            &reference.type_identity,
+            value,
+        )
+        .map_err(|error| EmbedError::new("bad_structured_projection", error))
+    }
+
+    /// The loaded artifact's compiler-issued callable bindings. These rows
+    /// are already integrity-checked and revision-bound by artifact
+    /// admission; consumers must not regenerate them into source tables.
+    pub fn callable_bindings(&self) -> &[mncs_model::BackendCallableBinding] {
+        &self.inner.artifact().callable_bindings
+    }
+
+    fn composite_contract(
+        &self,
+        type_identity: &SemanticId,
+    ) -> Result<&mncs_model::BackendValueContract, EmbedError> {
+        let mut matches = self
+            .inner
+            .artifact()
+            .composite_value_contracts
+            .values()
+            .filter(|contract| match contract {
+                mncs_model::BackendValueContract::Record {
+                    type_identity: candidate,
+                    ..
+                }
+                | mncs_model::BackendValueContract::Finite {
+                    type_identity: candidate,
+                    ..
+                } => candidate == type_identity,
+                _ => false,
+            });
+        let Some(contract) = matches.next() else {
+            return Err(EmbedError::new(
+                "unknown_composite_identity",
+                format!(
+                    "composite identity {type_identity} is not present in the loaded artifact"
+                ),
+            ));
+        };
+        if matches.any(|candidate| candidate != contract) {
+            return Err(EmbedError::new(
+                "ambiguous_composite_identity",
+                format!("composite identity {type_identity} resolves to different contracts"),
+            ));
+        }
+        Ok(contract)
+    }
+
+    fn verify_composite_reference(
+        &self,
+        reference: &CompositeReference,
+    ) -> Result<&BackendArtifact, EmbedError> {
+        let artifact = self.inner.artifact();
+        if reference.artifact_identity != artifact.identity {
+            return Err(EmbedError::new(
+                "artifact_identity_mismatch",
+                format!(
+                    "composite reference belongs to artifact {}, loaded artifact is {}",
+                    reference.artifact_identity, artifact.identity
+                ),
+            ));
+        }
+        self.composite_contract(&reference.type_identity)?;
+        Ok(artifact)
     }
 
     /// Resolve one compiler-issued callable, declaration, or test-case
@@ -1085,6 +1321,169 @@ pub unsafe extern "C" fn mncs_session_info(handle: *const Session) -> *mut CallR
         "reused_session": session.reused(),
     });
     match CallResponse::of(&info) {
+        Ok(response) => response,
+        Err(message) => {
+            stash_error(message);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Enumerate compiler-owned finite and record type identities from one
+/// admitted artifact. Each item contains a revision-bound
+/// [`CompositeReference`]. NULL on failure; consult `mncs_last_error`.
+///
+/// # Safety
+///
+/// `handle` must be NULL or a live session handle.
+#[no_mangle]
+pub unsafe extern "C" fn mncs_session_composite_types(
+    handle: *const Session,
+) -> *mut CallResponse {
+    if handle.is_null() {
+        stash_error("null session handle".to_owned());
+        return ptr::null_mut();
+    }
+    let session = unsafe { &*handle };
+    match session.composite_types() {
+        Ok(types) => match CallResponse::of(&types) {
+            Ok(response) => response,
+            Err(message) => {
+                stash_error(message);
+                ptr::null_mut()
+            }
+        },
+        Err(error) => {
+            stash_error(error.to_string());
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Project one JSON transport value into a compiler-declared nominal type.
+/// `request_json` has the shape
+/// `{ "reference": CompositeReference, "value": <bounded structured input> }`.
+/// The result contains the exact artifact/type identities and the canonical
+/// [`ExecutionValue`]. NULL on failure; consult `mncs_last_error`.
+///
+/// # Safety
+///
+/// `handle` must be NULL or a live session handle; `request_json` must be
+/// NULL or valid NUL-terminated UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn mncs_session_project_value(
+    handle: *const Session,
+    request_json: *const c_char,
+) -> *mut CallResponse {
+    if handle.is_null() {
+        stash_error("null session handle".to_owned());
+        return ptr::null_mut();
+    }
+    let session = unsafe { &*handle };
+    let text = read_c_str(request_json).unwrap_or_default();
+    #[derive(Deserialize)]
+    struct ProjectionRequest {
+        reference: CompositeReference,
+        value: serde_json::Value,
+    }
+    let request: ProjectionRequest = match serde_json::from_str(&text) {
+        Ok(request) => request,
+        Err(error) => {
+            stash_error(format!("structured projection request JSON rejected: {error}"));
+            return ptr::null_mut();
+        }
+    };
+    let value = match session.project_value(&request.reference, &request.value) {
+        Ok(value) => value,
+        Err(error) => {
+            stash_error(error.to_string());
+            return ptr::null_mut();
+        }
+    };
+    let response = serde_json::json!({
+        "artifact_identity": request.reference.artifact_identity,
+        "type_identity": request.reference.type_identity,
+        "value": value,
+    });
+    match CallResponse::of(&response) {
+        Ok(response) => response,
+        Err(message) => {
+            stash_error(message);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Serialize an artifact-bound typed nominal value to structured JSON.
+/// `request_json` has the shape
+/// `{ "reference": CompositeReference, "value": ExecutionValue }`.
+/// NULL on failure; consult `mncs_last_error`.
+///
+/// # Safety
+///
+/// `handle` must be NULL or a live session handle; `request_json` must be
+/// NULL or valid NUL-terminated UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn mncs_session_serialize_value(
+    handle: *const Session,
+    request_json: *const c_char,
+) -> *mut CallResponse {
+    if handle.is_null() {
+        stash_error("null session handle".to_owned());
+        return ptr::null_mut();
+    }
+    let session = unsafe { &*handle };
+    let text = read_c_str(request_json).unwrap_or_default();
+    #[derive(Deserialize)]
+    struct SerializationRequest {
+        reference: CompositeReference,
+        value: ExecutionValue,
+    }
+    let request: SerializationRequest = match serde_json::from_str(&text) {
+        Ok(request) => request,
+        Err(error) => {
+            stash_error(format!("structured serialization request JSON rejected: {error}"));
+            return ptr::null_mut();
+        }
+    };
+    match session.serialize_value(&request.reference, &request.value) {
+        Ok(value) => match CallResponse::of(&value) {
+            Ok(response) => response,
+            Err(message) => {
+                stash_error(message);
+                ptr::null_mut()
+            }
+        },
+        Err(error) => {
+            stash_error(error.to_string());
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Return the compiler-owned callable binding rows from the exact loaded
+/// artifact. The response includes artifact identity and digest so consumers
+/// can preserve the revision binding when they transport these rows.
+/// NULL on failure; consult `mncs_last_error`.
+///
+/// # Safety
+///
+/// `handle` must be NULL or a live session handle.
+#[no_mangle]
+pub unsafe extern "C" fn mncs_session_callable_bindings(
+    handle: *const Session,
+) -> *mut CallResponse {
+    if handle.is_null() {
+        stash_error("null session handle".to_owned());
+        return ptr::null_mut();
+    }
+    let session = unsafe { &*handle };
+    let response = serde_json::json!({
+        "artifact_identity": session.artifact_identity(),
+        "artifact_sha256": session.digest(),
+        "callable_bindings": session.callable_bindings(),
+    });
+    match CallResponse::of(&response) {
         Ok(response) => response,
         Err(message) => {
             stash_error(message);

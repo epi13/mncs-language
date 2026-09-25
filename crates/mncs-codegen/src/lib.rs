@@ -450,6 +450,49 @@ pub fn resolve_typed_arguments(
     support::resolve_host_arguments(contract, composites, values)
 }
 
+/// Project bounded structured transport material into a declared composite
+/// carried by one verified compiler artifact. The semantic target is the
+/// exact compiler-issued nominal identity; the artifact supplies the field
+/// types, enum variants, bounds, and canonical representation.
+pub fn project_structured_value_for_artifact(
+    artifact: &BackendArtifact,
+    type_identity: &SemanticId,
+    value: &serde_json::Value,
+) -> Result<ExecutionValue, String> {
+    if !artifact.identity_is_valid() {
+        return Err("MNCS_STRUCTURED_PROJECTION artifact identity is invalid".to_owned());
+    }
+    support::project_structured_composite(artifact, type_identity, value)
+}
+
+/// Resolve the existing typed host value representation directly against one
+/// nominal composite in a verified artifact. This shares the same resolver
+/// and value-contract validation as typed callable arguments.
+pub fn project_host_value_for_artifact(
+    artifact: &BackendArtifact,
+    type_identity: &SemanticId,
+    value: &HostExecutionValue,
+) -> Result<ExecutionValue, String> {
+    if !artifact.identity_is_valid() {
+        return Err("MNCS_STRUCTURED_PROJECTION artifact identity is invalid".to_owned());
+    }
+    support::project_host_composite(artifact, type_identity, value)
+}
+
+/// Serialize a checked nominal value through its compiler-owned contract.
+/// This is the inverse publication boundary for structured projection and
+/// uses compiler-emitted record fields and finite variant names.
+pub fn serialize_composite_value_for_artifact(
+    artifact: &BackendArtifact,
+    type_identity: &SemanticId,
+    value: &ExecutionValue,
+) -> Result<serde_json::Value, String> {
+    if !artifact.identity_is_valid() {
+        return Err("MNCS_STRUCTURED_PROJECTION artifact identity is invalid".to_owned());
+    }
+    support::serialize_composite_value(artifact, type_identity, value)
+}
+
 /// Resolve a typed call against a verified artifact, including generic entry
 /// resolution.  The artifact's own metadata is the sole authority for the
 /// callable signature.
