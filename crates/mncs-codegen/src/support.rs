@@ -9,7 +9,7 @@ use mncs_model::{
     BackendFunctionValueContract, BackendIdentity, BackendResult, BackendValueContract, BodyType,
     CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind, ExecutionFailure,
     ExecutionRequest, ExecutionStatus, ExecutionValue, HostExecutionValue, IntegerType, Program,
-    SequenceBound, SsaModule, TransformationStatus, TypeSyntax,
+    SequenceBound, SsaModule, TransformationStatus,
 };
 use sha2::{Digest, Sha256};
 
@@ -271,6 +271,10 @@ pub(crate) fn composite_value_contracts(
 ) -> BTreeMap<String, BackendValueContract> {
     let mut composites = BTreeMap::new();
     for record in &program.record_types {
+        let declaring_module = record
+            .identity
+            .declaring_module()
+            .unwrap_or_else(|| program.module.clone());
         let contract = BackendValueContract::Record {
             type_identity: record.identity.clone(),
             name: record.name.clone(),
@@ -280,9 +284,11 @@ pub(crate) fn composite_value_contracts(
                 .map(|field| {
                     (
                         field.name.clone(),
-                        AbiTypeRef(
-                            TypeSyntax::from(field.field_type.as_str()).resolve_against(program),
-                        ),
+                        AbiTypeRef(BodyType::from_program_in_module(
+                            program,
+                            &field.field_type,
+                            &declaring_module,
+                        )),
                     )
                 })
                 .collect(),
@@ -291,6 +297,10 @@ pub(crate) fn composite_value_contracts(
         composites.insert(record.identity.to_string(), contract);
     }
     for finite in &program.finite_types {
+        let declaring_module = finite
+            .identity
+            .declaring_module()
+            .unwrap_or_else(|| program.module.clone());
         // Include every declared finite type: payload-free ones are needed as
         // field-type references inside other composites.
         let payloads: BTreeMap<u32, Vec<(String, AbiTypeRef)>> = finite
@@ -305,10 +315,11 @@ pub(crate) fn composite_value_contracts(
                         .map(|field| {
                             (
                                 field.name.clone(),
-                                AbiTypeRef(
-                                    TypeSyntax::from(field.field_type.as_str())
-                                        .resolve_against(program),
-                                ),
+                                AbiTypeRef(BodyType::from_program_in_module(
+                                    program,
+                                    &field.field_type,
+                                    &declaring_module,
+                                )),
                             )
                         })
                         .collect(),
@@ -337,13 +348,19 @@ pub(crate) fn composite_value_contracts(
 }
 
 /// Classify one declared semantic type into the language-owned backend
-/// value contract used at process and interpreter boundaries.
-pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueContract {
-    if let Some(record_type) = program
-        .record_types
-        .iter()
-        .find(|record| record.name == name || record.identity.0 == name)
-    {
+/// value contract used at process and interpreter boundaries. The module
+/// selects the owner for a short nominal spelling; exact semantic identities
+/// remain authoritative when one is already present.
+fn value_contract_for(program: &Program, name: &str, module: &str) -> BackendValueContract {
+    if let Some(record_type) = program.record_types.iter().find(|record| {
+        record.identity.0 == name
+            || (record.name == name
+                && record.identity.declaring_module().as_deref() == Some(module))
+    }) {
+        let declaring_module = record_type
+            .identity
+            .declaring_module()
+            .unwrap_or_else(|| module.to_owned());
         return BackendValueContract::Record {
             type_identity: record_type.identity.clone(),
             name: record_type.name.clone(),
@@ -353,19 +370,25 @@ pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueC
                 .map(|field| {
                     (
                         field.name.clone(),
-                        AbiTypeRef(
-                            TypeSyntax::from(field.field_type.as_str()).resolve_against(program),
-                        ),
+                        AbiTypeRef(BodyType::from_program_in_module(
+                            program,
+                            &field.field_type,
+                            &declaring_module,
+                        )),
                     )
                 })
                 .collect(),
         };
     }
-    if let Some(finite_type) = program
-        .finite_types
-        .iter()
-        .find(|finite_type| finite_type.name == name || finite_type.identity.0 == name)
-    {
+    if let Some(finite_type) = program.finite_types.iter().find(|finite_type| {
+        finite_type.identity.0 == name
+            || (finite_type.name == name
+                && finite_type.identity.declaring_module().as_deref() == Some(module))
+    }) {
+        let declaring_module = finite_type
+            .identity
+            .declaring_module()
+            .unwrap_or_else(|| module.to_owned());
         // A type is boxed when ANY variant carries a payload;
         // every variant then gets a layout entry (maybe empty).
         let payloads = finite_type
@@ -386,10 +409,11 @@ pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueC
                         .map(|field| {
                             (
                                 field.name.clone(),
-                                AbiTypeRef(
-                                    TypeSyntax::from(field.field_type.as_str())
-                                        .resolve_against(program),
-                                ),
+                                AbiTypeRef(BodyType::from_program_in_module(
+                                    program,
+                                    &field.field_type,
+                                    &declaring_module,
+                                )),
                             )
                         })
                         .collect::<Vec<_>>(),
@@ -415,7 +439,7 @@ pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueC
     // Program-aware resolution so nested nominal elements (records/finites
     // inside sequences) rehydrate to their identities instead of lingering
     // as opaque spellings; the wire still carries short names for compat.
-    match BodyType::from_program(program, name) {
+    match BodyType::from_program_in_module(program, name, module) {
         BodyType::Sequence {
             element,
             bound: SequenceBound::Exact(length),
@@ -450,16 +474,17 @@ pub(crate) fn function_value_contracts(
 ) -> BTreeMap<String, BackendFunctionValueContract> {
     let mut contracts = BTreeMap::new();
     for function in &program.functions {
+        let module = function.home_module.as_deref().unwrap_or(&program.module);
         let contract = BackendFunctionValueContract {
             inputs: function
                 .inputs
                 .iter()
-                .map(|value| value_contract_for(program, &value.value_type))
+                .map(|value| value_contract_for(program, &value.value_type, module))
                 .collect(),
             outputs: function
                 .outputs
                 .iter()
-                .map(|value| value_contract_for(program, &value.value_type))
+                .map(|value| value_contract_for(program, &value.value_type, module))
                 .collect(),
             input_names: function
                 .inputs
@@ -3098,7 +3123,96 @@ mod contract_tests {
 #[cfg(test)]
 mod driver_tests {
     use super::*;
-    use mncs_model::{FiniteType, FiniteVariant};
+    use mncs_model::{FiniteType, FiniteVariant, RecordField, RecordType};
+
+    #[test]
+    fn nested_nominal_contract_fields_resolve_in_declaring_module() {
+        let flow_module = "mncs.compiler.flow.v1";
+        let ssa_module = "mncs.compiler.ssa.v1";
+        let flow_list_identity =
+            mncs_model::record_type_id(flow_module, "FunctionList", &[("value", "u64")]);
+        let ssa_list_identity =
+            mncs_model::record_type_id(ssa_module, "FunctionList", &[("value", "bool")]);
+        let lowered_identity = mncs_model::record_type_id(
+            flow_module,
+            "LoweredUnit",
+            &[("functions", "FunctionList")],
+        );
+        let flow_list = RecordType {
+            identity: flow_list_identity.clone(),
+            name: "FunctionList".to_owned(),
+            fields: vec![RecordField {
+                name: "value".to_owned(),
+                field_type: "u64".to_owned(),
+            }],
+        };
+        let ssa_list = RecordType {
+            identity: ssa_list_identity,
+            name: "FunctionList".to_owned(),
+            fields: vec![RecordField {
+                name: "value".to_owned(),
+                field_type: "bool".to_owned(),
+            }],
+        };
+        let lowered = RecordType {
+            identity: lowered_identity.clone(),
+            name: "LoweredUnit".to_owned(),
+            fields: vec![RecordField {
+                name: "functions".to_owned(),
+                field_type: "FunctionList".to_owned(),
+            }],
+        };
+        let finite_identity = mncs_model::finite_type_id(flow_module, "FlowChoice");
+        let finite = FiniteType {
+            identity: finite_identity.clone(),
+            name: "FlowChoice".to_owned(),
+            variants: vec![FiniteVariant {
+                identity: mncs_model::finite_variant_id(flow_module, "FlowChoice", "Some"),
+                name: "Some".to_owned(),
+                discriminant: 0,
+                payload: vec![RecordField {
+                    name: "functions".to_owned(),
+                    field_type: "FunctionList".to_owned(),
+                }],
+            }],
+        };
+        let program = Program {
+            schema_version: mncs_model::SUPPORTED_SCHEMA_VERSION.to_owned(),
+            module: ssa_module.to_owned(),
+            dependencies: Vec::new(),
+            finite_types: vec![finite],
+            // Put the consumer's same-named nominal first to make a global
+            // short-name lookup choose the wrong identity deterministically.
+            record_types: vec![ssa_list, flow_list, lowered],
+            assumptions: Vec::new(),
+            binding_table: None,
+            functions: Vec::new(),
+            generic_specializations: Vec::new(),
+        };
+
+        let contracts = composite_value_contracts(&program);
+        let BackendValueContract::Record { fields, .. } = contracts
+            .get(lowered_identity.as_str())
+            .expect("LoweredUnit contract")
+        else {
+            panic!("expected record contract")
+        };
+        assert!(matches!(
+            fields[0].1.get(),
+            BodyType::Record { identity, .. } if identity == &flow_list_identity
+        ));
+
+        let BackendValueContract::Finite { payloads, .. } = contracts
+            .get(finite_identity.as_str())
+            .expect("FlowChoice contract")
+        else {
+            panic!("expected finite contract")
+        };
+        assert!(matches!(
+            payloads[&0][0].1.get(),
+            BodyType::Record { identity, .. } if identity == &flow_list_identity
+        ));
+    }
 
     #[test]
     fn full_semantic_finite_identity_resolves_to_a_finite_contract() {
@@ -3127,7 +3241,7 @@ mod driver_tests {
         };
 
         assert!(matches!(
-            value_contract_for(&program, identity.as_str()),
+            value_contract_for(&program, identity.as_str(), "example"),
             BackendValueContract::Finite { .. }
         ));
         assert!(composite_value_contracts(&program).contains_key(identity.as_str()));
