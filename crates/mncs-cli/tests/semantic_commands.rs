@@ -106,6 +106,44 @@ fn source_impact_can_return_test_inventory_from_the_same_front_end() {
 }
 
 #[test]
+fn source_impact_exposes_subject_identity_without_test_inventory() {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock")
+        .as_nanos();
+    let source = std::env::temp_dir()
+        .join(format!("mncs-impact-subject-{}-{stamp}.mncs", std::process::id()));
+    std::fs::write(
+        &source,
+        "mncs 0.18; module test.subject; fn hello() -> (result: u64) { return 1; }",
+    )
+    .expect("write source fixture");
+
+    let output = binary()
+        .arg("impact")
+        .arg(&source)
+        .args([
+            "--root",
+            "mncs:0.18:function:test.subject::hello",
+        ])
+        .output()
+        .expect("run source impact without test inventory");
+    let _ = std::fs::remove_file(&source);
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).expect("impact JSON");
+    assert_eq!(report["source_subject"]["module"], "test.subject");
+    assert_eq!(report["source_subject"]["source_profile"], "0.18");
+    assert_eq!(report["source_subject"]["subject_identity"], "mncs:0.2:program:test.subject");
+    assert_eq!(report["source_subject"]["subject_fingerprint"].as_str().unwrap().len(), 64);
+    assert!(report["source_test_inventory"].is_null());
+}
+
+#[test]
 fn compiler_architecture_exposes_the_complete_stage_ladder_and_current_gaps() {
     let output = binary()
         .arg("compiler-architecture")

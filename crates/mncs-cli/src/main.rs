@@ -237,7 +237,18 @@ struct ImpactCommandReport {
     #[serde(flatten)]
     impact: mncs_model::SemanticImpact,
     #[serde(skip_serializing_if = "Option::is_none")]
+    source_subject: Option<SourceSubjectProjection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     source_test_inventory: Option<SourceTestInventoryProjection>,
+}
+
+#[derive(Debug, Serialize)]
+struct SourceSubjectProjection {
+    source_artifact_identity: String,
+    module: String,
+    source_profile: String,
+    subject_identity: String,
+    subject_fingerprint: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -6784,7 +6795,7 @@ fn impact_command(mut args: impl Iterator<Item = String>) -> ExitCode {
         eprintln!("error: impact requires at least one --root identity");
         return ExitCode::from(2);
     }
-    let (program, source_test_inventory) = if Path::new(&path)
+    let (program, source_subject, source_test_inventory) = if Path::new(&path)
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("mncs"))
     {
@@ -6799,6 +6810,15 @@ fn impact_command(mut args: impl Iterator<Item = String>) -> ExitCode {
             let _ = print_json(&front_end.diagnostics);
             return ExitCode::FAILURE;
         }
+        let source_subject = front_end.test_inventory.as_ref().map(|inventory| {
+            SourceSubjectProjection {
+                source_artifact_identity: inventory.source_artifact_identity.clone(),
+                module: inventory.module.clone(),
+                source_profile: inventory.source_profile.clone(),
+                subject_identity: inventory.subject_identity.to_string(),
+                subject_fingerprint: inventory.subject_fingerprint.clone(),
+            }
+        });
         let Some(program) = front_end.program else {
             eprintln!("error: valid source front end did not produce a semantic program");
             return ExitCode::from(2);
@@ -6818,13 +6838,14 @@ fn impact_command(mut args: impl Iterator<Item = String>) -> ExitCode {
         } else {
             None
         };
-        (program, inventory)
+        (program, source_subject, inventory)
     } else {
         (
             match read_valid_program(&path) {
                 Ok(program) => program,
                 Err(code) => return code,
             },
+            None,
             None,
         )
     };
@@ -6837,6 +6858,7 @@ fn impact_command(mut args: impl Iterator<Item = String>) -> ExitCode {
     };
     let report = ImpactCommandReport {
         impact: graph.impact_neighborhood(&roots, max_depth, max_nodes),
+        source_subject,
         source_test_inventory,
     };
     if print_json(&report) {
