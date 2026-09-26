@@ -233,6 +233,21 @@ struct TestInventoryCommandReport {
 }
 
 #[derive(Debug, Serialize)]
+struct ImpactCommandReport {
+    #[serde(flatten)]
+    impact: mncs_model::SemanticImpact,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_test_inventory: Option<SourceTestInventoryProjection>,
+}
+
+#[derive(Debug, Serialize)]
+struct SourceTestInventoryProjection {
+    schema_version: &'static str,
+    valid: bool,
+    inventory: mncs_compiler::TestInventory,
+}
+
+#[derive(Debug, Serialize)]
 struct DeclarationInventoryCommandReport {
     schema_version: &'static str,
     valid: bool,
@@ -6718,8 +6733,10 @@ fn impact_command(mut args: impl Iterator<Item = String>) -> ExitCode {
     let mut roots = Vec::new();
     let mut max_depth = 4usize;
     let mut max_nodes = 256usize;
+    let mut include_test_inventory = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            "--include-test-inventory" => include_test_inventory = true,
             "--root" => {
                 let Some(identity) = args.next() else {
                     eprintln!("error: impact --root requires an identity");
@@ -6767,9 +6784,49 @@ fn impact_command(mut args: impl Iterator<Item = String>) -> ExitCode {
         eprintln!("error: impact requires at least one --root identity");
         return ExitCode::from(2);
     }
-    let program = match read_valid_program(&path) {
-        Ok(program) => program,
-        Err(code) => return code,
+    let (program, source_test_inventory) = if Path::new(&path)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("mncs"))
+    {
+        let source = match read_source(&path) {
+            Ok(source) => source,
+            Err(code) => return code,
+        };
+        let envelope = SourceEnvelope::inline(SourceArtifactKind::Program, &path, source);
+        let resolver = FileModuleResolver::with_libraries(&path);
+        let front_end = ReferenceCompiler::default().front_end_with_resolver(envelope, &resolver);
+        if !front_end.is_valid() {
+            let _ = print_json(&front_end.diagnostics);
+            return ExitCode::FAILURE;
+        }
+        let Some(program) = front_end.program else {
+            eprintln!("error: valid source front end did not produce a semantic program");
+            return ExitCode::from(2);
+        };
+        let inventory = if include_test_inventory {
+            match front_end.test_inventory {
+                Some(inventory) => Some(SourceTestInventoryProjection {
+                    schema_version: mncs_compiler::TEST_INVENTORY_SCHEMA_VERSION,
+                    valid: true,
+                    inventory,
+                }),
+                None => {
+                    eprintln!("error: valid source front end did not produce its test inventory");
+                    return ExitCode::from(2);
+                }
+            }
+        } else {
+            None
+        };
+        (program, inventory)
+    } else {
+        (
+            match read_valid_program(&path) {
+                Ok(program) => program,
+                Err(code) => return code,
+            },
+            None,
+        )
     };
     let graph = match program.semantic_graph() {
         Ok(graph) => graph,
@@ -6778,7 +6835,11 @@ fn impact_command(mut args: impl Iterator<Item = String>) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    if print_json(&graph.impact_neighborhood(&roots, max_depth, max_nodes)) {
+    let report = ImpactCommandReport {
+        impact: graph.impact_neighborhood(&roots, max_depth, max_nodes),
+        source_test_inventory,
+    };
+    if print_json(&report) {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(2)
@@ -7423,6 +7484,7 @@ fn print_usage() {
     eprintln!("  mncs language-inventory");
     eprintln!("  mncs declaration-inventory <program.mncs> [--syntax-only]");
     eprintln!("  mncs test-inventory <program.mncs>");
+    eprintln!("  mncs impact <program.mncs> --include-test-inventory --root <semantic-id>");
     eprintln!("  mncs test <program.mncs> [--library ROOT ...] [--filter SELECTOR ...] [--test-identity ID ... | --verification-plan FILE] [--step-budget N] [--result FILE] [--check-result FILE] [--artifacts DIR] [--format json|text]");
     eprintln!("  mncs call <program.mncs> --module MODULE --function FUNCTION --args FILE [--library ROOT ...] [--step-budget N] [--result FILE] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path]");
     eprintln!("  mncs run-app DESCRIPTOR [--library ROOT ...] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path] [--step-budget N] [-- APP_ARG ...]");

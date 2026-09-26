@@ -3950,26 +3950,13 @@ fn resolve_sequence_element(program: &Program, function: &Function, element: Bod
             BodyType::GenericParam { name: n }
         }
         BodyType::Named(n) => {
-            if let Some(rec) = program
-                .record_types
-                .iter()
-                .find(|r| r.identity.0 == n || r.name == n)
-            {
-                BodyType::Record {
-                    identity: rec.identity.clone(),
-                    name: rec.name.clone(),
-                }
-            } else if let Some(fin) = program
-                .finite_types
-                .iter()
-                .find(|f| f.identity.0 == n || f.name == n)
-            {
-                BodyType::Finite {
-                    identity: fin.identity.clone(),
-                    name: fin.name.clone(),
-                }
-            } else {
-                BodyType::Named(n)
+            let module = function
+                .home_module
+                .as_deref()
+                .unwrap_or(&program.module);
+            match BodyType::from_program_in_module(program, &n, module) {
+                resolved @ (BodyType::Record { .. } | BodyType::Finite { .. }) => resolved,
+                _ => BodyType::Named(n),
             }
         }
         other => other,
@@ -3990,6 +3977,10 @@ fn body_type_for_function_value(
             name: gp.name.clone(),
         };
     }
+    let module = function
+        .home_module
+        .as_deref()
+        .unwrap_or(&program.module);
     if value_type.trim_start().starts_with('[') {
         // Program-aware resolution first (handles concrete nominal elements
         // and concrete bounds); generic-aware spelling parse second (handles
@@ -3997,7 +3988,7 @@ fn body_type_for_function_value(
         // Exactly one of them yields the sequence skeleton; element
         // rehydration below is shared so nominal identity cannot diverge
         // between the two paths.
-        let base = match BodyType::from_program(program, value_type) {
+        let base = match BodyType::from_program_in_module(program, value_type, module) {
             base @ BodyType::Sequence { .. } => base,
             _ => BodyType::from_semantic_name(value_type),
         };
@@ -4009,8 +4000,9 @@ fn body_type_for_function_value(
             };
         }
     }
-    // For non-generic or generic param used as value type error will be caught elsewhere
-    semantic_body_type(program, value_type)
+    // Short nominal names resolve in the declaring module. A linked root may
+    // contain another `Frame` (or `EnvironmentEntry`) with the same spelling.
+    BodyType::from_program_in_module(program, value_type, module)
 }
 
 fn substitute_body_type_for_call(

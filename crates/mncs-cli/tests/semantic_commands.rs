@@ -59,6 +59,53 @@ fn semantic_commands_emit_deterministic_machine_json() {
 }
 
 #[test]
+fn source_impact_can_return_test_inventory_from_the_same_front_end() {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock")
+        .as_nanos();
+    let source =
+        std::env::temp_dir().join(format!("mncs-impact-{}-{stamp}.mncs", std::process::id()));
+    std::fs::write(
+        &source,
+        "mncs 0.18; module test.impact; fn hello() -> (result: u64) { return 1; }",
+    )
+    .expect("write source fixture");
+
+    let output = binary()
+        .arg("impact")
+        .arg(&source)
+        .args([
+            "--include-test-inventory",
+            "--root",
+            "mncs:0.18:function:test.impact::hello",
+        ])
+        .output()
+        .expect("run combined source impact");
+    let _ = std::fs::remove_file(&source);
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).expect("impact JSON");
+    assert_eq!(report["schema_version"], "mncs.semantic-impact/1");
+    assert_eq!(
+        report["source_test_inventory"]["schema_version"],
+        "mncs.test-inventory/1"
+    );
+    assert_eq!(report["source_test_inventory"]["valid"], true);
+    assert_eq!(
+        report["source_test_inventory"]["inventory"]["module"],
+        "test.impact"
+    );
+    assert!(report["source_test_inventory"]["inventory"]["tests"]
+        .as_array()
+        .is_some());
+}
+
+#[test]
 fn compiler_architecture_exposes_the_complete_stage_ladder_and_current_gaps() {
     let output = binary()
         .arg("compiler-architecture")

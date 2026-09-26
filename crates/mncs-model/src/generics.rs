@@ -7,6 +7,9 @@ use crate::canonical::sha256_hex;
 use crate::identity::{function_id, instantiation_id, SemanticId};
 use crate::{Function, Program, Value};
 
+const MAX_SPECIALIZATIONS_PER_GENERIC: usize = 128;
+const MAX_SPECIALIZATIONS_PER_PROGRAM: usize = 16_384;
+
 /// Deterministic native entry name for one instantiation. The hash covers
 /// the canonical argument string shared with in-language call sites, so a
 /// host-requested instantiation and an in-language instantiation with the
@@ -220,11 +223,20 @@ pub fn specialize_program_with_seeds(
         }
     }
 
-    const MAX_SPECIALIZATIONS: usize = 128;
+    // A valid program may instantiate many independent generic declarations.
+    // Bound each declaration separately, then derive the project ceiling from
+    // the number of declarations so one generic cannot consume another's
+    // budget and wide, finite compiler modules are not rejected at 128 total.
+    let max_specializations = generic_by_id
+        .len()
+        .max(1)
+        .saturating_mul(MAX_SPECIALIZATIONS_PER_GENERIC)
+        .min(MAX_SPECIALIZATIONS_PER_PROGRAM);
     let mut expansions = 0usize;
+    let mut specializations_per_generic = BTreeMap::<SemanticId, usize>::new();
 
     while let Some(inst) = queue.pop_front() {
-        if specialization_by_key.len() >= MAX_SPECIALIZATIONS {
+        if specialization_by_key.len() >= max_specializations {
             diagnostics.push(Diagnostic {
                 code: "MNE227".to_owned(),
                 path: format!("specialization:{}", inst.generic_id.0),
@@ -237,6 +249,19 @@ pub fn specialize_program_with_seeds(
         }
         if in_progress.contains(&inst.key) {
             continue;
+        }
+        if specializations_per_generic
+            .get(&inst.generic_id)
+            .copied()
+            .unwrap_or_default()
+            >= MAX_SPECIALIZATIONS_PER_GENERIC
+        {
+            diagnostics.push(Diagnostic {
+                code: "MNE227".to_owned(),
+                path: format!("specialization:{}", inst.generic_id.0),
+                message: "generic function specialization limit exceeded; possible expanding recursive instantiation".to_owned(),
+            });
+            break;
         }
         in_progress.insert(inst.key.clone());
         let generic_fn = match generic_by_id.get(&inst.generic_id) {
@@ -337,13 +362,18 @@ pub fn specialize_program_with_seeds(
 
         // For inputs/outputs, substitute
         let mut new_inputs = Vec::new();
-        for val in &generic_fn.inputs {
+        for (index, val) in generic_fn.inputs.iter().enumerate() {
             let base_ty = body_type_for_standalone(program, generic_fn, &val.value_type);
-            let concrete_ty =
-                substitute_body_type(base_ty, &type_map, &value_concrete, &BTreeMap::new());
+            let concrete_ty = new_body
+                .parameters
+                .get(index)
+                .map(|parameter| parameter.ty.clone())
+                .unwrap_or_else(|| {
+                    substitute_body_type(base_ty, &type_map, &value_concrete, &BTreeMap::new())
+                });
             new_inputs.push(Value {
                 name: val.name.clone(),
-                value_type: concrete_ty.semantic_name(),
+                value_type: specialization_type_name(&concrete_ty),
             });
         }
         let mut new_outputs = Vec::new();
@@ -353,7 +383,7 @@ pub fn specialize_program_with_seeds(
                 substitute_body_type(base_ty, &type_map, &value_concrete, &BTreeMap::new());
             new_outputs.push(Value {
                 name: val.name.clone(),
-                value_type: concrete_ty.semantic_name(),
+                value_type: specialization_type_name(&concrete_ty),
             });
         }
 
@@ -386,6 +416,9 @@ pub fn specialize_program_with_seeds(
         };
         specialization_records.push(record);
         specialization_by_key.insert(inst.key.clone(), new_function.clone());
+        *specializations_per_generic
+            .entry(inst.generic_id.clone())
+            .or_default() += 1;
 
         // Scan new_body for further generic calls
         for block in new_function.body.as_ref().unwrap().blocks.iter() {
@@ -413,7 +446,7 @@ pub fn specialize_program_with_seeds(
                             && !in_progress.contains(&key)
                             && !seen_keys.contains(&key)
                         {
-                            if expansions >= MAX_SPECIALIZATIONS {
+                            if expansions >= max_specializations {
                                 diagnostics.push(Diagnostic {
                                     code: "MNE227".to_owned(),
                                     path: new_name.clone(),
@@ -871,7 +904,8 @@ fn resolve_generic_type(program: &Program, function: &Function, ty: BodyType) ->
             {
                 BodyType::GenericParam { name }
             } else {
-                BodyType::from_program(program, &name)
+                let module = function.home_module.as_deref().unwrap_or(&program.module);
+                BodyType::from_program_in_module(program, &name, module)
             }
         }
         BodyType::Sequence { element, bound } => BodyType::Sequence {
@@ -886,6 +920,24 @@ fn resolve_generic_type(program: &Program, function: &Function, ty: BodyType) ->
     }
 }
 
+/// Preserve nominal identities when a specialized signature is serialized
+/// back into the function value-type surface. `semantic_name` is intended for
+/// source display and deliberately erases record/finite identity.
+fn specialization_type_name(ty: &BodyType) -> String {
+    match ty {
+        BodyType::Record { identity, .. } | BodyType::Finite { identity, .. } => identity.0.clone(),
+        BodyType::Sequence { element, bound } => format!(
+            "[{}; {}]",
+            specialization_type_name(element),
+            bound.canonical_text()
+        ),
+        BodyType::Vector { element, lanes } => {
+            format!("vec<{}, {lanes}>", specialization_type_name(element))
+        }
+        _ => ty.semantic_name(),
+    }
+}
+
 fn contains_type_parameter(ty: &BodyType, name: &str) -> bool {
     match ty {
         BodyType::GenericParam { name: candidate } => candidate == name,
@@ -893,5 +945,49 @@ fn contains_type_parameter(ty: &BodyType, name: &str) -> bool {
             contains_type_parameter(element, name)
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{record_type_id, RecordField, RecordType};
+
+    #[test]
+    fn generic_nominals_resolve_in_the_declaring_module_and_keep_identity() {
+        let mut program = crate::body::tests::executable_program();
+        program.module = "consumer.module".to_owned();
+        let declaring_identity = record_type_id("declaring.module", "Frame", &[("value", "u64")]);
+        let consumer_identity = record_type_id("consumer.module", "Frame", &[("value", "bool")]);
+        program.record_types = vec![
+            RecordType {
+                identity: declaring_identity.clone(),
+                name: "Frame".to_owned(),
+                fields: vec![RecordField {
+                    name: "value".to_owned(),
+                    field_type: "u64".to_owned(),
+                }],
+            },
+            RecordType {
+                identity: consumer_identity,
+                name: "Frame".to_owned(),
+                fields: vec![RecordField {
+                    name: "value".to_owned(),
+                    field_type: "bool".to_owned(),
+                }],
+            },
+        ];
+        let mut generic = program.functions[0].clone();
+        generic.home_module = Some("declaring.module".to_owned());
+
+        let resolved = body_type_for_standalone(&program, &generic, "[Frame; up_to 4]");
+        assert_eq!(
+            resolved.canonical_identity(),
+            format!("sequence<record:{};up_to 4>", declaring_identity.0)
+        );
+        assert_eq!(
+            specialization_type_name(&resolved),
+            format!("[{}; up_to 4]", declaring_identity.0)
+        );
     }
 }
