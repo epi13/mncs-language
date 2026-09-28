@@ -3195,6 +3195,23 @@ impl<'a> Parser<'a> {
                 span: path_span,
             });
         }
+        if segments.len() >= 3 && self.current_kind() == Some(TokenKind::LeftBracket) {
+            // A qualified name followed by an index is a value projection
+            // chain (`state.identity.bytes[i]`), not a namespace path. The
+            // bracket is the disambiguating postfix token; preserve the
+            // no-bracket form as a QualifiedPath for module resolution.
+            let mut projected = AstExpr::Name(first);
+            for segment in segments.iter().skip(1) {
+                let span =
+                    SourceSpan::covering(&self.envelope.text, projected.span(), segment.span);
+                projected = AstExpr::FieldProject {
+                    base: Box::new(projected),
+                    field: segment.clone(),
+                    span,
+                };
+            }
+            return Some(self.project_chain(projected));
+        }
         if segments.len() == 2 {
             // Preserve the long-standing `value.field` parse. Elaboration
             // will reinterpret it as a finite constructor only for a nominal
@@ -5764,6 +5781,30 @@ mod tests {
         assert_eq!(function.text, "first");
         assert_eq!(generic_args.len(), 1);
         assert_eq!(generic_args[0].text.text, "Point");
+    }
+
+    #[test]
+    fn profile_010_parses_three_segment_value_projection_before_indexing() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "three-segment-index-projection",
+            "mncs 0.10;\nmodule example.projection;\nfn read(state: State, index: i64) -> (result: byte) { return state.identity.bytes[index]; }\n",
+        );
+        let parsed = parse(&envelope);
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+        let ast = parsed.ast.expect("projection AST");
+        let AstExpr::Index { base, .. } = &ast.functions[0].body.returned_value else {
+            panic!("expected index over a qualified value projection");
+        };
+        let AstExpr::FieldProject { base, field, .. } = base.as_ref() else {
+            panic!("expected the final field projection");
+        };
+        assert_eq!(field.text, "bytes");
+        let AstExpr::FieldProject { base, field, .. } = base.as_ref() else {
+            panic!("expected the nested field projection");
+        };
+        assert_eq!(field.text, "identity");
+        assert!(matches!(base.as_ref(), AstExpr::Name(name) if name.text == "state"));
     }
 
     #[test]
