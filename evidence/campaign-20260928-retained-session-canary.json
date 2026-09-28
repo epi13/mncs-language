@@ -1,0 +1,46 @@
+{
+  "schema_version": "mncs.language.retained-session-canary/1",
+  "run_id": "agent-native-retained-20260928",
+  "command": "cargo test --offline -p mncs-embed --test embedding cold_warm_retained_and_batch_costs_are_reported -- --nocapture",
+  "language_revision": "c1ea183b9bb1ef77455aa5b9ef8cfdb37523c8f7",
+  "test_profile": "Rust test/debug profile",
+  "source": {
+    "implementation": "crates/mncs-embed/src/lib.rs",
+    "implementation_sha256": "8e45f65003e3501df0a822e2631ced2b2eb1e9a7e41ee524ef0e47d1feaa11ae",
+    "test": "crates/mncs-embed/tests/embedding.rs::cold_warm_retained_and_batch_costs_are_reported",
+    "test_sha256": "b3237b4d359d3133a5378f6ff616e2315c011988deb4dbdb21ad2698887b6b72"
+  },
+  "result": {
+    "status": "PASS",
+    "artifact_compile_ms": 127.534,
+    "session_open_ms": 6.908,
+    "first_retained_call_ms": 0.111,
+    "retained_batch_calls": 200,
+    "retained_batch_total_ms": 4.903,
+    "retained_batch_mean_ms": 0.024515
+  },
+  "comparison": {
+    "baseline_observation": "MNCS-TOOLING-71B72613B11B--OBS-69724E137BC4",
+    "baseline_language_revision": "cbd638b1dcb06f3577851628c37bfb77b355b7f8",
+    "baseline_ms": {
+      "artifact_compile": 120.673,
+      "session_open": 6.423,
+      "first_retained_call": 0.091,
+      "retained_batch_calls": 200,
+      "retained_batch_total": 4.816,
+      "retained_batch_mean": 0.02408
+    },
+    "delta_ms": {
+      "artifact_compile": 6.861,
+      "session_open": 0.485,
+      "first_retained_call": 0.02,
+      "retained_batch_total": 0.087,
+      "retained_batch_mean": 0.000435
+    },
+    "interpretation": "The exact same test and source hashes were measured in the same Rust test profile. One run per revision is too small to attribute the small absolute changes to a code regression; the retained batch remained about 24.5 microseconds per call."
+  },
+  "limits": [
+    "This measures the mncs-embed retained API, not standalone mncs call or mncs-doctor process startup.",
+    "The sample is one test run per revision and is sensitive to host scheduling and warm build state."
+  ]
+}
