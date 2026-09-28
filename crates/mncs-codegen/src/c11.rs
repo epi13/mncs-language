@@ -14,6 +14,9 @@ use mncs_model::{
     SsaModule, TargetContractRef, TargetLoweringPlan, TransformationStatus,
 };
 
+#[path = "c11/native_ssa.rs"]
+mod native_ssa;
+pub use native_ssa::{emit_verified_native_ssa_c11, NativeSsaScalarModule};
 use crate::composite::SlotWidth;
 use crate::native::{
     NativeExecutable, ToolchainIdentity, argv_from_request, compile_and_run_with_call_file_full,

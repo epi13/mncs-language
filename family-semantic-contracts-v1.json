@@ -7,19 +7,40 @@
       "contract_identity": "mncs.compiler.test-inventory/1",
       "contract_revision": "0.18",
       "exported_identity": "mncs-language:test-inventory",
-      "evidence": "crates/mncs-cli/src/main.rs"
+      "evidence": "crates/mncs-cli/src/main.rs",
+      "canonical_entrypoint": "mncs test-inventory",
+      "invocation": {
+        "kind": "executable",
+        "path": "target/debug/mncs",
+        "fixed_argv": ["test-inventory"]
+      },
+      "effects": ["read"]
     },
     {
       "contract_identity": "mncs.semantic-impact/1",
       "contract_revision": "1",
       "exported_identity": "mncs-language:semantic-impact",
-      "evidence": "crates/mncs-cli/src/main.rs"
+      "evidence": "crates/mncs-cli/src/main.rs",
+      "canonical_entrypoint": "mncs impact",
+      "invocation": {
+        "kind": "executable",
+        "path": "target/debug/mncs",
+        "fixed_argv": ["impact"]
+      },
+      "effects": ["read"]
     },
     {
       "contract_identity": "mncs.semantic-impact-classification/1",
       "contract_revision": "1",
       "exported_identity": "mncs-language:semantic-impact-classification",
-      "evidence": "crates/mncs-cli/src/main.rs"
+      "evidence": "crates/mncs-cli/src/main.rs",
+      "canonical_entrypoint": "mncs impact",
+      "invocation": {
+        "kind": "executable",
+        "path": "target/debug/mncs",
+        "fixed_argv": ["impact"]
+      },
+      "effects": ["read"]
     },
     {
       "contract_identity": "mncs.cli-toolchain/1",

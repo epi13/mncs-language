@@ -85,6 +85,53 @@ fn typed_batch_calls_share_one_retained_session() {
         .all(|output| output.artifact_sha256 == digest));
 }
 
+/// Separate cold artifact/session setup from the first call and a retained
+/// batch so tooling pressure reports include all execution shapes.
+#[test]
+fn cold_warm_retained_and_batch_costs_are_reported() {
+    let compile_started = Instant::now();
+    let artifact = Artifact::from_source(SOURCE, "mncs-research-bytecode")
+        .expect("compile probe artifact");
+    let compile_ms = compile_started.elapsed().as_secs_f64() * 1000.0;
+
+    let open_started = Instant::now();
+    let session = Session::open(artifact).expect("open retained session");
+    let open_ms = open_started.elapsed().as_secs_f64() * 1000.0;
+    assert!(session.reused());
+
+    let options = CallOptions::budgeted(8_192);
+    let warm_started = Instant::now();
+    let warm = session
+        .call_json("probe.embed", "decide", &i64_arg(42), &options)
+        .expect("first call");
+    let first_call_ms = warm_started.elapsed().as_secs_f64() * 1000.0;
+    assert_eq!(warm.status, "returned");
+    assert!(warm.reused_session);
+
+    let calls = (0..200)
+        .map(|value| {
+            BatchCall::new(
+                "probe.embed",
+                "decide",
+                serde_json::from_str(&i64_arg(value)).expect("batch arguments"),
+                options.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let batch_started = Instant::now();
+    let outputs = session.call_batch(&calls);
+    let batch_ms = batch_started.elapsed().as_secs_f64() * 1000.0;
+    assert_eq!(outputs.len(), calls.len());
+    assert!(outputs.iter().all(|output| output.status == "returned"));
+    assert!(outputs.iter().all(|output| output.reused_session));
+
+    eprintln!(
+        "embed cold/warm/batch ms: artifact_compile={compile_ms:.3} session_open={open_ms:.3} first_call={first_call_ms:.3} retained_batch_calls={} retained_batch_total={batch_ms:.3} retained_batch_mean={:.3}",
+        outputs.len(),
+        batch_ms / outputs.len() as f64,
+    );
+}
+
 /// The embedded host can name a record and enum variant while scalar widths,
 /// nominal identities, and field order come from the verified artifact.
 #[test]
