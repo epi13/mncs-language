@@ -49,6 +49,19 @@
       "evidence": "crates/mncs-cli/src/main.rs"
     },
     {
+      "contract_identity": "mncs.compiler.declaration-inventory/1",
+      "contract_revision": "1",
+      "exported_identity": "mncs-language:declaration-inventory",
+      "evidence": "crates/mncs-cli/src/main.rs",
+      "canonical_entrypoint": "mncs declaration-inventory",
+      "invocation": {
+        "kind": "executable",
+        "path": "target/debug/mncs",
+        "fixed_argv": ["declaration-inventory"]
+      },
+      "effects": ["read"]
+    },
+    {
       "contract_identity": "mncs.execution-observation/1",
       "contract_revision": "1",
       "exported_identity": "mncs-language:execution-observation",

@@ -1,0 +1,51 @@
+{
+  "schema_version": "mncs.language.retained-session-canary/1",
+  "run_id": "agent-native-continuation-retained-20260928",
+  "command": "cargo test --offline -p mncs-embed --test embedding cold_warm_retained_and_batch_costs_are_reported -- --nocapture",
+  "language_revision": "a3ac17df69e68f6373cbff336db0a572667d73da",
+  "test_profile": "Rust test/debug profile",
+  "source": {
+    "implementation": "crates/mncs-embed/src/lib.rs",
+    "implementation_sha256": "8e45f65003e3501df0a822e2631ced2b2eb1e9a7e41ee524ef0e47d1feaa11ae",
+    "test": "crates/mncs-embed/tests/embedding.rs::cold_warm_retained_and_batch_costs_are_reported",
+    "test_sha256": "b3237b4d359d3133a5378f6ff616e2315c011988deb4dbdb21ad2698887b6b72"
+  },
+  "result": {
+    "status": "PASS",
+    "artifact_compile_ms": 122.117,
+    "session_open_ms": 6.352,
+    "first_retained_call_ms": 0.082,
+    "retained_batch_calls": 200,
+    "retained_batch_total_ms": 4.825,
+    "retained_batch_mean_ms": 0.024125
+  },
+  "resource": {
+    "command_elapsed_seconds": 9.76,
+    "cargo_test_build_seconds": 9.61,
+    "test_elapsed_seconds": 0.13,
+    "maximum_resident_set_kib": 601836
+  },
+  "comparison": {
+    "baseline_language_revision": "cbd638b1dcb06f3577851628c37bfb77b355b7f8",
+    "baseline_ms": {
+      "artifact_compile": 120.673,
+      "session_open": 6.423,
+      "first_retained_call": 0.091,
+      "retained_batch_calls": 200,
+      "retained_batch_total": 4.816,
+      "retained_batch_mean": 0.02408
+    },
+    "delta_ms": {
+      "artifact_compile": 1.444,
+      "session_open": -0.071,
+      "first_retained_call": -0.009,
+      "retained_batch_total": 0.009,
+      "retained_batch_mean": 0.000045
+    },
+    "interpretation": "The exact test and source hashes match the earlier campaign. The 200-call batch remains about 24 microseconds per call; the small deltas are within one-run timing noise."
+  },
+  "limits": [
+    "This measures the mncs-embed retained API, not standalone mncs call or mncs-doctor process startup.",
+    "The sample is one test run per revision and is sensitive to host scheduling and warm build state."
+  ]
+}
