@@ -604,7 +604,10 @@ pub trait BackendAdapter {
 pub struct PortableWasmAdapter;
 pub struct ResearchBytecodeAdapter;
 
-pub use c11::{C11_ARTIFACT_KIND, C11_BACKEND_NAME, C11Adapter, NativeSsaScalarModule, emit_verified_native_ssa_c11};
+pub use c11::{
+    emit_structurally_checked_native_ssa_c11, C11_ARTIFACT_KIND, C11_BACKEND_NAME,
+    C11Adapter, NativeSsaScalarModule,
+};
 pub use cranelift_backend::{CRANELIFT_ARTIFACT_KIND, CRANELIFT_BACKEND_NAME, CraneliftAdapter};
 pub use llvm::{LLVM_ARTIFACT_KIND, LLVM_BACKEND_NAME, LlvmAdapter};
 pub use matrix::{

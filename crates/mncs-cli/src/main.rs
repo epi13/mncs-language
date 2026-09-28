@@ -11,10 +11,10 @@ use std::{
 
 use mncs_codegen::{
     backend_adapter, backend_capabilities, backend_family_matrix, backend_names,
-    compare_body_ssa_and_backend, execute_backend, lower_selected_ssa, portable_wasm_plan,
-    emit_verified_native_ssa_c11, NativeSsaScalarModule,
-    selected_ssa_ref, target_for_backend, target_is_portable_wasm, target_is_ptx64,
-    BackendExecutionSession, BackendStatefulSession,
+    compare_body_ssa_and_backend, emit_structurally_checked_native_ssa_c11, execute_backend,
+    lower_selected_ssa, portable_wasm_plan, selected_ssa_ref, target_for_backend,
+    target_is_portable_wasm, target_is_ptx64, BackendExecutionSession, BackendStatefulSession,
+    NativeSsaScalarModule,
 };
 use mncs_compiler::{
     bundle::{collect_library_modules, StdlibBundle},
@@ -147,7 +147,7 @@ fn run_cli() -> ExitCode {
         "compile" => compile_command(args),
         "abi" => abi_command(args),
         "execute-backend" => backend_execution_command(args),
-        "emit-native-ssa-c11" => native_ssa_c11_command(args),
+        "emit-native-ssa-c11-structural" => native_ssa_c11_command(args),
         "check-backend-execution" => backend_compare_command(args),
         "conformance" => conformance_command(args),
         "validate-translation" => validate_translation_command(args),
@@ -6072,7 +6072,9 @@ where
 {
     let mut args = args.into_iter();
     let Some(path) = args.next() else {
-        eprintln!("error: emit-native-ssa-c11 requires a normalized native SSA artifact");
+        eprintln!(
+            "error: emit-native-ssa-c11-structural requires an unattested structural SSA input"
+        );
         return ExitCode::from(2);
     };
     if args.next().is_some() {
@@ -6083,7 +6085,7 @@ where
         Ok(native) => native,
         Err(code) => return code,
     };
-    match emit_verified_native_ssa_c11(&native) {
+    match emit_structurally_checked_native_ssa_c11(&native) {
         Ok(source) => {
             print!("{source}");
             ExitCode::SUCCESS
@@ -7564,7 +7566,7 @@ fn print_usage() {
     eprintln!("  mncs compile <program> --proof <artifact.json> [--proof-operation OP]  (RFC 0007 tranche-0.2 proof ingestion)");
     eprintln!("  mncs abi <program.mncs|program.json>");
     eprintln!("  mncs execute-backend <program.json> <execution-request.json>");
-    eprintln!("  mncs emit-native-ssa-c11 <normalized-native-ssa.json>");
+    eprintln!("  mncs emit-native-ssa-c11-structural <unattested-scalar-ssa.json>");
     eprintln!("  mncs check-backend-execution <program.json> <corpus.json>");
     eprintln!("  mncs conformance <program.mncs|program.json> [--seed N] [--cases N] [--backends a,b,c] [--step-budget N] [--predicate NAME] [--output FILE] [--emit-corpus FILE] [--attach-evidence PROGRAM.json]");
     eprintln!("  mncs validate-translation <kind> <program.json> [corpus.json]");
