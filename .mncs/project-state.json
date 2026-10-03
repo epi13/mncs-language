@@ -1,0 +1,18 @@
+{
+  "schema_version": "mncs.project-intent/1",
+  "purpose": "MNCS Language investigates the opposite arrangement from conventional languages: contracts, effects, capabilities, assumptions, failure semantics, resource bounds, machine intent, and evidence are part of a program's meaning from the beginning -- machine-native without being machine-exclusive.",
+  "entry": [
+    "cargo run -p mncs-cli -- validate examples/account-transfer.mncs.json",
+    "cargo test --package mncs-cli"
+  ],
+  "milestones": [
+    {
+      "id": "mncs-language:projection-conformance",
+      "title": "Declared ambient projection surfaces satisfy their contract",
+      "subject_slot": "declarations",
+      "evidence": "projection-conformance",
+      "dependencies": [],
+      "blockers": []
+    }
+  ]
+}

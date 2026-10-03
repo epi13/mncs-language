@@ -1,5 +1,8 @@
 # MNCS Language Project
 
+<!-- MNCS:generated:begin -->
+<!-- MNCS:generated:end -->
+
 [![CI](https://github.com/epi13/mncs-language/actions/workflows/ci.yml/badge.svg)](https://github.com/epi13/mncs-language/actions/workflows/ci.yml)
 ![MNCS badge](docs/mncs-badge.svg)
 
