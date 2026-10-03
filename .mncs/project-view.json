@@ -1,0 +1,154 @@
+{
+  "capabilities": [
+    {
+      "contract": "capability-index",
+      "fingerprint_sources": [
+        "docs/language-capabilities.json",
+        "docs/language-capability-deltas.json"
+      ],
+      "kind": "generated-language-projection",
+      "stability": "experimental",
+      "version": "1"
+    },
+    {
+      "contract": "compiler-inventory",
+      "fingerprint_sources": [
+        "crates/mncs-compiler/src/inventory.rs",
+        "spec/declaration-inventory-v1.schema.json"
+      ],
+      "kind": "compiler-introspection-interface",
+      "stability": "experimental",
+      "version": "1"
+    },
+    {
+      "contract": "core-standard-library",
+      "fingerprint_sources": [
+        "library/core/",
+        "library/std/"
+      ],
+      "kind": "mncs-library",
+      "stability": "experimental",
+      "version": "1"
+    },
+    {
+      "contract": "compiler-runtime",
+      "fingerprint_sources": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/mncs-model/Cargo.toml",
+        "crates/mncs-model/src/",
+        "crates/mncs-syntax/Cargo.toml",
+        "crates/mncs-syntax/src/",
+        "crates/mncs-compiler/Cargo.toml",
+        "crates/mncs-compiler/src/",
+        "crates/mncs-codegen/Cargo.toml",
+        "crates/mncs-codegen/src/",
+        "crates/mncs-embed/Cargo.toml",
+        "crates/mncs-embed/src/",
+        "crates/mncs-cli/Cargo.toml",
+        "crates/mncs-cli/src/"
+      ],
+      "kind": "compiler-runtime",
+      "note": "Tracks implementation sources and build manifests; executable test sources are scoped to their own repository obligations.",
+      "stability": "experimental",
+      "version": "1"
+    },
+    {
+      "contract": "source-profile",
+      "fingerprint_sources": [
+        "crates/mncs-syntax/src/profile.rs"
+      ],
+      "kind": "language-profile",
+      "stability": "experimental",
+      "version": "0.18"
+    },
+    {
+      "contract": "semantic-identity",
+      "fingerprint_sources": [
+        "crates/mncs-model/src/identity.rs"
+      ],
+      "kind": "identity-artifact",
+      "stability": "experimental",
+      "version": "1"
+    },
+    {
+      "contract": "cli-toolchain",
+      "fingerprint_sources": [
+        "crates/mncs-cli/src/main.rs"
+      ],
+      "kind": "compiler-cli",
+      "stability": "experimental",
+      "version": "1"
+    }
+  ],
+  "dependencies": [],
+  "entry": [
+    "cargo run -p mncs-cli -- validate examples/account-transfer.mncs.json",
+    "cargo test --package mncs-cli"
+  ],
+  "purpose": "MNCS Language investigates the opposite arrangement from conventional languages: contracts, effects, capabilities, assumptions, failure semantics, resource bounds, machine intent, and evidence are part of a program's meaning from the beginning -- machine-native without being machine-exclusive.",
+  "repository": "mncs-language",
+  "schema_version": "mncs.project-view/1",
+  "source_identity": "sha256:4e44174606ade7f9e72f825f28d78b360483f78de9d1948c192f8099f1d22a9c",
+  "structure": {
+    "layout": "mncs.repository-layout/1",
+    "surfaces": [
+      {
+        "authority": "mncs-language",
+        "class": "canonical",
+        "classification": {
+          "authority": "canonical",
+          "boundary_kind": "none",
+          "lifecycle": "active",
+          "semantic_role": "canonical-semantic"
+        },
+        "path": "library/"
+      },
+      {
+        "authority": "mncs-language",
+        "class": "canonical",
+        "classification": {
+          "authority": "canonical",
+          "boundary_kind": "compiler-bootstrap",
+          "lifecycle": "active",
+          "semantic_role": "host-bootstrap"
+        },
+        "note": "Canonical compiler/runtime implementation with a compiler-bootstrap host boundary; not all Rust code is an external semantic boundary.",
+        "path": "crates/"
+      },
+      {
+        "class": "canonical",
+        "classification": {
+          "authority": "reference",
+          "boundary_kind": "none",
+          "lifecycle": "active",
+          "semantic_role": "reference"
+        },
+        "note": "Executable probes and conformance programs.",
+        "path": "examples/"
+      },
+      {
+        "authority": "mncs-language",
+        "class": "generated",
+        "classification": {
+          "authority": "none",
+          "boundary_kind": "none",
+          "lifecycle": "generated",
+          "semantic_role": "generated"
+        },
+        "path": "docs/language-capabilities.json"
+      },
+      {
+        "class": "migration-shadow",
+        "classification": {
+          "authority": "none",
+          "boundary_kind": "filesystem",
+          "lifecycle": "temporary",
+          "semantic_role": "temporary-host-semantic"
+        },
+        "note": "Deterministic projection adapter over compiler-owned inventories.",
+        "path": "scripts/generate_language_capabilities.py"
+      }
+    ]
+  }
+}

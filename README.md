@@ -1,6 +1,29 @@
 # MNCS Language Project
 
 <!-- MNCS:generated:begin -->
+## Project entry
+
+MNCS Language investigates the opposite arrangement from conventional languages: contracts, effects, capabilities, assumptions, failure semantics, resource bounds, machine intent, and evidence are part of a program's meaning from the beginning -- machine-native without being machine-exclusive.
+
+```bash
+cargo run -p mncs-cli -- validate examples/account-transfer.mncs.json
+```
+
+```bash
+cargo test --package mncs-cli
+```
+
+Declared capabilities (declarations do not establish execution health):
+
+- `capability-index/1` — generated-language-projection (experimental)
+- `cli-toolchain/1` — compiler-cli (experimental)
+- `compiler-inventory/1` — compiler-introspection-interface (experimental)
+- `compiler-runtime/1` — compiler-runtime (experimental)
+- `core-standard-library/1` — mncs-library (experimental)
+- `semantic-identity/1` — identity-artifact (experimental)
+- `source-profile/0.18` — language-profile (experimental)
+
+Semantic sources and ownership: `.mncs/projections.json`.
 <!-- MNCS:generated:end -->
 
 [![CI](https://github.com/epi13/mncs-language/actions/workflows/ci.yml/badge.svg)](https://github.com/epi13/mncs-language/actions/workflows/ci.yml)
