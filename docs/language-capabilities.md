@@ -26,6 +26,10 @@ The inventory deliberately publishes only compiler-registered public
 intrinsics. Private implementation helper names such as `elaborate_program`
 cannot appear in the index unless a compiler table deliberately exports them.
 
-Regenerate with `python scripts/generate_language_capabilities.py` and verify
-with `python scripts/test_generate_language_capabilities.py`. The generated
+The index and its delta journal are ambient projections owned by
+`mncs-language:language-capabilities` and
+`mncs-language:language-capability-deltas`; the projection renderer wraps
+`scripts/generate_language_capabilities.py`, so do not refresh the committed
+files by hand. Verify with
+`python scripts/test_generate_language_capabilities.py`. The generated
 index is content-addressed and contains no timestamps or machine-local paths.

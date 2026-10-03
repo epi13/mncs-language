@@ -143,6 +143,981 @@
      "identity": "mncs.project-view/1"
     }
    }
+  },
+  {
+   "schema_version": "mncs.semantic-projection/1",
+   "id": "mncs-language:language-capability-deltas",
+   "owner": "mncs-language:project-state",
+   "template": "mncs-language.language-capability-deltas",
+   "inputs": [
+    "spec/source-profile-registry.json",
+    "library",
+    "examples/source/bounded-min.mncs",
+    "examples/source/identity.mncs",
+    "examples/source/cre3-retry-authority.mncs",
+    "examples/source/structured-artifact.mncs",
+    "examples/source/application-entry.mncs",
+    "docs/language-capabilities.json"
+   ],
+   "subjects": [
+    {
+     "subject": "mncs-language:profile-registry",
+     "slot": "registry",
+     "path": "spec/source-profile-registry.json",
+     "format": "json"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/bounds.mncs",
+     "slot": "library/core/bounds.mncs",
+     "path": "library/core/bounds.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/bytes.mncs",
+     "slot": "library/core/bytes.mncs",
+     "path": "library/core/bytes.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/contracts.mncs",
+     "slot": "library/core/contracts.mncs",
+     "path": "library/core/contracts.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/geometry.mncs",
+     "slot": "library/core/geometry.mncs",
+     "path": "library/core/geometry.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/identity.mncs",
+     "slot": "library/core/identity.mncs",
+     "path": "library/core/identity.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/image.mncs",
+     "slot": "library/core/image.mncs",
+     "path": "library/core/image.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/lineage.mncs",
+     "slot": "library/core/lineage.mncs",
+     "path": "library/core/lineage.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/logic.mncs",
+     "slot": "library/core/logic.mncs",
+     "path": "library/core/logic.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/mask.mncs",
+     "slot": "library/core/mask.mncs",
+     "path": "library/core/mask.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/numeric.mncs",
+     "slot": "library/core/numeric.mncs",
+     "path": "library/core/numeric.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/ordering.mncs",
+     "slot": "library/core/ordering.mncs",
+     "path": "library/core/ordering.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/partition.mncs",
+     "slot": "library/core/partition.mncs",
+     "path": "library/core/partition.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/proof_admit.mncs",
+     "slot": "library/core/proof_admit.mncs",
+     "path": "library/core/proof_admit.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/proof_check.mncs",
+     "slot": "library/core/proof_check.mncs",
+     "path": "library/core/proof_check.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/proof_dep.mncs",
+     "slot": "library/core/proof_dep.mncs",
+     "path": "library/core/proof_dep.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/proof_term.mncs",
+     "slot": "library/core/proof_term.mncs",
+     "path": "library/core/proof_term.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/random.mncs",
+     "slot": "library/core/random.mncs",
+     "path": "library/core/random.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/result.mncs",
+     "slot": "library/core/result.mncs",
+     "path": "library/core/result.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/sequences.mncs",
+     "slot": "library/core/sequences.mncs",
+     "path": "library/core/sequences.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/status.mncs",
+     "slot": "library/core/status.mncs",
+     "path": "library/core/status.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/vector.mncs",
+     "slot": "library/core/vector.mncs",
+     "path": "library/core/vector.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/version.mncs",
+     "slot": "library/core/version.mncs",
+     "path": "library/core/version.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/vision.mncs",
+     "slot": "library/core/vision.mncs",
+     "path": "library/core/vision.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/family/coherence.mncs",
+     "slot": "library/family/coherence.mncs",
+     "path": "library/family/coherence.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/family/journal.mncs",
+     "slot": "library/family/journal.mncs",
+     "path": "library/family/journal.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/family/rfc_status.mncs",
+     "slot": "library/family/rfc_status.mncs",
+     "path": "library/family/rfc_status.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/binding.mncs",
+     "slot": "library/jit/binding.mncs",
+     "path": "library/jit/binding.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/depends.mncs",
+     "slot": "library/jit/depends.mncs",
+     "path": "library/jit/depends.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/lifecycle.mncs",
+     "slot": "library/jit/lifecycle.mncs",
+     "path": "library/jit/lifecycle.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/plan.mncs",
+     "slot": "library/jit/plan.mncs",
+     "path": "library/jit/plan.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/profile.mncs",
+     "slot": "library/jit/profile.mncs",
+     "path": "library/jit/profile.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/proof.mncs",
+     "slot": "library/jit/proof.mncs",
+     "path": "library/jit/proof.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/session.mncs",
+     "slot": "library/jit/session.mncs",
+     "path": "library/jit/session.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/types.mncs",
+     "slot": "library/jit/types.mncs",
+     "path": "library/jit/types.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/ansi.mncs",
+     "slot": "library/std/ansi.mncs",
+     "path": "library/std/ansi.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/application.mncs",
+     "slot": "library/std/application.mncs",
+     "path": "library/std/application.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/channel.mncs",
+     "slot": "library/std/channel.mncs",
+     "path": "library/std/channel.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/chunk.mncs",
+     "slot": "library/std/chunk.mncs",
+     "path": "library/std/chunk.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/clock.mncs",
+     "slot": "library/std/clock.mncs",
+     "path": "library/std/clock.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/encoding.mncs",
+     "slot": "library/std/encoding.mncs",
+     "path": "library/std/encoding.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/fixed.mncs",
+     "slot": "library/std/fixed.mncs",
+     "path": "library/std/fixed.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/fnv1a.mncs",
+     "slot": "library/std/fnv1a.mncs",
+     "path": "library/std/fnv1a.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/json.mncs",
+     "slot": "library/std/json.mncs",
+     "path": "library/std/json.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/json_cursor.mncs",
+     "slot": "library/std/json_cursor.mncs",
+     "path": "library/std/json_cursor.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/json_emit.mncs",
+     "slot": "library/std/json_emit.mncs",
+     "path": "library/std/json_emit.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/json_projection.mncs",
+     "slot": "library/std/json_projection.mncs",
+     "path": "library/std/json_projection.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/json_stream.mncs",
+     "slot": "library/std/json_stream.mncs",
+     "path": "library/std/json_stream.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/platform.mncs",
+     "slot": "library/std/platform.mncs",
+     "path": "library/std/platform.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/process.mncs",
+     "slot": "library/std/process.mncs",
+     "path": "library/std/process.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/relation.mncs",
+     "slot": "library/std/relation.mncs",
+     "path": "library/std/relation.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/scope.mncs",
+     "slot": "library/std/scope.mncs",
+     "path": "library/std/scope.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/sha256.mncs",
+     "slot": "library/std/sha256.mncs",
+     "path": "library/std/sha256.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/simd.mncs",
+     "slot": "library/std/simd.mncs",
+     "path": "library/std/simd.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/sort.mncs",
+     "slot": "library/std/sort.mncs",
+     "path": "library/std/sort.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/store.mncs",
+     "slot": "library/std/store.mncs",
+     "path": "library/std/store.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/task.mncs",
+     "slot": "library/std/task.mncs",
+     "path": "library/std/task.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/text_map.mncs",
+     "slot": "library/std/text_map.mncs",
+     "path": "library/std/text_map.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/text_scan.mncs",
+     "slot": "library/std/text_scan.mncs",
+     "path": "library/std/text_scan.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/text_utf8.mncs",
+     "slot": "library/std/text_utf8.mncs",
+     "path": "library/std/text_utf8.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/text_view.mncs",
+     "slot": "library/std/text_view.mncs",
+     "path": "library/std/text_view.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/token_set.mncs",
+     "slot": "library/std/token_set.mncs",
+     "path": "library/std/token_set.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:examples/source/bounded-min.mncs",
+     "slot": "examples/source/bounded-min.mncs",
+     "path": "examples/source/bounded-min.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:examples/source/identity.mncs",
+     "slot": "examples/source/identity.mncs",
+     "path": "examples/source/identity.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:examples/source/cre3-retry-authority.mncs",
+     "slot": "examples/source/cre3-retry-authority.mncs",
+     "path": "examples/source/cre3-retry-authority.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:examples/source/structured-artifact.mncs",
+     "slot": "examples/source/structured-artifact.mncs",
+     "path": "examples/source/structured-artifact.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:examples/source/application-entry.mncs",
+     "slot": "examples/source/application-entry.mncs",
+     "path": "examples/source/application-entry.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:committed-index",
+     "slot": "index",
+     "path": "docs/language-capabilities.json",
+     "format": "digest"
+    }
+   ],
+   "output": "docs/language-capability-deltas.json",
+   "output_kind": "whole-file",
+   "renderer": {
+    "identity": "mncs-language.language-capability-deltas",
+    "version": "1",
+    "schema_version": "mncs.semantic-state/1",
+    "entry": {
+     "module": "projector/capabilities.py",
+     "callable": "render_language_capability_deltas"
+    }
+   },
+   "provider_capability": "mncs-doc:documentation-projection",
+   "render_argv": [
+    "semantic-project",
+    "--state",
+    "{semantic}",
+    "--route",
+    "mncs-language.language-capability-deltas",
+    "--output",
+    "{artifact}/rendered.md",
+    "--provenance-out",
+    "{artifact}/receipt.json",
+    "--renderer-root",
+    "{checkout}"
+   ],
+   "policy": "ambient-safe",
+   "manual_edit_policy": "protected",
+   "verification": {
+    "required": false
+   },
+   "validation": {
+    "format": "json",
+    "schema": {
+     "type": "object",
+     "required": [
+      "schema_version",
+      "retention",
+      "deltas",
+      "history_identity"
+     ],
+     "properties": {
+      "schema_version": {
+       "const": "mncs.language-capability-deltas/1"
+      },
+      "retention": {
+       "type": "integer"
+      },
+      "deltas": {
+       "type": "array"
+      },
+      "history_identity": {
+       "pattern": "^sha256:[0-9a-f]{64}$"
+      }
+     }
+    }
+   },
+   "bootstrap_digest": "sha256:04c96e391e3e12cbc31fec227a7ed47d6af7d6ba1d9cb072bdcb3894d322e29e",
+   "renderer_sources": [
+    "projector/capabilities.py",
+    "scripts/generate_language_capabilities.py"
+   ]
+  },
+  {
+   "schema_version": "mncs.semantic-projection/1",
+   "id": "mncs-language:language-capabilities",
+   "owner": "mncs-language:project-state",
+   "template": "mncs-language.language-capabilities",
+   "inputs": [
+    "spec/source-profile-registry.json",
+    "library",
+    "examples/source/bounded-min.mncs",
+    "examples/source/identity.mncs",
+    "examples/source/cre3-retry-authority.mncs",
+    "examples/source/structured-artifact.mncs",
+    "examples/source/application-entry.mncs"
+   ],
+   "subjects": [
+    {
+     "subject": "mncs-language:profile-registry",
+     "slot": "registry",
+     "path": "spec/source-profile-registry.json",
+     "format": "json"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/bounds.mncs",
+     "slot": "library/core/bounds.mncs",
+     "path": "library/core/bounds.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/bytes.mncs",
+     "slot": "library/core/bytes.mncs",
+     "path": "library/core/bytes.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/contracts.mncs",
+     "slot": "library/core/contracts.mncs",
+     "path": "library/core/contracts.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/geometry.mncs",
+     "slot": "library/core/geometry.mncs",
+     "path": "library/core/geometry.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/identity.mncs",
+     "slot": "library/core/identity.mncs",
+     "path": "library/core/identity.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/image.mncs",
+     "slot": "library/core/image.mncs",
+     "path": "library/core/image.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/lineage.mncs",
+     "slot": "library/core/lineage.mncs",
+     "path": "library/core/lineage.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/logic.mncs",
+     "slot": "library/core/logic.mncs",
+     "path": "library/core/logic.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/mask.mncs",
+     "slot": "library/core/mask.mncs",
+     "path": "library/core/mask.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/numeric.mncs",
+     "slot": "library/core/numeric.mncs",
+     "path": "library/core/numeric.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/ordering.mncs",
+     "slot": "library/core/ordering.mncs",
+     "path": "library/core/ordering.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/partition.mncs",
+     "slot": "library/core/partition.mncs",
+     "path": "library/core/partition.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/proof_admit.mncs",
+     "slot": "library/core/proof_admit.mncs",
+     "path": "library/core/proof_admit.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/proof_check.mncs",
+     "slot": "library/core/proof_check.mncs",
+     "path": "library/core/proof_check.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/proof_dep.mncs",
+     "slot": "library/core/proof_dep.mncs",
+     "path": "library/core/proof_dep.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/proof_term.mncs",
+     "slot": "library/core/proof_term.mncs",
+     "path": "library/core/proof_term.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/random.mncs",
+     "slot": "library/core/random.mncs",
+     "path": "library/core/random.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/result.mncs",
+     "slot": "library/core/result.mncs",
+     "path": "library/core/result.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/sequences.mncs",
+     "slot": "library/core/sequences.mncs",
+     "path": "library/core/sequences.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/status.mncs",
+     "slot": "library/core/status.mncs",
+     "path": "library/core/status.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/vector.mncs",
+     "slot": "library/core/vector.mncs",
+     "path": "library/core/vector.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/version.mncs",
+     "slot": "library/core/version.mncs",
+     "path": "library/core/version.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/core/vision.mncs",
+     "slot": "library/core/vision.mncs",
+     "path": "library/core/vision.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/family/coherence.mncs",
+     "slot": "library/family/coherence.mncs",
+     "path": "library/family/coherence.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/family/journal.mncs",
+     "slot": "library/family/journal.mncs",
+     "path": "library/family/journal.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/family/rfc_status.mncs",
+     "slot": "library/family/rfc_status.mncs",
+     "path": "library/family/rfc_status.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/binding.mncs",
+     "slot": "library/jit/binding.mncs",
+     "path": "library/jit/binding.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/depends.mncs",
+     "slot": "library/jit/depends.mncs",
+     "path": "library/jit/depends.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/lifecycle.mncs",
+     "slot": "library/jit/lifecycle.mncs",
+     "path": "library/jit/lifecycle.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/plan.mncs",
+     "slot": "library/jit/plan.mncs",
+     "path": "library/jit/plan.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/profile.mncs",
+     "slot": "library/jit/profile.mncs",
+     "path": "library/jit/profile.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/proof.mncs",
+     "slot": "library/jit/proof.mncs",
+     "path": "library/jit/proof.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/session.mncs",
+     "slot": "library/jit/session.mncs",
+     "path": "library/jit/session.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/jit/types.mncs",
+     "slot": "library/jit/types.mncs",
+     "path": "library/jit/types.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/ansi.mncs",
+     "slot": "library/std/ansi.mncs",
+     "path": "library/std/ansi.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/application.mncs",
+     "slot": "library/std/application.mncs",
+     "path": "library/std/application.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/channel.mncs",
+     "slot": "library/std/channel.mncs",
+     "path": "library/std/channel.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/chunk.mncs",
+     "slot": "library/std/chunk.mncs",
+     "path": "library/std/chunk.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/clock.mncs",
+     "slot": "library/std/clock.mncs",
+     "path": "library/std/clock.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/encoding.mncs",
+     "slot": "library/std/encoding.mncs",
+     "path": "library/std/encoding.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/fixed.mncs",
+     "slot": "library/std/fixed.mncs",
+     "path": "library/std/fixed.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/fnv1a.mncs",
+     "slot": "library/std/fnv1a.mncs",
+     "path": "library/std/fnv1a.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/json.mncs",
+     "slot": "library/std/json.mncs",
+     "path": "library/std/json.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/json_cursor.mncs",
+     "slot": "library/std/json_cursor.mncs",
+     "path": "library/std/json_cursor.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/json_emit.mncs",
+     "slot": "library/std/json_emit.mncs",
+     "path": "library/std/json_emit.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/json_projection.mncs",
+     "slot": "library/std/json_projection.mncs",
+     "path": "library/std/json_projection.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/json_stream.mncs",
+     "slot": "library/std/json_stream.mncs",
+     "path": "library/std/json_stream.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/platform.mncs",
+     "slot": "library/std/platform.mncs",
+     "path": "library/std/platform.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/process.mncs",
+     "slot": "library/std/process.mncs",
+     "path": "library/std/process.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/relation.mncs",
+     "slot": "library/std/relation.mncs",
+     "path": "library/std/relation.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/scope.mncs",
+     "slot": "library/std/scope.mncs",
+     "path": "library/std/scope.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/sha256.mncs",
+     "slot": "library/std/sha256.mncs",
+     "path": "library/std/sha256.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/simd.mncs",
+     "slot": "library/std/simd.mncs",
+     "path": "library/std/simd.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/sort.mncs",
+     "slot": "library/std/sort.mncs",
+     "path": "library/std/sort.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/store.mncs",
+     "slot": "library/std/store.mncs",
+     "path": "library/std/store.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/task.mncs",
+     "slot": "library/std/task.mncs",
+     "path": "library/std/task.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/text_map.mncs",
+     "slot": "library/std/text_map.mncs",
+     "path": "library/std/text_map.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/text_scan.mncs",
+     "slot": "library/std/text_scan.mncs",
+     "path": "library/std/text_scan.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/text_utf8.mncs",
+     "slot": "library/std/text_utf8.mncs",
+     "path": "library/std/text_utf8.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/text_view.mncs",
+     "slot": "library/std/text_view.mncs",
+     "path": "library/std/text_view.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:library/std/token_set.mncs",
+     "slot": "library/std/token_set.mncs",
+     "path": "library/std/token_set.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:examples/source/bounded-min.mncs",
+     "slot": "examples/source/bounded-min.mncs",
+     "path": "examples/source/bounded-min.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:examples/source/identity.mncs",
+     "slot": "examples/source/identity.mncs",
+     "path": "examples/source/identity.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:examples/source/cre3-retry-authority.mncs",
+     "slot": "examples/source/cre3-retry-authority.mncs",
+     "path": "examples/source/cre3-retry-authority.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:examples/source/structured-artifact.mncs",
+     "slot": "examples/source/structured-artifact.mncs",
+     "path": "examples/source/structured-artifact.mncs",
+     "format": "digest"
+    },
+    {
+     "subject": "mncs-language:corpus:examples/source/application-entry.mncs",
+     "slot": "examples/source/application-entry.mncs",
+     "path": "examples/source/application-entry.mncs",
+     "format": "digest"
+    }
+   ],
+   "output": "docs/language-capabilities.json",
+   "output_kind": "whole-file",
+   "renderer": {
+    "identity": "mncs-language.language-capabilities",
+    "version": "1",
+    "schema_version": "mncs.semantic-state/1",
+    "entry": {
+     "module": "projector/capabilities.py",
+     "callable": "render_language_capabilities"
+    }
+   },
+   "provider_capability": "mncs-doc:documentation-projection",
+   "render_argv": [
+    "semantic-project",
+    "--state",
+    "{semantic}",
+    "--route",
+    "mncs-language.language-capabilities",
+    "--output",
+    "{artifact}/rendered.md",
+    "--provenance-out",
+    "{artifact}/receipt.json",
+    "--renderer-root",
+    "{checkout}"
+   ],
+   "policy": "ambient-safe",
+   "manual_edit_policy": "protected",
+   "verification": {
+    "required": false
+   },
+   "validation": {
+    "format": "json",
+    "schema": {
+     "type": "object",
+     "required": [
+      "schema_version",
+      "language",
+      "current_profile",
+      "library_modules",
+      "compiler_inventory_identity",
+      "content_identity"
+     ],
+     "properties": {
+      "schema_version": {
+       "const": "mncs.language-capabilities/1"
+      },
+      "language": {
+       "const": "MNCS"
+      },
+      "current_profile": {
+       "type": "string"
+      },
+      "content_identity": {
+       "pattern": "^sha256:[0-9a-f]{64}$"
+      },
+      "compiler_inventory_identity": {
+       "pattern": "^sha256:[0-9a-f]{64}$"
+      },
+      "profile_registry_identity": {
+       "pattern": "^sha256:[0-9a-f]{64}$"
+      }
+     }
+    }
+   },
+   "bootstrap_digest": "sha256:7d9ef520666220ef477864c1b3988e8ec4db34a41e506014ea9b478cc7e95bd0",
+   "renderer_sources": [
+    "projector/capabilities.py",
+    "scripts/generate_language_capabilities.py"
+   ]
   }
  ]
 }
