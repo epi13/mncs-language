@@ -8,3 +8,5 @@ integration/forge/generated/
 .idea/
 .vscode/
 workspace/
+__pycache__/
+*.py[cod]

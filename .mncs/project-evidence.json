@@ -2,7 +2,7 @@
   "projection-conformance": {
     "schema_version": "mncs.semantic-evidence/1",
     "producer": "mncs-environment:projection-conformance",
-    "subject_identity": "sha256:f35c754b1ad0151f328090c34e3af2134e8ed992c393a41e014401d969e4d908",
+    "subject_identity": "sha256:e6ecfca30a541dd2907c1d1279dc98dd124218fed08ae540d8b576d0891f04f7",
     "verdict": "pass",
     "validation": {
       "contract": "MNCS-Commons:semantic-projection/1",
@@ -11,6 +11,6 @@
       "profile_schema": "sha256:622ca8df9cc2862cd7df12477e55e14e06479e5d6062d34046f32a3d1272a982",
       "native_receipt": "0a62c1d3f4ce8756eb5f0f96c7d46d648c80a6d41326b705c324f1f09e232197"
     },
-    "receipt_identity": "sha256:0eac8d7b74c1233b7f55e51c48bdab9033d2b25262f0130df119fb42bbb7cdd2"
+    "receipt_identity": "sha256:964875627ab7b247f560cf3aa1687d46d794d5a6eab77b921e7fa935168102f9"
   }
 }
