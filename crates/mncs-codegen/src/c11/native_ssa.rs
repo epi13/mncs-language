@@ -1,6 +1,7 @@
 use super::*;
 use serde::Deserialize;
-use mncs_model::{IntegerType, SemanticId};
+use mncs_model::{ArithmeticIntent, BackendPromise, IntegerType, SemanticId};
+use crate::promises::withheld;
 use crate::scalar::{ScalarBlock, ScalarValue};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -51,8 +52,17 @@ pub struct NativeSsaScalarBlock {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NativeSsaScalarInstruction {
-    Constant { dest: NativeSsaScalarValue, value: i128 },
+    // u64, not i128: the bool/u64 envelope has no wider constant, and the
+    // CLI JSON layer cannot deserialize i128 without arbitrary precision.
+    Constant { dest: NativeSsaScalarValue, value: u64 },
     Call { dest: NativeSsaScalarValue, callee: String, args: Vec<String> },
+    Integer {
+        dest: NativeSsaScalarValue,
+        operator: String,
+        intent: ArithmeticIntent,
+        lhs: String,
+        rhs: String,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -127,7 +137,8 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
             for instruction in &block.instructions {
                 let dest = match instruction {
                     NativeSsaScalarInstruction::Constant { dest, .. }
-                    | NativeSsaScalarInstruction::Call { dest, .. } => dest,
+                    | NativeSsaScalarInstruction::Call { dest, .. }
+                    | NativeSsaScalarInstruction::Integer { dest, .. } => dest,
                 };
                 if definitions.insert(dest.id.clone(), dest.ty).is_some() {
                     return Err(format!("duplicate SSA value {} in {}", dest.id, function.identity));
@@ -138,6 +149,7 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
             .ok_or_else(|| format!("undefined SSA value {id} in {}", function.identity));
 
         let mut scalar_blocks = Vec::new();
+        let mut decisions = Vec::new();
         for block in &function.blocks {
             let mut instructions = Vec::new();
             for instruction in &block.instructions {
@@ -145,7 +157,7 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
                     NativeSsaScalarInstruction::Constant { dest, value } => {
                         instructions.push(ScalarInst::Const {
                             dest: ScalarValue { id: value_id(&dest.id), ty: scalar_ty(dest.ty) },
-                            value: *value,
+                            value: i128::from(*value),
                         });
                     }
                     NativeSsaScalarInstruction::Call { dest, callee, args } => {
@@ -164,6 +176,44 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
                             dest: ScalarValue { id: value_id(&dest.id), ty: scalar_ty(dest.ty) },
                             callee: symbol.clone(),
                             args: args.iter().map(|id| value_id(id)).collect(),
+                        });
+                    }
+                    NativeSsaScalarInstruction::Integer { dest, operator, intent, lhs, rhs } => {
+                        match operator.as_str() {
+                            "add" | "sub" | "mul" | "div" | "mod" | "and" | "or" | "xor" | "shl" | "shr" => {}
+                            _ => return Err(format!("integer operator {operator} is outside the scalar envelope")),
+                        }
+                        if matches!(intent, ArithmeticIntent::Widening { .. }) {
+                            return Err("widening arithmetic intent is outside the scalar envelope".into());
+                        }
+                        if dest.ty != NativeSsaScalarType::U64 {
+                            return Err(format!("integer arithmetic requires a u64 destination in {}", function.identity));
+                        }
+                        if type_of(lhs)? != NativeSsaScalarType::U64 || type_of(rhs)? != NativeSsaScalarType::U64 {
+                            return Err(format!("integer arithmetic requires u64 operands in {}", function.identity));
+                        }
+                        // The adapter carries no range evidence, so the
+                        // no-overflow promise stays withheld: wrapping is
+                        // already total, checked/trapping keep their exact
+                        // guards, and saturating keeps its clamp. The
+                        // withheld decision is recorded for audit.
+                        let (promise_kind, reason) = match intent {
+                            ArithmeticIntent::Wrapping => (BackendPromise::WrappingArithmetic,
+                                "wrapping intent is already conservative arithmetic; no no-overflow promise is implied"),
+                            ArithmeticIntent::Saturating => (BackendPromise::NoOverflow,
+                                "saturating semantics do not consume a no-overflow backend promise"),
+                            _ => (BackendPromise::NoOverflow,
+                                "native SSA admission carries no range evidence; guards stay exact"),
+                        };
+                        let promise = withheld(promise_kind, value_id(&dest.id), reason);
+                        decisions.push(promise.decision.clone());
+                        instructions.push(ScalarInst::Integer {
+                            dest: ScalarValue { id: value_id(&dest.id), ty: scalar_ty(dest.ty) },
+                            operator: operator.clone(),
+                            intent: *intent,
+                            lhs: value_id(lhs),
+                            rhs: value_id(rhs),
+                            promise: Box::new(promise),
                         });
                     }
                 }
@@ -226,7 +276,7 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
             },
             blocks: scalar_blocks,
             promises: Vec::new(),
-            promise_decisions: Vec::new(),
+            promise_decisions: decisions,
         });
     }
 
@@ -240,11 +290,14 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
             }
         }
     }
+    let module_decisions: Vec<_> = scalar_functions.iter()
+        .flat_map(|function| function.promise_decisions.iter().cloned())
+        .collect();
     Ok(emit_module(&ScalarModule {
         functions: scalar_functions,
         unsupported: Vec::new(),
         features: vec!["verified-native-scalar-ssa".into()],
-        promise_decisions: Vec::new(),
+        promise_decisions: module_decisions,
     }))
 }
 
@@ -385,6 +438,133 @@ int main(void) {
         module.functions[1].blocks[0].terminator = NativeSsaScalarTerminator::Jump {
             target: 999,
             args: vec![],
+        };
+        assert!(emit_verified_native_ssa_c11(&module).is_err());
+    }
+
+    fn arithmetic_module() -> NativeSsaScalarModule {
+        let mut module = verified_module();
+        module.functions.push(NativeSsaScalarFunction {
+            identity: "mncs:0.2:function:app::arith".into(),
+            params: vec![
+                NativeSsaScalarValue { id: "0".into(), ty: NativeSsaScalarType::U64 },
+                NativeSsaScalarValue { id: "1".into(), ty: NativeSsaScalarType::U64 },
+            ],
+            result_type: NativeSsaScalarType::U64,
+            blocks: vec![NativeSsaScalarBlock {
+                id: 0,
+                params: vec![],
+                instructions: vec![
+                    NativeSsaScalarInstruction::Integer {
+                        dest: NativeSsaScalarValue { id: "2".into(), ty: NativeSsaScalarType::U64 },
+                        operator: "add".into(),
+                        intent: ArithmeticIntent::Checked,
+                        lhs: "0".into(),
+                        rhs: "1".into(),
+                    },
+                    NativeSsaScalarInstruction::Integer {
+                        dest: NativeSsaScalarValue { id: "3".into(), ty: NativeSsaScalarType::U64 },
+                        operator: "mul".into(),
+                        intent: ArithmeticIntent::Wrapping,
+                        lhs: "2".into(),
+                        rhs: "1".into(),
+                    },
+                ],
+                terminator: NativeSsaScalarTerminator::Return { value: "3".into() },
+            }],
+        });
+        module
+    }
+
+    #[test]
+    fn native_ssa_c11_executes_checked_and_wrapping_integer_arithmetic() {
+        let source = emit_verified_native_ssa_c11(&arithmetic_module()).unwrap();
+        assert!(source.contains("mncs_app__arith"));
+        // Checked intent keeps its exact wide-intermediate guard; the
+        // withheld no-overflow promise never trims it.
+        assert!(source.contains("mncs_wide"));
+
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("mncs-native-ssa-arith-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let module_path = dir.join("module.c");
+        let driver_path = dir.join("driver.c");
+        let executable_path = dir.join("run");
+        std::fs::write(&module_path, source).unwrap();
+        std::fs::write(&driver_path, r#"#include <stdint.h>
+extern void mncs_app__arith(uint64_t, uint64_t, int32_t *, int64_t *, uint64_t);
+int main(void) {
+  int32_t status = 0;
+  int64_t value = 0;
+  /* (6 + 7) * 7 = 91, no overflow anywhere. */
+  mncs_app__arith(6, 7, &status, &value, 64);
+  if (status || value != 91) return 1;
+  /* 6 + 0 then * 0: wrapping multiply by zero stays total. */
+  mncs_app__arith(6, 0, &status, &value, 64);
+  if (status || value != 0) return 2;
+  /* (2^63 + 2) * 2^63 wraps mod 2^64 to 0 with status 0: the wrapping
+     multiply must not trap where the checked add did not overflow. */
+  mncs_app__arith(2, 0x8000000000000000ULL, &status, &value, 64);
+  if (status || value != 0) return 3;
+  /* UINT64_MAX + 1 overflows the checked add: exact trap, status 1. */
+  mncs_app__arith(0xFFFFFFFFFFFFFFFFULL, 1, &status, &value, 64);
+  if (!status) return 4;
+  return 0;
+}
+"#).unwrap();
+
+        let compiler = if std::process::Command::new("clang").arg("--version").output().is_ok() {
+            "clang"
+        } else {
+            "cc"
+        };
+        let compiled = std::process::Command::new(compiler)
+            .args(["-std=c11", "-O0"])
+            .arg(&module_path)
+            .arg(&driver_path)
+            .arg("-lm")
+            .arg("-o")
+            .arg(&executable_path)
+            .output()
+            .unwrap();
+        assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable_path).status().unwrap();
+        assert!(executed.success());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn native_ssa_c11_refuses_arithmetic_outside_the_envelope() {
+        // Unknown operator.
+        let mut module = arithmetic_module();
+        module.functions[2].blocks[0].instructions[0] = NativeSsaScalarInstruction::Integer {
+            dest: NativeSsaScalarValue { id: "2".into(), ty: NativeSsaScalarType::U64 },
+            operator: "pow".into(),
+            intent: ArithmeticIntent::Checked,
+            lhs: "0".into(),
+            rhs: "1".into(),
+        };
+        assert!(emit_verified_native_ssa_c11(&module).is_err());
+
+        // Widening intent cannot ride the fixed-cell scalar envelope.
+        let mut module = arithmetic_module();
+        module.functions[2].blocks[0].instructions[0] = NativeSsaScalarInstruction::Integer {
+            dest: NativeSsaScalarValue { id: "2".into(), ty: NativeSsaScalarType::U64 },
+            operator: "add".into(),
+            intent: ArithmeticIntent::Widening { bits: 128 },
+            lhs: "0".into(),
+            rhs: "1".into(),
+        };
+        assert!(emit_verified_native_ssa_c11(&module).is_err());
+
+        // Non-u64 destination.
+        let mut module = arithmetic_module();
+        module.functions[2].blocks[0].instructions[0] = NativeSsaScalarInstruction::Integer {
+            dest: NativeSsaScalarValue { id: "2".into(), ty: NativeSsaScalarType::Bool },
+            operator: "add".into(),
+            intent: ArithmeticIntent::Checked,
+            lhs: "0".into(),
+            rhs: "1".into(),
         };
         assert!(emit_verified_native_ssa_c11(&module).is_err());
     }
