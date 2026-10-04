@@ -26,6 +26,23 @@ use mncs_model::{
 };
 use mncs_syntax::{parse, SourceArtifactKind, SourceEnvelope};
 
+/// Stage F: stdlib-owned corpora read across repos from the
+/// `mncs-stdlib` checkout (explicit `MNCS_STDLIB_ROOT` or sibling).
+fn stdlib_checkout_dir() -> String {
+    // Test inputs need a real checkout: an explicitly empty variable
+    // (the CLI's hermetic spelling) falls through to the sibling here.
+    let explicit = std::env::var("MNCS_STDLIB_ROOT")
+        .ok()
+        .filter(|root| !root.trim().is_empty());
+    let checkout =
+        explicit.unwrap_or_else(|| format!("{}/../../../mncs-stdlib", env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        std::path::Path::new(&checkout).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    checkout
+}
+
 fn demo_program() -> mncs_model::Program {
     let text = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -260,9 +277,9 @@ fn demo_binding(demo: &Demo) -> ProofBinding {
 fn demo_proof_cells_match_the_executed_corpus_case() {
     // The artifact checked below is byte-identical to the cells the
     // differential suite executes on all five backends.
-    let text = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../examples/execution/proof-kernel-corpus.json"
+    let text = std::fs::read_to_string(format!(
+        "{}/examples/execution/proof-kernel-corpus.json",
+        stdlib_checkout_dir()
     ))
     .expect("curated corpus");
     let cases = parse_proof_corpus(&text).expect("parse curated corpus");

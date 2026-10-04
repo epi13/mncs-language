@@ -1,7 +1,7 @@
 # RFC 0048: MNCS-native JIT / execution orchestration architecture
 
 Status: **Implemented** (experimental).
-Scope: `library/jit/`, JIT corpora, `docs/jit-architecture.md`.
+Scope: `mncs-stdlib/library/jit/`, JIT corpora, `docs/jit-architecture.md`.
 Related: RFC 0016 (staging/specialization), RFC 0017 (runtime/
 execution-context), RFC 0038 (compiler refinement), RFC 0041
 (backend plurality).
@@ -89,7 +89,7 @@ observation records) are present.
 
 ## Consequences
 
-- `library/jit/` (8 MNCS modules, ~2.7k lines with tests-in-source
+- `mncs-stdlib/library/jit/` (8 MNCS modules, ~2.7k lines with tests-in-source
   candidates) plus 8 corpora (32 cases) is the extraction unit for
   a future `mncs-jit`.
 - The bootstrap compiler required **zero** production changes for

@@ -211,8 +211,8 @@ construct. It should include accepted, rejected, and unresolved fixtures before 
 prover or verified compiler.
 
 Tranche 0.1 status: that pilot now exists and stays experimental. The kernel
-itself is MNCS source (`library/core/proof_term.mncs`,
-`library/core/proof_check.mncs`), executed identically on all five backends
+itself is MNCS source (`mncs-stdlib/library/core/proof_term.mncs`,
+`mncs-stdlib/library/core/proof_check.mncs`), executed identically on all five backends
 with an independent Rust reference checker in differential agreement
 (`crates/mncs-cli/tests/proof_kernel.rs`); a real compiler-generated
 `integer-overflow` obligation is discharged end to end
@@ -220,7 +220,7 @@ with an independent Rust reference checker in differential agreement
 set — design and implementation maturity tracked separately with per-criterion
 evidence — lives in `rfcs/conformance-ledger.json`, generated to
 `docs/rfc-conformance.md`; status transitions themselves execute as MNCS in
-`library/family/rfc_status.mncs`. Evidence record: `docs/rfc-0007-evidence.md`.
+`mncs-stdlib/library/family/rfc_status.mncs`. Evidence record: `docs/rfc-0007-evidence.md`.
 
 ## Active cross-cutting track — assurance, evidence, trust, and witnesses
 

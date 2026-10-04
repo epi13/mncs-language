@@ -22,6 +22,44 @@ OUTPUT = ROOT / "docs/language-capabilities.json"
 DELTA_OUTPUT = ROOT / "docs/language-capability-deltas.json"
 
 
+def stdlib_root() -> Path:
+    """Stage F: the standard library lives in the mncs-stdlib checkout.
+
+    Explicit `MNCS_STDLIB_ROOT` wins, else the `mncs-stdlib` sibling of
+    this repository. Fails closed: the language index projects over the
+    stdlib, so generation without it would publish a hollow projection.
+    """
+    explicit = os.environ.get("MNCS_STDLIB_ROOT", "").strip()
+    root = Path(explicit) if explicit else ROOT.parent / "mncs-stdlib"
+    if not (root / "library").is_dir():
+        raise RuntimeError(
+            f"mncs-stdlib checkout missing at {root}; set MNCS_STDLIB_ROOT"
+        )
+    return root
+
+
+def display_path(path: Path) -> str:
+    """Index path: repository-relative for language files, workspace-rooted
+    (`mncs-stdlib/...`) for stdlib files so projections stay stable."""
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.relative_to(ROOT.parent).as_posix()
+
+
+def stdlib_facts() -> dict[str, object]:
+    """Composition facts from the stdlib compatibility manifest."""
+    manifest_path = stdlib_root() / "stdlib-manifest.json"
+    manifest = read_json(manifest_path)
+    return {
+        "manifest_path": display_path(manifest_path),
+        "bundle_identity": manifest["bundle_identity"],
+        "requires_profile": manifest["requires_profile"],
+        "module_count": manifest["module_count"],
+        "manifest_identity": digest_file(manifest_path),
+    }
+
+
 def digest_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
 
@@ -60,7 +98,7 @@ def compiler_binary() -> Path:
 
 def compiler_command(binary: Path, *arguments: str) -> dict[str, object]:
     environment = os.environ.copy()
-    library_root = str(ROOT / "library")
+    library_root = str(stdlib_root() / "library")
     configured = environment.get("MNCS_LIBRARY_PATH")
     environment["MNCS_LIBRARY_PATH"] = (
         f"{library_root}:{configured}" if configured else library_root
@@ -137,7 +175,7 @@ def source_facts(path: Path, binary: Path) -> dict[str, object]:
     return {
         "module": inventory.get("module"),
         "profile": inventory.get("source_profile"),
-        "path": path.relative_to(ROOT).as_posix(),
+        "path": display_path(path),
         # Projection provenance is file-addressed so Doctor can verify
         # freshness without reimplementing compiler identity derivation.
         "source_identity": digest_file(path),
@@ -160,21 +198,23 @@ def source_facts(path: Path, binary: Path) -> dict[str, object]:
 
 def canonical_examples(binary: Path) -> list[dict[str, object]]:
     candidates = [
-        ("bounded-collections", "examples/source/bounded-min.mncs", "bounded collections"),
-        ("identity", "examples/source/identity.mncs", "identity"),
-        ("effects", "examples/source/cre3-retry-authority.mncs", "effects"),
-        ("structured-artifacts", "examples/source/structured-artifact.mncs", "structured artifacts"),
-        ("applications", "examples/source/application-entry.mncs", "applications"),
+        (ROOT, "bounded-collections", "examples/source/bounded-min.mncs", "bounded collections"),
+        (ROOT, "identity", "examples/source/identity.mncs", "identity"),
+        (ROOT, "effects", "examples/source/cre3-retry-authority.mncs", "effects"),
+        (ROOT, "structured-artifacts", "examples/source/structured-artifact.mncs", "structured artifacts"),
+        # Stage F: the application-entry witness moved with the stdlib.
+        (None, "applications", "examples/source/application-entry.mncs", "applications"),
     ]
     examples = []
-    for identity, relative, topic in candidates:
-        path = ROOT / relative
+    for base, identity, relative, topic in candidates:
+        anchor = stdlib_root() if base is None else base
+        path = anchor / relative
         if path.is_file():
             inventory = source_facts(path, binary)
             examples.append(
                 {
                     "identity": f"mncs.example/{identity}/1",
-                    "path": relative,
+                    "path": display_path(path),
                     "profile": inventory["profile"],
                     "topics": [topic],
                     "source_identity": inventory["source_identity"],
@@ -229,7 +269,8 @@ def build_index(binary: Path) -> dict[str, object]:
     profiles = read_json(REGISTRY)
     current = next(item for item in profiles if item["status"] == "current")
     compiler_facts = compiler_language_inventory(binary)
-    library_paths = sorted((ROOT / "library").rglob("*.mncs"))
+    stdlib = stdlib_facts()
+    library_paths = sorted((stdlib_root() / "library").rglob("*.mncs"))
     worker_count = max(
         1,
         min(
@@ -257,6 +298,13 @@ def build_index(binary: Path) -> dict[str, object]:
             "source_identity": digest_file(ROOT / "scripts/generate_language_capabilities.py"),
         }
     )
+    provenance.append(
+        {
+            "path": stdlib["manifest_path"],
+            "kind": "stdlib_manifest",
+            "source_identity": stdlib["manifest_identity"],
+        }
+    )
     provenance.extend(
         {"path": item["path"], "kind": "library_module", "source_identity": item["source_identity"]}
         for item in library
@@ -279,6 +327,7 @@ def build_index(binary: Path) -> dict[str, object]:
         "compiler_inventory_identity": compiler_facts["inventory_identity"],
         "compiler_inventory": compiler_facts,
         "profiles": profiles,
+        "stdlib": stdlib,
         "library_modules": library,
         "intrinsics": compiler_facts["intrinsics"],
         "topics": CURATED_TOPICS,

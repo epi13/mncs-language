@@ -13,20 +13,22 @@ before repository-wide search. The packet is a projection; this repository
 remains the authority for language semantics and capability content.
 
 New implementation code is written in MNCS source (`.mncs`) wherever
-technically possible: `library/` for reusable capability, `examples/` for
-probes and conformance programs, `pressure/`-style experiment corpora where
-the workflow calls for them. Do not escape to a host language (Rust included)
-merely because MNCS lacks a capability; that lack is a language-pressure
-event (section 3). Host code in `crates/` and `scripts/` is compiler,
-runtime, tooling, and transport, not a substitute for expressible MNCS.
+technically possible: `examples/` for probes and conformance programs,
+`pressure/`-style experiment corpora where the workflow calls for them,
+and the `mncs-stdlib` repository for reusable capability. Do not escape
+to a host language (Rust included) merely because MNCS lacks a
+capability; that lack is a language-pressure event (section 3). Host
+code in `crates/` and `scripts/` is compiler, runtime, tooling, and
+transport, not a substitute for expressible MNCS.
 
 ## 2. Prefer stdlib over repository-local substitutes
 
-Before adding a helper, check `library/std/` and `library/core/`. If the
-primitive belongs in the standard library, add it there with backend and
-conformance coverage rather than duplicating it at a call site. Coherent,
-reusable, machine-native abstractions only; do not inflate stdlib with
-one-off conveniences.
+Before adding a helper, check the `mncs-stdlib` checkout
+(`MNCS_STDLIB_ROOT`, else the `mncs-stdlib` sibling): `library/std/`
+and `library/core/`. If the primitive belongs in the standard library,
+add it there with contract and conformance coverage rather than
+duplicating it at a call site. Coherent, reusable, machine-native
+abstractions only; do not inflate stdlib with one-off conveniences.
 
 ## 3. Missing capability becomes a capability-gap artifact, never a workaround
 

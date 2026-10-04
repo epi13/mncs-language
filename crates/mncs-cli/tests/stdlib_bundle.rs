@@ -11,8 +11,47 @@ use std::process::Command;
 
 use serde_json::Value;
 
+/// Stage F: the `mncs-stdlib` checkout backing these tests: explicit
+/// `MNCS_STDLIB_ROOT` wins, else the `mncs-stdlib` sibling checkout.
+/// Fails closed with a clear message when absent.
+fn stdlib_checkout_dir() -> String {
+    // Test inputs need a real checkout: an explicitly empty variable
+    // (the CLI's hermetic spelling) falls through to the sibling here.
+    let explicit = std::env::var("MNCS_STDLIB_ROOT")
+        .ok()
+        .filter(|root| !root.trim().is_empty());
+    let checkout =
+        explicit.unwrap_or_else(|| format!("{}/../../../mncs-stdlib", env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        std::path::Path::new(&checkout).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    checkout
+}
+
+/// Stage F: standard-library sources now live in `mncs-stdlib/library/`.
+fn stdlib_library_dir() -> String {
+    let checkout = stdlib_checkout_dir();
+    let dir = format!("{checkout}/library");
+    assert!(
+        std::path::Path::new(&dir).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    dir
+}
+
+/// Stage F: stdlib-owned examples (fixtures/corpora) read across repos.
+fn stdlib_example(name: &str) -> String {
+    format!("{}/examples/{name}", stdlib_checkout_dir())
+}
+
+/// Stage F: the canonical bundle pin owned by mncs-stdlib.
+fn canonical_pin() -> String {
+    format!("{}/dist/stdlib-bundle.json", stdlib_checkout_dir())
+}
+
 fn library_dir() -> String {
-    format!("{}/../../library", env!("CARGO_MANIFEST_DIR"))
+    stdlib_library_dir()
 }
 
 fn example(name: &str) -> String {
@@ -47,6 +86,9 @@ fn source_study(
         }
         None => {
             command.env_remove("MNCS_LIBRARY_PATH");
+            // No filesystem authority at all: disable the sibling default
+            // so bundle-only stays bundle-only in family checkouts.
+            command.env("MNCS_STDLIB_ROOT", "");
         }
     }
     match bundle {
@@ -74,7 +116,7 @@ fn bundle_only_consumer_elaborates_without_filesystem_stdlib() {
     let dir = workspace("only");
     let source_path = dir.join("consumer.mncs");
     fs::write(&source_path, consumer_source()).expect("write consumer");
-    let bundle = format!("{}/stdlib-bundle.json", library_dir());
+    let bundle = canonical_pin();
     let (code, study) = source_study(&source_path, None, Some(&bundle));
     assert_eq!(code, Some(0), "study JSON: {study:#}");
     let held = diagnostics(&study);
@@ -110,7 +152,7 @@ fn byte_identical_bundle_and_tree_collapse() {
     let dir = workspace("collapse");
     let source_path = dir.join("consumer.mncs");
     fs::write(&source_path, consumer_source()).expect("write consumer");
-    let bundle = format!("{}/stdlib-bundle.json", library_dir());
+    let bundle = canonical_pin();
     let (code, study) = source_study(&source_path, Some(&library_dir()), Some(&bundle));
     assert_eq!(code, Some(0), "study JSON: {study:#}");
     let held = diagnostics(&study);
@@ -194,10 +236,8 @@ fn bundle_only_execution_meets_filesystem_expectations() {
     for backend in ["mncs-research-bytecode", "mncs-c11"] {
         let output = binary()
             .env_remove("MNCS_LIBRARY_PATH")
-            .env(
-                "MNCS_STDLIB_BUNDLE",
-                format!("{}/stdlib-bundle.json", library_dir()),
-            )
+            .env("MNCS_STDLIB_ROOT", "")
+            .env("MNCS_STDLIB_BUNDLE", canonical_pin())
             .args([
                 "experiment",
                 "run",
@@ -205,7 +245,7 @@ fn bundle_only_execution_meets_filesystem_expectations() {
                 "--backend",
                 backend,
                 "--corpus",
-                &example("execution/text-utf8-corpus.json"),
+                &stdlib_example("execution/text-utf8-corpus.json"),
             ])
             .output()
             .expect("run bundle experiment");
@@ -229,8 +269,7 @@ fn bundle_only_execution_meets_filesystem_expectations() {
 #[test]
 fn tampered_bundle_fails_verification() {
     let dir = workspace("tamper");
-    let pristine =
-        fs::read_to_string(format!("{}/stdlib-bundle.json", library_dir())).expect("read pin");
+    let pristine = fs::read_to_string(canonical_pin()).expect("read pin");
     let mut document: Value = serde_json::from_str(&pristine).expect("pin parses");
     let modules = document["modules"].as_array_mut().expect("modules");
     let entry = modules
@@ -254,11 +293,7 @@ fn tampered_bundle_fails_verification() {
         "tampered bundle must fail verification"
     );
     let ok = binary()
-        .args([
-            "bundle",
-            "verify",
-            &format!("{}/stdlib-bundle.json", library_dir()),
-        ])
+        .args(["bundle", "verify", &canonical_pin()])
         .output()
         .expect("verify pristine");
     assert!(

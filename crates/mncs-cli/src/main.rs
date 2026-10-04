@@ -3633,7 +3633,10 @@ where
                 }
             }
         }
-        let library_roots = mncs_compiler::admission_library_roots(&[]);
+        // CLI-discovered roots (explicit paths plus the stdlib default)
+        // seed proof admission; duplicates with MNCS_LIBRARY_PATH are
+        // harmless under the resolver's first-match rule.
+        let library_roots = mncs_compiler::admission_library_roots(&library_roots());
         compiler.compile_with_proofs(request, &program, &inputs, &library_roots)
     };
     if let Some(output_dir) = &options.output_dir {
@@ -7283,10 +7286,11 @@ fn per_claim_milli(value: usize, claim_count: usize) -> usize {
 /// Resolves imported module names against the directory of the root source
 /// file using the dotted-path convention: `use a.b;` loads `<root>/a/b.mncs`.
 /// Additional standard-library roots come from `MNCS_LIBRARY_PATH`
-/// (`:`-separated directories searched after the source-local roots), so
-/// external consumers can bind to `mncs.core.*` without vendoring the library
-/// tree. The name identifies the candidate only; compatibility is established
-/// by elaborating the resolved module.
+/// (`:`-separated directories searched after the source-local roots) plus
+/// the discovered stdlib root (`MNCS_STDLIB_ROOT`, else the `mncs-stdlib`
+/// sibling checkout), so external consumers can bind to `mncs.core.*`
+/// without vendoring the library tree. The name identifies the candidate
+/// only; compatibility is established by elaborating the resolved module.
 struct FileModuleResolver {
     root: PathBuf,
     libraries: Vec<PathBuf>,
@@ -7352,15 +7356,56 @@ impl FileModuleResolver {
 }
 
 /// Directories that may satisfy `use` targets beyond the importing file's own
-/// directory tree. Deterministic order; missing entries are skipped so a stale
-/// path degrades into an honest resolution miss instead of an error.
+/// directory tree. Deterministic order: explicit `MNCS_LIBRARY_PATH` entries
+/// first, then the discovered standard-library root (Stage F: the library
+/// lives in the `mncs-stdlib` repository). Missing entries are skipped so a
+/// stale path degrades into an honest resolution miss instead of an error.
+/// Authority conflicts still fail closed downstream; order never shadows.
 fn library_roots() -> Vec<PathBuf> {
-    std::env::var("MNCS_LIBRARY_PATH")
+    let mut roots: Vec<PathBuf> = std::env::var("MNCS_LIBRARY_PATH")
         .unwrap_or_default()
         .split(':')
         .filter(|entry| !entry.is_empty())
         .map(PathBuf::from)
-        .collect()
+        .collect();
+    if let Some(default) = stdlib_default_root() {
+        if !roots.contains(&default) {
+            roots.push(default);
+        }
+    }
+    roots
+}
+
+/// Canonical standard-library root discovery (Stage F).
+///
+/// Precedence:
+/// 1. `MNCS_STDLIB_ROOT` set to a non-empty value names the `mncs-stdlib`
+///    checkout; its `library/` subdirectory is the root.
+/// 2. `MNCS_STDLIB_ROOT` set-but-empty disables default discovery, for
+///    hermetic tests and explicitly pinned invocations.
+/// 3. Unset: the `mncs-stdlib` sibling of the language checkout backing
+///    this binary (`<exe>/../../mncs-stdlib/library`), when present.
+/// 4. Otherwise no default root: explicit `MNCS_LIBRARY_PATH` entries and
+///    the pinned bundle (when configured) are the only authorities.
+fn stdlib_default_root() -> Option<PathBuf> {
+    match std::env::var("MNCS_STDLIB_ROOT") {
+        Ok(value) if value.trim().is_empty() => None,
+        Ok(value) => {
+            let root = PathBuf::from(value).join("library");
+            root.is_dir().then_some(root)
+        }
+        Err(_) => stdlib_sibling_root(),
+    }
+}
+
+/// The `mncs-stdlib` sibling of the language checkout backing this binary:
+/// `<exe-dir>/../../mncs-stdlib/library`. Returns `None` when the layout
+/// is unrecognized or the directory is absent.
+fn stdlib_sibling_root() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let checkout = exe.parent()?.parent()?.parent()?;
+    let root = checkout.parent()?.join("mncs-stdlib").join("library");
+    root.is_dir().then_some(root)
 }
 
 impl FileModuleResolver {

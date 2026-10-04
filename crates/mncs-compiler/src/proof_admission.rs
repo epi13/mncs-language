@@ -4,7 +4,7 @@
 //!
 //! - Host Rust reads artifact bytes/files and decodes JSON (transport).
 //! - Semantic admission is performed by EXECUTING the MNCS admission module
-//!   (`library/core/proof_admit.mncs`, `mncs.core.proof_admit.v1`) in-process
+//!   (`mncs-stdlib/library/core/proof_admit.mncs`, `mncs.core.proof_admit.v1`) in-process
 //!   over the exact artifact cells. The MNCS-issued verdict and canonical
 //!   assumption set are decoded from the returned `ProofBinding` record.
 //! - Proof validity is never decided here: [`admit_artifact`] refuses
@@ -96,7 +96,7 @@ pub struct AdmittedProof {
 }
 
 // --- Value encoding (transport): DepCell to MNCS Cell record ----------
-// Identity constants mirror `scripts/gen_proof_dep_corpus.py`; the
+// Identity constants mirror `mncs-stdlib/scripts/gen_proof_dep_corpus.py`; the
 // `cell_encoding_matches_checked_in_corpus` test pins them against the
 // checked-in corpus so drift fails loudly instead of silently.
 
@@ -262,11 +262,22 @@ impl ModuleResolver for LibraryResolver {
     }
 }
 
-/// Library roots: explicit directories first, then `MNCS_LIBRARY_PATH`.
+/// Library roots: explicit directories first, then `MNCS_LIBRARY_PATH`,
+/// then the `MNCS_STDLIB_ROOT` checkout's `mncs-stdlib/library/` when set. (Library
+/// code honors only the explicit variable; binary-relative sibling
+/// defaults belong to CLI entrypoints, never to in-process consumers.)
 pub fn admission_library_roots(extra: &[PathBuf]) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = extra.to_vec();
     if let Ok(path) = std::env::var("MNCS_LIBRARY_PATH") {
         roots.extend(path.split(':').filter(|e| !e.is_empty()).map(PathBuf::from));
+    }
+    if let Ok(stdlib) = std::env::var("MNCS_STDLIB_ROOT") {
+        if !stdlib.trim().is_empty() {
+            let root = std::path::PathBuf::from(stdlib).join("library");
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
     }
     roots
 }
@@ -1005,14 +1016,26 @@ mod tests {
     use super::*;
     use mncs_model::{parse_proof_dep_corpus, DepCorroboration, DepVerdict};
 
+    /// Stage F: stdlib sources live in the `mncs-stdlib` checkout.
+    fn stdlib_checkout_dir() -> PathBuf {
+        // Test inputs need a real checkout: an explicitly empty variable
+        // (the CLI's hermetic spelling) falls through to the sibling here.
+        if let Ok(root) = std::env::var("MNCS_STDLIB_ROOT") {
+            if !root.trim().is_empty() {
+                return PathBuf::from(root);
+            }
+        }
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../mncs-stdlib")
+    }
+
     fn library_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library")
+        stdlib_checkout_dir().join("library")
     }
 
     fn corpus_artifact(case_id: &str, obligation: &str) -> (DepArtifact, String) {
         let path = format!(
-            "{}/../../examples/execution/proof-dep-corpus.json",
-            env!("CARGO_MANIFEST_DIR")
+            "{}/examples/execution/proof-dep-corpus.json",
+            stdlib_checkout_dir().display()
         );
         let text = std::fs::read_to_string(&path).expect("proof-dep corpus");
         let cases = parse_proof_dep_corpus(&text).expect("parse proof-dep corpus");
@@ -1046,8 +1069,8 @@ mod tests {
         // corpus does; any drift fails here instead of silently forking the
         // MNCS-executed meaning from the differentially-checked one.
         let path = format!(
-            "{}/../../examples/execution/proof-dep-corpus.json",
-            env!("CARGO_MANIFEST_DIR")
+            "{}/examples/execution/proof-dep-corpus.json",
+            stdlib_checkout_dir().display()
         );
         let document: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).expect("corpus"))
@@ -1173,8 +1196,8 @@ mod tests {
         // (even a 106-byte compiler obligation id); judging whether that
         // obligation is live happens at HIR/SSA attachment, not here.
         let path = format!(
-            "{}/../../examples/execution/proof-dep-corpus.json",
-            env!("CARGO_MANIFEST_DIR")
+            "{}/examples/execution/proof-dep-corpus.json",
+            stdlib_checkout_dir().display()
         );
         let text = std::fs::read_to_string(&path).expect("corpus");
         let cases = parse_proof_dep_corpus(&text).expect("parse");

@@ -128,7 +128,7 @@
           "state": "partial",
           "evidence": [
             "crates/mncs-model/src/verifier.rs",
-            "library/core/proof_check.mncs"
+            "../mncs-stdlib/library/core/proof_check.mncs"
           ]
         }
       ],
@@ -448,7 +448,7 @@
           "text": "Canonical proof-core representation with versioned terms",
           "state": "satisfied",
           "evidence": [
-            "library/core/proof_term.mncs",
+            "../mncs-stdlib/library/core/proof_term.mncs",
             "crates/mncs-model/src/proof_kernel.rs"
           ]
         },
@@ -457,7 +457,7 @@
           "text": "Explicit inspectable proof terms with canonical identities",
           "state": "satisfied",
           "evidence": [
-            "library/core/proof_term.mncs",
+            "../mncs-stdlib/library/core/proof_term.mncs",
             "crates/mncs-model/src/proof_kernel.rs"
           ]
         },
@@ -466,8 +466,8 @@
           "text": "Bounded explicit universe hierarchy without hidden impredicativity",
           "state": "satisfied",
           "evidence": [
-            "library/core/proof_check.mncs",
-            "examples/execution/proof-kernel-corpus.json"
+            "../mncs-stdlib/library/core/proof_check.mncs",
+            "../mncs-stdlib/examples/execution/proof-kernel-corpus.json"
           ]
         },
         {
@@ -475,9 +475,9 @@
           "text": "Dependent function types beyond monomorphized generics",
           "state": "satisfied",
           "evidence": [
-            "library/core/proof_dep.mncs",
+            "../mncs-stdlib/library/core/proof_dep.mncs",
             "crates/mncs-model/src/proof_dep.rs",
-            "examples/execution/proof-dep-corpus.json",
+            "../mncs-stdlib/examples/execution/proof-dep-corpus.json",
             "docs/rfc-0007-tranche-02-calculus.md"
           ]
         },
@@ -486,10 +486,10 @@
           "text": "At least one inductive family with dependent reasoning (Nat)",
           "state": "satisfied",
           "evidence": [
-            "library/core/proof_check.mncs",
-            "examples/execution/proof-kernel-corpus.json",
-            "library/core/proof_dep.mncs",
-            "examples/execution/proof-dep-corpus.json"
+            "../mncs-stdlib/library/core/proof_check.mncs",
+            "../mncs-stdlib/examples/execution/proof-kernel-corpus.json",
+            "../mncs-stdlib/library/core/proof_dep.mncs",
+            "../mncs-stdlib/examples/execution/proof-dep-corpus.json"
           ]
         },
         {
@@ -497,7 +497,7 @@
           "text": "Explicit propositional equality kept separate from other equalities",
           "state": "satisfied",
           "evidence": [
-            "library/core/proof_check.mncs",
+            "../mncs-stdlib/library/core/proof_check.mncs",
             "docs/rfc-0007-evidence.md"
           ]
         },
@@ -506,7 +506,7 @@
           "text": "Deterministic checking to PASS/FAIL/UNKNOWN that never promotes UNKNOWN",
           "state": "satisfied",
           "evidence": [
-            "library/core/proof_check.mncs",
+            "../mncs-stdlib/library/core/proof_check.mncs",
             "crates/mncs-cli/tests/proof_kernel.rs"
           ]
         },
@@ -541,11 +541,11 @@
           "text": "MNCS-native checker executing through real backend paths",
           "state": "satisfied",
           "evidence": [
-            "library/core/proof_check.mncs",
+            "../mncs-stdlib/library/core/proof_check.mncs",
             "crates/mncs-cli/tests/proof_kernel.rs",
-            "library/core/proof_dep.mncs",
-            "examples/execution/proof-dep-corpus.json",
-            "examples/execution/proof-dep-admission-corpus.json"
+            "../mncs-stdlib/library/core/proof_dep.mncs",
+            "../mncs-stdlib/examples/execution/proof-dep-corpus.json",
+            "../mncs-stdlib/examples/execution/proof-dep-admission-corpus.json"
           ]
         },
         {
@@ -563,9 +563,9 @@
           "text": "Valid, invalid, adversarial, and unresolved fixtures",
           "state": "satisfied",
           "evidence": [
-            "examples/execution/proof-kernel-corpus.json",
-            "examples/execution/proof-kernel-fuzz-corpus.json",
-            "examples/execution/proof-dep-corpus.json"
+            "../mncs-stdlib/examples/execution/proof-kernel-corpus.json",
+            "../mncs-stdlib/examples/execution/proof-kernel-fuzz-corpus.json",
+            "../mncs-stdlib/examples/execution/proof-dep-corpus.json"
           ]
         },
         {
@@ -573,11 +573,11 @@
           "text": "Real compiler integration with explicit proof relationship",
           "state": "satisfied",
           "evidence": [
-            "library/core/proof_admit.mncs",
+            "../mncs-stdlib/library/core/proof_admit.mncs",
             "crates/mncs-compiler/src/proof_admission.rs",
             "crates/mncs-model/src/proof_transport.rs",
             "crates/mncs-cli/tests/proof_dep_admission.rs",
-            "examples/execution/proof-dep-admission-corpus.json"
+            "../mncs-stdlib/examples/execution/proof-dep-admission-corpus.json"
           ]
         },
         {
@@ -586,8 +586,8 @@
           "state": "satisfied",
           "evidence": [
             "crates/mncs-cli/tests/proof_kernel.rs",
-            "examples/execution/proof-dep-corpus.json",
-            "examples/execution/proof-dep-admission-corpus.json"
+            "../mncs-stdlib/examples/execution/proof-dep-corpus.json",
+            "../mncs-stdlib/examples/execution/proof-dep-admission-corpus.json"
           ]
         },
         {
@@ -614,7 +614,7 @@
           "state": "satisfied",
           "evidence": [
             "docs/rfc-0007-evidence.md",
-            "library/core/proof_check.mncs"
+            "../mncs-stdlib/library/core/proof_check.mncs"
           ]
         },
         {
@@ -622,7 +622,7 @@
           "text": "Proof-core stratification: total kernel versus effectful execution",
           "state": "satisfied",
           "evidence": [
-            "library/core/proof_term.mncs",
+            "../mncs-stdlib/library/core/proof_term.mncs",
             "docs/rfc-0007-evidence.md"
           ]
         },
@@ -730,7 +730,7 @@
             "examples/source/fs-scan.mncs",
             "crates/mncs-cli/tests/fs_effects.rs",
             "docs/fs-resource-effects.md",
-            "library/std/chunk.mncs"
+            "../mncs-stdlib/library/std/chunk.mncs"
           ]
         }
       ],
@@ -830,8 +830,8 @@
           "text": "Concurrency and memory-consistency model",
           "state": "partial",
           "evidence": [
-            "library/std/scope.mncs",
-            "library/std/channel.mncs",
+            "../mncs-stdlib/library/std/scope.mncs",
+            "../mncs-stdlib/library/std/channel.mncs",
             "crates/mncs-embed/src/scope.rs",
             "crates/mncs-cli/tests/task_scope.rs",
             "crates/mncs-cli/tests/channel_contract.rs",
@@ -1019,7 +1019,7 @@
           "text": "Cross-module generic resolution with nominal identities",
           "state": "satisfied",
           "evidence": [
-            "examples/source/status-generic-consumer.mncs",
+            "../mncs-stdlib/examples/source/status-generic-consumer.mncs",
             "examples/source/generic-polymorphism.mncs"
           ]
         },
@@ -1078,7 +1078,7 @@
           "text": "Namespace imports with aliasing and identity preservation",
           "state": "satisfied",
           "evidence": [
-            "examples/source/profile09-stdlib-namespace-consumer.mncs",
+            "../mncs-stdlib/examples/source/profile09-stdlib-namespace-consumer.mncs",
             "crates/mncs-compiler/src/resolution.rs"
           ]
         },
@@ -1315,8 +1315,8 @@
           "text": "Evidence combination algebra that cannot promote UNKNOWN",
           "state": "satisfied",
           "evidence": [
-            "library/core/status.mncs",
-            "library/family/coherence.mncs"
+            "../mncs-stdlib/library/core/status.mncs",
+            "../mncs-stdlib/library/family/coherence.mncs"
           ]
         },
         {
@@ -1324,7 +1324,7 @@
           "text": "Promotion gates refusing on unresolved UNKNOWN",
           "state": "satisfied",
           "evidence": [
-            "library/family/coherence.mncs"
+            "../mncs-stdlib/library/family/coherence.mncs"
           ]
         },
         {
@@ -1336,8 +1336,8 @@
       ],
       "evidence_artifacts": [],
       "tests": [
-        "examples/execution/family-coherence-transition-corpus.json",
-        "examples/execution/family-coherence-promotion-corpus.json"
+        "../mncs-stdlib/examples/execution/family-coherence-transition-corpus.json",
+        "../mncs-stdlib/examples/execution/family-coherence-promotion-corpus.json"
       ],
       "dependents": [
         "0007"
@@ -1384,10 +1384,10 @@
           "text": "Bounded sequences, views, bytes, vectors, masks",
           "state": "satisfied",
           "evidence": [
-            "library/core/sequences.mncs",
-            "library/core/bytes.mncs",
-            "library/core/vector.mncs",
-            "library/core/mask.mncs"
+            "../mncs-stdlib/library/core/sequences.mncs",
+            "../mncs-stdlib/library/core/bytes.mncs",
+            "../mncs-stdlib/library/core/vector.mncs",
+            "../mncs-stdlib/library/core/mask.mncs"
           ]
         },
         {
@@ -1463,7 +1463,7 @@
           "state": "satisfied",
           "evidence": [
             "crates/mncs-model/src/identity.rs",
-            "library/core/identity.mncs"
+            "../mncs-stdlib/library/core/identity.mncs"
           ]
         },
         {
@@ -1471,7 +1471,7 @@
           "text": "Explicit propositional equality in the proof core",
           "state": "partial",
           "evidence": [
-            "library/core/proof_check.mncs",
+            "../mncs-stdlib/library/core/proof_check.mncs",
             "docs/rfc-0007-evidence.md"
           ]
         },
@@ -1543,8 +1543,8 @@
           "text": "Kernel-checked closed Nat computation (Plus/literals)",
           "state": "satisfied",
           "evidence": [
-            "library/core/proof_check.mncs",
-            "examples/execution/proof-kernel-corpus.json"
+            "../mncs-stdlib/library/core/proof_check.mncs",
+            "../mncs-stdlib/examples/execution/proof-kernel-corpus.json"
           ]
         },
         {
@@ -1619,7 +1619,7 @@
           "text": "Proof-kernel termination by topological construction",
           "state": "satisfied",
           "evidence": [
-            "library/core/proof_term.mncs",
+            "../mncs-stdlib/library/core/proof_term.mncs",
             "docs/rfc-0007-evidence.md"
           ]
         },
@@ -1826,8 +1826,8 @@
           "text": "Portable encodings with executable round-trip laws",
           "state": "satisfied",
           "evidence": [
-            "library/std/encoding.mncs",
-            "library/core/bytes.mncs"
+            "../mncs-stdlib/library/std/encoding.mncs",
+            "../mncs-stdlib/library/core/bytes.mncs"
           ]
         },
         {
@@ -1840,7 +1840,7 @@
       "evidence_artifacts": [],
       "tests": [
         "crates/mncs-cli/tests/library_core.rs",
-        "examples/execution/library-std-encoding-corpus.json"
+        "../mncs-stdlib/examples/execution/library-std-encoding-corpus.json"
       ],
       "dependents": [
         "0007"
@@ -1963,7 +1963,7 @@
           "text": "Change-set transition and promotion decision vocabulary",
           "state": "partial",
           "evidence": [
-            "library/family/coherence.mncs"
+            "../mncs-stdlib/library/family/coherence.mncs"
           ]
         },
         {
@@ -1975,8 +1975,8 @@
       ],
       "evidence_artifacts": [],
       "tests": [
-        "examples/execution/family-coherence-promotion-corpus.json",
-        "examples/execution/family-coherence-transition-corpus.json"
+        "../mncs-stdlib/examples/execution/family-coherence-promotion-corpus.json",
+        "../mncs-stdlib/examples/execution/family-coherence-transition-corpus.json"
       ],
       "dependents": [],
       "dependencies": [
@@ -2010,7 +2010,7 @@
           "state": "partial",
           "evidence": [
             "crates/mncs-model/src/provenance.rs",
-            "library/core/lineage.mncs"
+            "../mncs-stdlib/library/core/lineage.mncs"
           ]
         },
         {
@@ -2170,8 +2170,8 @@
           "text": "Fuzz corpora with differential oracles",
           "state": "partial",
           "evidence": [
-            "examples/execution/proof-kernel-fuzz-corpus.json",
-            "scripts/gen_proof_fuzz.py"
+            "../mncs-stdlib/examples/execution/proof-kernel-fuzz-corpus.json",
+            "../mncs-stdlib/scripts/gen_proof_fuzz.py"
           ]
         },
         {
@@ -2708,7 +2708,7 @@
           "state": "satisfied",
           "evidence": [
             "docs/development-evidence/bounded-data-2026-08.md",
-            "library/core/sequences.mncs"
+            "../mncs-stdlib/library/core/sequences.mncs"
           ]
         },
         {
@@ -2948,7 +2948,7 @@
           "state": "satisfied",
           "evidence": [
             "crates/mncs-cli/tests/jit_orchestration.rs",
-            "library/jit/session.mncs"
+            "../mncs-stdlib/library/jit/session.mncs"
           ]
         },
         {
@@ -2964,7 +2964,7 @@
           "text": "Proof-aware execution metadata linked to orchestration state",
           "state": "partial",
           "evidence": [
-            "library/jit/proof.mncs"
+            "../mncs-stdlib/library/jit/proof.mncs"
           ]
         },
         {
@@ -2972,7 +2972,7 @@
           "text": "Definition retirement and redefinition/invalidation across generations",
           "state": "partial",
           "evidence": [
-            "library/jit/lifecycle.mncs"
+            "../mncs-stdlib/library/jit/lifecycle.mncs"
           ]
         }
       ],

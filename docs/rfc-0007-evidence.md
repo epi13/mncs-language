@@ -89,8 +89,8 @@ fail closed.
 
 ## The two checkers
 
-- **MNCS-native kernel** (`library/core/proof_term.mncs`,
-  `library/core/proof_check.mncs`, ~644 lines of MNCS): a single forward pass
+- **MNCS-native kernel** (`mncs-stdlib/library/core/proof_term.mncs`,
+  `mncs-stdlib/library/core/proof_check.mncs`, ~644 lines of MNCS): a single forward pass
   over the buffer carrying a memo of representatives, descriptors, literal
   values, and mention flags. All dynamic lookups are clamped and gated, so
   adversarial buffers fail closed instead of trapping.
@@ -190,7 +190,7 @@ checks the frozen artifacts.
 # Tranche 0.2 record — genuine dependency (appended; tranche 0.1 above is frozen history)
 
 Tranche 0.2 closes gaps G1, G2, G3, and G7 with a second MNCS-native kernel,
-`library/core/proof_dep.mncs` (`mncs.core.proof_dep.v2`, kernel identity
+`mncs-stdlib/library/core/proof_dep.mncs` (`mncs.core.proof_dep.v2`, kernel identity
 `mncs:proof-kernel:0.2`), specified by `docs/rfc-0007-tranche-02-calculus.md`.
 The tranche 0.1 kernel is untouched: the two kernels coexist, one per
 vocabulary, with independent corpora and independent reference checkers.
@@ -232,7 +232,7 @@ vocabulary, with independent corpora and independent reference checkers.
 
 ## The two checkers (tranche 0.2)
 
-- **MNCS-native kernel** (`library/core/proof_dep.mncs`, ~2700 lines):
+- **MNCS-native kernel** (`mncs-stdlib/library/core/proof_dep.mncs`, ~2700 lines):
   flat single-pass tables with closures.
 - **Independent reference** (`crates/mncs-model/src/proof_dep.rs`, ~2000
   lines): direct recursive evaluation with de Bruijn levels and fuel. No
@@ -250,16 +250,16 @@ vocabulary, with independent corpora and independent reference checkers.
   creates proof authority: the former `DepBinding::bind` constructor is
   removed, UNKNOWN is never upgraded, and disagreement is always a safety
   stop. Authoritative admission and binding execute in
-  `library/core/proof_admit.mncs` (`mncs.core.proof_admit.v1`) through the
+  `mncs-stdlib/library/core/proof_admit.mncs` (`mncs.core.proof_admit.v1`) through the
   MNCS toolchain; the host only transports bytes.
 - Common-mode surface (unchanged): SHA-256 identity, canonical JSON, and
   the MNCS compiler itself for executed runs.
 
 ## Measurements (tranche 0.2, as hardened)
 
-- MNCS kernel: `library/core/proof_dep.mncs` (plus `assumption_set` /
+- MNCS kernel: `mncs-stdlib/library/core/proof_dep.mncs` (plus `assumption_set` /
   `assumption_set_equal`); authoritative admission in
-  `library/core/proof_admit.mncs`; reference plus corroboration logic in
+  `mncs-stdlib/library/core/proof_admit.mncs`; reference plus corroboration logic in
   `crates/mncs-model/src/proof_dep.rs`.
 - Curated corpus: 20 cases in `examples/execution/proof-dep-corpus.json`,
   plus 21 admission/binding cases in

@@ -39,12 +39,12 @@ class FamilyProviderMetadataTests(unittest.TestCase):
                 json.loads(first)["authority"]["interface_identity"],
                 json.loads(evidence_changed)["authority"]["interface_identity"],
             )
-            source["providers"][0]["contract_revision"] = "0.18"
+            source["providers"][0]["contract_revision"] = "9.99-staleness-probe"
             source_path.write_text(json.dumps(source), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "declaration provides are stale"):
                 generator.render(source_path, ROOT / "family-semantic-contracts-v1.json")
             declaration = json.loads((ROOT / "family-semantic-contracts-v1.json").read_text(encoding="utf-8"))
-            declaration["provides"][0]["contract_revision"] = "0.18"
+            declaration["provides"][0]["contract_revision"] = "9.99-staleness-probe"
             declaration_path = root / "family-semantic-contracts-v1.json"
             declaration_path.write_text(json.dumps(declaration), encoding="utf-8")
             second = generator.render(source_path, declaration_path)

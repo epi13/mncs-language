@@ -40,7 +40,7 @@ fn main() {
         vec![
             "docs/source-profile-0.7.md: Exact-to-bounded-view borrow rule".to_owned(),
             "mncs.std.encoding.v1 read_u16_le/read_u32_le over [byte; up_to 64]".to_owned(),
-            "examples/source/subtype-windows.mncs + examples/execution/subtype-windows-corpus.json via scripts/gen_subtype_windows_corpus.py (10 cases on all five backends)".to_owned(),
+            "mncs-stdlib/examples/source/subtype-windows.mncs + mncs-stdlib/examples/execution/subtype-windows-corpus.json via mncs-stdlib/scripts/gen_subtype_windows_corpus.py (10 cases on all five backends)".to_owned(),
             "crates/mncs-cli/tests/abi_boundary.rs: exact_sequences_borrow_into_bounded_views_per_backend".to_owned(),
             "mncs-compiler borrow_tests: accept, oversize/element refusal, nested and tail-return borrows".to_owned(),
         ],

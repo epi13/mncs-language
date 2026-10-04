@@ -8,8 +8,42 @@ use std::process::Command;
 
 use serde_json::Value;
 
+/// Stage F: the `mncs-stdlib` checkout backing these tests: explicit
+/// `MNCS_STDLIB_ROOT` wins, else the `mncs-stdlib` sibling checkout.
+/// Fails closed with a clear message when absent.
+fn stdlib_checkout_dir() -> String {
+    // Test inputs need a real checkout: an explicitly empty variable
+    // (the CLI's hermetic spelling) falls through to the sibling here.
+    let explicit = std::env::var("MNCS_STDLIB_ROOT")
+        .ok()
+        .filter(|root| !root.trim().is_empty());
+    let checkout =
+        explicit.unwrap_or_else(|| format!("{}/../../../mncs-stdlib", env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        std::path::Path::new(&checkout).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    checkout
+}
+
+/// Stage F: standard-library sources now live in `mncs-stdlib/library/`.
+fn stdlib_library_dir() -> String {
+    let checkout = stdlib_checkout_dir();
+    let dir = format!("{checkout}/library");
+    assert!(
+        std::path::Path::new(&dir).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    dir
+}
+
+/// Stage F: stdlib-owned examples (fixtures/corpora) read across repos.
+fn stdlib_example(name: &str) -> String {
+    format!("{}/examples/{name}", stdlib_checkout_dir())
+}
+
 fn library_dir() -> String {
-    format!("{}/../../library", env!("CARGO_MANIFEST_DIR"))
+    stdlib_library_dir()
 }
 
 fn binary() -> Command {
@@ -37,11 +71,11 @@ fn arch_classifier_answers_all_aliases_on_every_executable_backend() {
             .args([
                 "experiment",
                 "run",
-                &example("source/arch/classify.mncs"),
+                &stdlib_example("source/arch/classify.mncs"),
                 "--backend",
                 backend,
                 "--corpus",
-                &example("execution/arch-classify-corpus.json"),
+                &stdlib_example("execution/arch-classify-corpus.json"),
             ])
             .output()
             .expect("run arch-classify experiment");
@@ -75,7 +109,7 @@ fn host_fed_bytes_classify_by_runtime_length() {
             "--backend",
             "mncs-research-bytecode",
             "--corpus",
-            &example("execution/arch-classify-host-corpus.json"),
+            &stdlib_example("execution/arch-classify-host-corpus.json"),
             "--grant-read",
             &format!(
                 "arch_reader={}/../../examples/execution/arch-blob.txt",
@@ -107,7 +141,7 @@ fn text_equality_agrees_across_layers() {
         .args([
             "check-backend-execution",
             &format!("{}/std/text_scan.mncs", library_dir()),
-            &example("execution/text-scan-corpus.json"),
+            &stdlib_example("execution/text-scan-corpus.json"),
         ])
         .output()
         .expect("run layered text-scan check");

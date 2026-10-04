@@ -10,6 +10,41 @@ use std::process::Command;
 
 use serde_json::Value;
 
+/// Stage F: the `mncs-stdlib` checkout backing these tests: explicit
+/// `MNCS_STDLIB_ROOT` wins, else the `mncs-stdlib` sibling checkout.
+/// Fails closed with a clear message when absent.
+fn stdlib_checkout_dir() -> String {
+    // Test inputs need a real checkout: an explicitly empty variable
+    // (the CLI's hermetic spelling) falls through to the sibling here.
+    let explicit = std::env::var("MNCS_STDLIB_ROOT")
+        .ok()
+        .filter(|root| !root.trim().is_empty());
+    let checkout =
+        explicit.unwrap_or_else(|| format!("{}/../../../mncs-stdlib", env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        std::path::Path::new(&checkout).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    checkout
+}
+
+/// Stage F: standard-library sources now live in `mncs-stdlib/library/`.
+fn stdlib_library_dir() -> String {
+    let checkout = stdlib_checkout_dir();
+    let dir = format!("{checkout}/library");
+    assert!(
+        std::path::Path::new(&dir).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    dir
+}
+
+/// Stage F: paths into the `mncs-stdlib` checkout (explicit
+/// `MNCS_STDLIB_ROOT` or the sibling checkout).
+fn stdlib_workspace(name: &str) -> String {
+    format!("{}/../../../mncs-stdlib/{name}", env!("CARGO_MANIFEST_DIR"))
+}
+
 fn workspace(name: &str) -> String {
     format!("{}/../../{name}", env!("CARGO_MANIFEST_DIR"))
 }
@@ -228,18 +263,15 @@ fn ledger_rfc0007_tally_matches_the_executable_gate() {
 
 fn run_status_corpus(backend: &str) -> Value {
     let output = binary()
-        .env(
-            "MNCS_LIBRARY_PATH",
-            format!("{}/../../library/", env!("CARGO_MANIFEST_DIR")),
-        )
+        .env("MNCS_LIBRARY_PATH", format!("{}/", stdlib_library_dir()))
         .args([
             "experiment",
             "run",
-            &workspace("library/family/rfc_status.mncs"),
+            &stdlib_workspace("library/family/rfc_status.mncs"),
             "--backend",
             backend,
             "--corpus",
-            &workspace("examples/execution/rfc-status-corpus.json"),
+            &stdlib_workspace("examples/execution/rfc-status-corpus.json"),
         ])
         .output()
         .expect("run status corpus");

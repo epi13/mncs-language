@@ -11,6 +11,41 @@ use std::process::Command;
 
 use serde_json::Value;
 
+/// Stage F: the `mncs-stdlib` checkout backing these tests: explicit
+/// `MNCS_STDLIB_ROOT` wins, else the `mncs-stdlib` sibling checkout.
+/// Fails closed with a clear message when absent.
+fn stdlib_checkout_dir() -> String {
+    // Test inputs need a real checkout: an explicitly empty variable
+    // (the CLI's hermetic spelling) falls through to the sibling here.
+    let explicit = std::env::var("MNCS_STDLIB_ROOT")
+        .ok()
+        .filter(|root| !root.trim().is_empty());
+    let checkout =
+        explicit.unwrap_or_else(|| format!("{}/../../../mncs-stdlib", env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        std::path::Path::new(&checkout).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    checkout
+}
+
+/// Stage F: standard-library sources now live in `mncs-stdlib/library/`.
+fn stdlib_library_dir() -> String {
+    let checkout = stdlib_checkout_dir();
+    let dir = format!("{checkout}/library");
+    assert!(
+        std::path::Path::new(&dir).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    dir
+}
+
+/// Stage F: paths into the `mncs-stdlib` checkout (explicit
+/// `MNCS_STDLIB_ROOT` or the sibling checkout).
+fn stdlib_workspace(name: &str) -> String {
+    format!("{}/../../../mncs-stdlib/{name}", env!("CARGO_MANIFEST_DIR"))
+}
+
 fn workspace(name: &str) -> String {
     format!("{}/../../{name}", env!("CARGO_MANIFEST_DIR"))
 }
@@ -21,10 +56,7 @@ fn binary() -> Command {
 
 fn conformance(args: &[&str]) -> (Option<i32>, Value, String) {
     let output = binary()
-        .env(
-            "MNCS_LIBRARY_PATH",
-            format!("{}/../../library/", env!("CARGO_MANIFEST_DIR")),
-        )
+        .env("MNCS_LIBRARY_PATH", format!("{}/", stdlib_library_dir()))
         .arg("conformance")
         .args(args)
         .output()
@@ -91,7 +123,7 @@ fn mutant_implementation_is_rejected_with_failure_exit() {
 #[test]
 fn image_laws_pass_on_portable_backends() {
     let (code, report, _) = conformance(&[
-        &workspace("library/core/image.mncs"),
+        &stdlib_workspace("library/core/image.mncs"),
         "--cases",
         "2",
         "--backends",
@@ -111,7 +143,7 @@ fn image_mutant_is_rejected_with_failure_exit() {
     // cost: one case of the self-contained broken-shift law rejects in
     // seconds under dev. The full image suite stays release-gated above.
     let (code, report, _) = conformance(&[
-        &workspace("examples/source/semantic/image_mutant.mncs"),
+        &stdlib_workspace("examples/source/semantic/image_mutant.mncs"),
         "--cases",
         "1",
         "--backends",
@@ -129,7 +161,7 @@ fn vision_mutant_is_rejected_with_failure_exit() {
     // rejects in under a minute under dev. The full vision suite stays
     // release-gated (see the module header).
     let (code, report, _) = conformance(&[
-        &workspace("examples/source/semantic/vision_mutant.mncs"),
+        &stdlib_workspace("examples/source/semantic/vision_mutant.mncs"),
         "--cases",
         "1",
         "--backends",
@@ -183,10 +215,7 @@ fn emitted_corpus_reuses_experiment_machinery() {
     // The emitted corpus executes under the pre-existing experiment runner
     // with every case expecting `true`.
     let output = binary()
-        .env(
-            "MNCS_LIBRARY_PATH",
-            format!("{}/../../library/", env!("CARGO_MANIFEST_DIR")),
-        )
+        .env("MNCS_LIBRARY_PATH", format!("{}/", stdlib_library_dir()))
         .args([
             "experiment",
             "run",

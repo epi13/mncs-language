@@ -11,8 +11,17 @@ permissions:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    # Stage F: the standard library lives in mncs-stdlib; check it out next
+    # to this repository and name it explicitly for every step.
+    env:
+      MNCS_STDLIB_ROOT: ${{ github.workspace }}/mncs-stdlib
     steps:
       - uses: actions/checkout@v4
+      - name: Check out mncs-stdlib sibling
+        uses: actions/checkout@v4
+        with:
+          repository: epi13/mncs-stdlib
+          path: mncs-stdlib
       - name: Install LLVM toolchain for external-target backends
         run: |
           if ! command -v llc >/dev/null 2>&1; then
@@ -37,25 +46,21 @@ jobs:
       - name: Validate accepted example
         run: cargo run -p mncs-cli -- validate examples/account-transfer.mncs.json
       - name: Validate extracted TUI primitives and parser consumer
-        env:
-          MNCS_LIBRARY_PATH: ${{ github.workspace }}/library
         run: |
-          cargo run -p mncs-cli -- validate library/core/partition.mncs
-          cargo run -p mncs-cli -- validate library/std/ansi.mncs
-          cargo run -p mncs-cli -- validate examples/source/ansi-parser-probe.mncs
+          cargo run -p mncs-cli -- validate ${{ github.workspace }}/mncs-stdlib/library/core/partition.mncs
+          cargo run -p mncs-cli -- validate ${{ github.workspace }}/mncs-stdlib/library/std/ansi.mncs
+          cargo run -p mncs-cli -- validate ${{ github.workspace }}/mncs-stdlib/examples/source/ansi-parser-probe.mncs
       - name: Exercise Profile 0.9 namespace binding consumer
         shell: bash
-        env:
-          MNCS_LIBRARY_PATH: ${{ github.workspace }}/library
         run: |
           set -euo pipefail
-          cargo run -p mncs-cli -- source-study examples/source/profile09-stdlib-namespace-consumer.mncs > /tmp/mncs-profile09-study.json
+          cargo run -p mncs-cli -- source-study ${{ github.workspace }}/mncs-stdlib/examples/source/profile09-stdlib-namespace-consumer.mncs > /tmp/mncs-profile09-study.json
           jq -e '.binding_table.schema_version == "0.1" and ([.binding_table.references[] | select(.provenance == "aliased")] | length) > 0' /tmp/mncs-profile09-study.json
           for backend in mncs-research-bytecode mncs-portable-wasm-mvp; do
             output_dir="/tmp/mncs-profile09-consumer-${backend#mncs-}"
-            cargo run -p mncs-cli -- experiment run examples/source/profile09-stdlib-namespace-consumer.mncs \
+            cargo run -p mncs-cli -- experiment run ${{ github.workspace }}/mncs-stdlib/examples/source/profile09-stdlib-namespace-consumer.mncs \
               --backend "$backend" \
-              --corpus examples/execution/profile09-stdlib-namespace-consumer-corpus.json \
+              --corpus ${{ github.workspace }}/mncs-stdlib/examples/execution/profile09-stdlib-namespace-consumer-corpus.json \
               --output-dir "$output_dir"
             jq -e '.status == "PASS" and ([.cases[] | select(.expectation_met == true)] | length) == 1' "$output_dir/result.json"
           done
@@ -64,9 +69,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/mncs-partition-ci
-          timeout 600s cargo run -p mncs-cli -- experiment run library/core/partition.mncs \
+          timeout 600s cargo run -p mncs-cli -- experiment run ${{ github.workspace }}/mncs-stdlib/library/core/partition.mncs \
             --backend mncs-research-bytecode \
-            --corpus examples/execution/partition-corpus.json \
+            --corpus ${{ github.workspace }}/mncs-stdlib/examples/execution/partition-corpus.json \
             --output-dir /tmp/mncs-partition-ci \
             > /tmp/mncs-partition-ci/stdout.json
           jq -e '.cases | length == 2 and all(.[]; .status == "returned" and .expectation_met == true and .status_met == true)' \
@@ -80,8 +85,6 @@ jobs:
           fi
       - name: Exercise semantic conformance
         shell: bash
-        env:
-          MNCS_LIBRARY_PATH: ${{ github.workspace }}/library
         run: |
           set -euo pipefail
           # Arithmetic contracts pass on every executable backend; the mutant
@@ -110,8 +113,6 @@ jobs:
           jq -e '.status == "PASS"' /tmp/mncs-conformance-corpus/result.json
       - name: Exercise image and vision semantic laws (release)
         shell: bash
-        env:
-          MNCS_LIBRARY_PATH: ${{ github.workspace }}/library
         run: |
           set -euo pipefail
           cargo build --release -p mncs-cli
@@ -121,11 +122,11 @@ jobs:
           # Neither suite could complete at all before the executor
           # identity-cache fix, which removed per-call full-module
           # re-fingerprinting from nested SSA execution.
-          timeout 1200s ./target/release/mncs conformance library/core/image.mncs \
+          timeout 1200s ./target/release/mncs conformance ${{ github.workspace }}/mncs-stdlib/library/core/image.mncs \
             --cases 3 --backends mncs-portable-wasm-mvp,mncs-research-bytecode \
             --step-budget 200000 --output /tmp/mncs-conformance-image.json > /dev/null
           jq -e '.summary.fail == 0 and .summary.pass > 0' /tmp/mncs-conformance-image.json
-          timeout 1200s ./target/release/mncs conformance library/core/vision.mncs \
+          timeout 1200s ./target/release/mncs conformance ${{ github.workspace }}/mncs-stdlib/library/core/vision.mncs \
             --cases 4 --backends mncs-portable-wasm-mvp,mncs-research-bytecode \
             --step-budget 8000000 --output /tmp/mncs-conformance-vision.json > /dev/null
           jq -e '.summary.fail == 0 and .summary.pass > 0' /tmp/mncs-conformance-vision.json

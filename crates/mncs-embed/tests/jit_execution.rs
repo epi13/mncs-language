@@ -3,7 +3,7 @@
 //! Architecture under test: the JIT orchestration layer (session,
 //! generations, bindings, invalidation, planning, profiling,
 //! proof-aware publication, lifecycle) is implemented in MNCS
-//! (`library/jit/`). Rust is only the thin provider driver: it
+//! (`mncs-stdlib/library/jit/`). Rust is only the thin provider driver: it
 //! compiles definition sources through the existing bootstrap
 //! pipeline, invokes compiled artifacts, supplies wall-clock
 //! observations and content fingerprints, and threads the MNCS-owned
@@ -31,13 +31,42 @@ use mncs_model::ArtifactRepresentation;
 use mncs_syntax::{SourceArtifactKind, SourceEnvelope, SourceOrigin, SourceOriginKind};
 use serde_json::{json, Value};
 
+/// Stage F: the `mncs-stdlib` checkout backing these tests: explicit
+/// `MNCS_STDLIB_ROOT` wins, else the `mncs-stdlib` sibling checkout.
+/// Fails closed with a clear message when absent.
+fn stdlib_checkout_dir() -> String {
+    // Test inputs need a real checkout: an explicitly empty variable
+    // (the CLI's hermetic spelling) falls through to the sibling here.
+    let explicit = std::env::var("MNCS_STDLIB_ROOT")
+        .ok()
+        .filter(|root| !root.trim().is_empty());
+    let checkout =
+        explicit.unwrap_or_else(|| format!("{}/../../../mncs-stdlib", env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        std::path::Path::new(&checkout).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    checkout
+}
+
+/// Stage F: standard-library sources now live in `mncs-stdlib/library/`.
+fn stdlib_library_dir() -> String {
+    let checkout = stdlib_checkout_dir();
+    let dir = format!("{checkout}/library");
+    assert!(
+        std::path::Path::new(&dir).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    dir
+}
+
 // ---------------------------------------------------------------------------
 // Library resolution (test-side only; mirrors the CLI FileModuleResolver
-// candidate for `library/jit/<name>.mncs`).
+// candidate for `mncs-stdlib/library/jit/<name>.mncs`).
 // ---------------------------------------------------------------------------
 
 fn library_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library")
+    PathBuf::from(stdlib_library_dir())
 }
 
 struct JitLibraryResolver {
@@ -82,7 +111,7 @@ impl ModuleResolver for JitLibraryResolver {
 // ---------------------------------------------------------------------------
 
 /// Compile the MNCS JIT orchestration program (rooted at
-/// `library/jit/binding.mncs`, which transitively links session,
+/// `mncs-stdlib/library/jit/binding.mncs`, which transitively links session,
 /// depends, lifecycle, proof, types, and logic) to a backend artifact.
 fn compile_orchestration(backend: &str) -> (Artifact, u128) {
     let root = library_root();

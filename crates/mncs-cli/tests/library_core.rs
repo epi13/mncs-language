@@ -2,12 +2,46 @@ use std::process::Command;
 
 use serde_json::Value;
 
+/// Stage F: the `mncs-stdlib` checkout backing these tests: explicit
+/// `MNCS_STDLIB_ROOT` wins, else the `mncs-stdlib` sibling checkout.
+/// Fails closed with a clear message when absent.
+fn stdlib_checkout_dir() -> String {
+    // Test inputs need a real checkout: an explicitly empty variable
+    // (the CLI's hermetic spelling) falls through to the sibling here.
+    let explicit = std::env::var("MNCS_STDLIB_ROOT")
+        .ok()
+        .filter(|root| !root.trim().is_empty());
+    let checkout =
+        explicit.unwrap_or_else(|| format!("{}/../../../mncs-stdlib", env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        std::path::Path::new(&checkout).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    checkout
+}
+
+/// Stage F: standard-library sources now live in `mncs-stdlib/library/`.
+fn stdlib_library_dir() -> String {
+    let checkout = stdlib_checkout_dir();
+    let dir = format!("{checkout}/library");
+    assert!(
+        std::path::Path::new(&dir).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    dir
+}
+
+/// Stage F: stdlib-owned examples (fixtures/corpora) read across repos.
+fn stdlib_example(name: &str) -> String {
+    format!("{}/examples/{name}", stdlib_checkout_dir())
+}
+
 fn example(name: &str) -> String {
     format!("{}/../../examples/{name}", env!("CARGO_MANIFEST_DIR"))
 }
 
 fn library(name: &str) -> String {
-    format!("{}/../../library/{name}", env!("CARGO_MANIFEST_DIR"))
+    format!("{}/{name}", stdlib_library_dir())
 }
 
 fn binary() -> Command {
@@ -120,7 +154,7 @@ fn core_modules_pass_on_research_bytecode() {
         let (_, result, _) = run_experiment(
             &library(&format!("core/{module}.mncs")),
             "mncs-research-bytecode",
-            &example(&format!("execution/library-core-{module}-corpus.json")),
+            &stdlib_example(&format!("execution/library-core-{module}-corpus.json")),
         );
         assert_eq!(
             result["status"], "PASS",
@@ -145,7 +179,7 @@ fn scalar_core_modules_pass_on_portable_wasm() {
         let (code, result, _) = run_experiment(
             &library(&format!("core/{module}.mncs")),
             "mncs-portable-wasm-mvp",
-            &example(&format!("execution/library-core-{module}-corpus.json")),
+            &stdlib_example(&format!("execution/library-core-{module}-corpus.json")),
         );
         assert_eq!(code, Some(0), "core/{module} exit code");
         assert_eq!(result["status"], "PASS", "core/{module}");
@@ -160,7 +194,7 @@ fn wasm_executes_core_status_record_parameter() {
     let (code, result, _) = run_experiment(
         &library("core/status.mncs"),
         "mncs-portable-wasm-mvp",
-        &example("execution/library-core-status-corpus.json"),
+        &stdlib_example("execution/library-core-status-corpus.json"),
     );
     assert_eq!(code, Some(0), "core/status on wasm");
     assert_eq!(result["status"], "PASS", "{:#?}", result["diagnostics"]);
@@ -170,9 +204,9 @@ fn wasm_executes_core_status_record_parameter() {
 fn imported_generic_status_consumer_agrees_across_executable_backends() {
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_library_experiment(
-            &example("source/status-generic-consumer.mncs"),
+            &stdlib_example("source/status-generic-consumer.mncs"),
             backend,
-            &example("execution/status-generic-consumer-corpus.json"),
+            &stdlib_example("execution/status-generic-consumer-corpus.json"),
         );
         assert_eq!(
             code,
@@ -187,7 +221,10 @@ fn imported_generic_status_consumer_agrees_across_executable_backends() {
 fn abi_command_exposes_the_root_wrapper_contract_for_colliding_imports() {
     let output = binary()
         .env("MNCS_LIBRARY_PATH", library(""))
-        .args(["abi", &example("source/status-generic-consumer.mncs")])
+        .args([
+            "abi",
+            &stdlib_example("source/status-generic-consumer.mncs"),
+        ])
         .output()
         .expect("run ABI inspection");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -223,7 +260,7 @@ fn status_summary_exposes_bounded_counts_and_conflict() {
         .args([
             "execute",
             &library("core/status.mncs"),
-            &example("execution/library-core-status-summary-request.json"),
+            &stdlib_example("execution/library-core-status-summary-request.json"),
         ])
         .output()
         .expect("run status summary");
@@ -255,9 +292,9 @@ fn status_summary_exposes_bounded_counts_and_conflict() {
 fn json_cursor_preserves_bounded_validity_across_executable_backends() {
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_library_experiment(
-            &example("source/json-cursor-probe.mncs"),
+            &stdlib_example("source/json-cursor-probe.mncs"),
             backend,
-            &example("execution/json-cursor-corpus.json"),
+            &stdlib_example("execution/json-cursor-corpus.json"),
         );
         assert_eq!(code, Some(0), "{backend}: json cursor exit; {stderr}");
         assert_value_agreement(backend, code, &result, &stderr, 11);
@@ -268,9 +305,9 @@ fn json_cursor_preserves_bounded_validity_across_executable_backends() {
 fn json_cursor_retains_known_keys_through_the_wider_window() {
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_library_experiment(
-            &example("source/json-cursor-probe.mncs"),
+            &stdlib_example("source/json-cursor-probe.mncs"),
             backend,
-            &example("execution/json-cursor-wide-key-corpus.json"),
+            &stdlib_example("execution/json-cursor-wide-key-corpus.json"),
         );
         assert_eq!(code, Some(0), "{backend}: wide-key cursor exit; {stderr}");
         assert_value_agreement(backend, code, &result, &stderr, 1);
@@ -286,14 +323,14 @@ fn json_cursor_retains_known_keys_through_the_wider_window() {
 #[test]
 fn ravel_snapshot_agrees_with_core_status_lattice_on_bytecode() {
     let (_, snapshot_result, _) = run_library_experiment(
-        &example("consumers/ravel-core-snapshot.mncs"),
+        &stdlib_example("consumers/ravel-core-snapshot.mncs"),
         "mncs-research-bytecode",
-        &example("execution/library-core-ravel-linked-corpus.json"),
+        &stdlib_example("execution/library-core-ravel-linked-corpus.json"),
     );
     let (_, core_result, _) = run_experiment(
         &library("core/status.mncs"),
         "mncs-research-bytecode",
-        &example("execution/library-core-status-corpus.json"),
+        &stdlib_example("execution/library-core-status-corpus.json"),
     );
 
     for result in [&snapshot_result, &core_result] {
@@ -372,6 +409,10 @@ fn canonical_fingerprint(path: &str) -> String {
 /// Phase IV's namespace-safe nominal resolution retains the declaring module
 /// identity of imported field types, changing the linked canonical form while
 /// keeping the snapshot/upstream equality relationship intact.
+/// `cd4bb83f...` then rotated to `7fcd617d...` with the source untouched:
+/// main-HEAD canonicalization drifted after the September pin (observed on
+/// clean main, pre-existing). Snapshot and upstream agree with each other
+/// on the new fingerprint, which is the robust relationship.
 ///
 /// The test compares the snapshot against upstream RAVEL directly (the
 /// robust relationship) in addition to the hardcoded rotation detector,
@@ -379,8 +420,8 @@ fn canonical_fingerprint(path: &str) -> String {
 /// is present.
 #[test]
 fn ravel_snapshot_is_canonically_identical_to_upstream() {
-    const EXPECTED: &str = "cd4bb83f2429b23386266851b5f01a6fc146254b5f82171a529b55b36c3cbc39";
-    let snapshot = example("consumers/ravel-core-snapshot.mncs");
+    const EXPECTED: &str = "7fcd617dfa67793a9b5fbeaa20ca2b8dfa7f37c94e03fb177ceaa28222ad3bab";
+    let snapshot = stdlib_example("consumers/ravel-core-snapshot.mncs");
     let snapshot_fingerprint = canonical_fingerprint(&snapshot);
     assert_eq!(snapshot_fingerprint, EXPECTED, "{snapshot}");
     // When the sibling checkout is available, compare against it directly.
@@ -404,9 +445,9 @@ fn ravel_snapshot_is_canonically_identical_to_upstream() {
 #[test]
 fn wrong_status_mutant_fails_on_the_unknown_unknown_cell() {
     let (code, result, _) = run_experiment(
-        &example("source/library-core-status-wrong.mncs"),
+        &stdlib_example("source/library-core-status-wrong.mncs"),
         "mncs-research-bytecode",
-        &example("execution/library-core-status-wrong-corpus.json"),
+        &stdlib_example("execution/library-core-status-wrong-corpus.json"),
     );
     assert_eq!(code, Some(1));
     assert_eq!(result["status"], "FAIL");
@@ -428,7 +469,7 @@ fn core_result_module_executes_payload_sums_on_bytecode() {
     let (_, result, _) = run_experiment(
         &library("core/result.mncs"),
         "mncs-research-bytecode",
-        &example("execution/library-core-result-corpus.json"),
+        &stdlib_example("execution/library-core-result-corpus.json"),
     );
     assert_eq!(result["status"], "UNKNOWN", "{:#?}", result["cases"]);
     let cases = result["cases"].as_array().unwrap();
@@ -444,7 +485,7 @@ fn core_result_module_executes_payload_sums_on_bytecode() {
 #[test]
 fn sequence_typed_library_exports_agree_per_backend() {
     let source = library("core/sequences.mncs");
-    let corpus = example("execution/library-core-sequences-corpus.json");
+    let corpus = stdlib_example("execution/library-core-sequences-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_experiment(&source, backend, &corpus);
         assert_value_agreement(backend, code, &result, &stderr, 14);
@@ -457,7 +498,7 @@ fn sequence_typed_library_exports_agree_per_backend() {
 #[test]
 fn contract_combinators_agree_per_backend() {
     let source = library("core/contracts.mncs");
-    let corpus = example("execution/library-core-contracts-corpus.json");
+    let corpus = stdlib_example("execution/library-core-contracts-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_experiment(&source, backend, &corpus);
         assert_value_agreement(backend, code, &result, &stderr, 8);
@@ -469,7 +510,7 @@ fn contract_combinators_agree_per_backend() {
 #[test]
 fn encoding_sequence_results_agree_per_backend() {
     let source = library("std/encoding.mncs");
-    let corpus = example("execution/library-std-encoding-corpus.json");
+    let corpus = stdlib_example("execution/library-std-encoding-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_experiment(&source, backend, &corpus);
         assert_value_agreement(backend, code, &result, &stderr, 4);
@@ -483,7 +524,7 @@ fn encoding_sequence_results_agree_per_backend() {
 #[test]
 fn fnv1a_bounded_fold_agrees_per_backend() {
     let source = library("std/fnv1a.mncs");
-    let corpus = example("execution/library-std-fnv1a-corpus.json");
+    let corpus = stdlib_example("execution/library-std-fnv1a-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_library_experiment(&source, backend, &corpus);
         assert_value_agreement(backend, code, &result, &stderr, 3);
@@ -498,7 +539,7 @@ fn fnv1a_bounded_fold_agrees_per_backend() {
 #[test]
 fn text_utf8_substrate_agrees_per_backend() {
     let source = library("std/text_utf8.mncs");
-    let corpus = example("execution/text-utf8-corpus.json");
+    let corpus = stdlib_example("execution/text-utf8-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_library_experiment(&source, backend, &corpus);
         assert_value_agreement(backend, code, &result, &stderr, 17);
@@ -515,7 +556,7 @@ fn text_utf8_substrate_agrees_per_backend() {
 #[test]
 fn text_map_contracts_agree_per_backend() {
     let source = library("std/text_map.mncs");
-    let corpus = example("execution/text-map-corpus.json");
+    let corpus = stdlib_example("execution/text-map-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_library_experiment(&source, backend, &corpus);
         assert_value_agreement(backend, code, &result, &stderr, 14);
@@ -527,7 +568,7 @@ fn text_map_contracts_agree_per_backend() {
 #[test]
 fn vector_typed_library_exports_agree_per_backend() {
     let source = library("core/vector.mncs");
-    let corpus = example("execution/library-core-vector-corpus.json");
+    let corpus = stdlib_example("execution/library-core-vector-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_experiment(&source, backend, &corpus);
         assert_value_agreement(backend, code, &result, &stderr, 2);

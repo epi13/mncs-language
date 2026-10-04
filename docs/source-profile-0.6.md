@@ -226,9 +226,12 @@ never touches the filesystem itself. Hosts choose their own layout rules:
   path, an `mncs.`-prefix-stripped path, then `<tail>.mncs`;
 - after those source-local roots, the research CLI searches each directory
   listed in the `MNCS_LIBRARY_PATH` environment variable (`:`-separated, in
-  order). This is how external consumers bind to `mncs.core.*` without
-  vendoring the standard-library tree: point `MNCS_LIBRARY_PATH` at this
-  repository's `library/` directory;
+  order), then the discovered standard-library root: `MNCS_STDLIB_ROOT`
+  when set (naming the `mncs-stdlib` checkout), else the `mncs-stdlib`
+  sibling of the language checkout backing the binary. This is how
+  external consumers bind to `mncs.core.*` without vendoring the
+  standard-library tree: the toolchain knows where the library lives,
+  and explicit roots compose with (never shadow) the default;
 - language-service hosts may resolve against resident workspace documents.
 
 The resolver may use a version-tail alias: `use mncs.core.ordering` may select
@@ -256,9 +259,10 @@ order; candidates within a root in the fixed spelling order above), so the
 same tree always resolves the same way.
 
 Installed and distributed consumers resolve through the same mechanism: a
-deployment that ships the compiler alongside the `library/` tree points
-`MNCS_LIBRARY_PATH` at that tree (exactly as the test suite points it at
-this repository's `library/`). Successful source studies expose
+deployment that ships the compiler alongside the `mncs-stdlib` checkout
+resolves through the discovered default (or an explicit
+`MNCS_STDLIB_ROOT` / `MNCS_LIBRARY_PATH` entry, or the bundle pin).
+Successful source studies expose
 `module_resolutions` — requested and declared names, source identity,
 logical source name, module identity, and the linked module fingerprint —
 so build and evidence pipelines record the actual resolved identity rather

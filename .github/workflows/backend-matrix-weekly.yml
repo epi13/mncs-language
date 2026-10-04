@@ -16,10 +16,17 @@ permissions:
 jobs:
   matrix:
     runs-on: ubuntu-latest
+    # Stage F: the standard library lives in mncs-stdlib; check it out next
+    # to this repository and name it explicitly for every step.
     env:
-      MNCS_LIBRARY_PATH: ${{ github.workspace }}/library
+      MNCS_STDLIB_ROOT: ${{ github.workspace }}/mncs-stdlib
     steps:
       - uses: actions/checkout@v4
+      - name: Check out mncs-stdlib sibling
+        uses: actions/checkout@v4
+        with:
+          repository: epi13/mncs-stdlib
+          path: mncs-stdlib
       - name: Install LLVM toolchain for external-target backends
         run: |
           if ! command -v llc >/dev/null 2>&1; then
@@ -35,6 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           MNCS=./target/release/mncs
+          STDLIB="${GITHUB_WORKSPACE}/mncs-stdlib"
           check() {
             local program="$1" corpus="$2" extra="${3:-}"
             for backend in mncs-research-bytecode mncs-portable-wasm-mvp mncs-c11 mncs-llvm-ir mncs-cranelift; do
@@ -48,25 +56,25 @@ jobs:
               echo "MATRIX PASS: $program $backend"
             done
           }
-          check examples/source/arch/classify.mncs examples/execution/arch-classify-corpus.json
-          check library/std/token_set.mncs examples/execution/token-set-corpus.json
-          check examples/source/fleet-tokens.mncs examples/execution/fleet-tokens-corpus.json
-          check library/std/text_scan.mncs examples/execution/text-scan-corpus.json
-          check examples/source/host-read-scan.mncs examples/execution/host-read-scan-corpus.json \
+          check "$STDLIB/examples/source/arch/classify.mncs" "$STDLIB/examples/execution/arch-classify-corpus.json"
+          check "$STDLIB/library/std/token_set.mncs" "$STDLIB/examples/execution/token-set-corpus.json"
+          check "$STDLIB/examples/source/fleet-tokens.mncs" "$STDLIB/examples/execution/fleet-tokens-corpus.json"
+          check "$STDLIB/library/std/text_scan.mncs" "$STDLIB/examples/execution/text-scan-corpus.json"
+          check "$STDLIB/examples/source/host-read-scan.mncs" "$STDLIB/examples/execution/host-read-scan-corpus.json" \
             "--grant-read note_reader=examples/execution/host-read-note.txt"
           check examples/source/host-write-append.mncs examples/execution/host-write-append-corpus.json \
             "--grant-write ledger_writer=/tmp/matrix-ledger.bin"
-          check examples/source/clock-scan.mncs examples/execution/clock-scan-corpus.json \
+          check "$STDLIB/examples/source/clock-scan.mncs" "$STDLIB/examples/execution/clock-scan-corpus.json" \
             "--grant-time ticker"
           check examples/source/crypto-verify.mncs examples/execution/crypto-verify-corpus.json \
             "--grant-crypto verifier"
-          check library/std/scope.mncs examples/execution/scope-corpus.json
-          check library/std/channel.mncs examples/execution/channel-corpus.json
-          check library/std/chunk.mncs examples/execution/chunk-corpus.json
-          check library/std/sort.mncs examples/execution/sort-corpus.json
-          check library/std/relation.mncs examples/execution/relation-corpus.json
-          check library/std/sha256.mncs examples/execution/sha256-corpus.json
-          check library/std/store.mncs examples/execution/store-corpus.json
+          check "$STDLIB/library/std/scope.mncs" "$STDLIB/examples/execution/scope-corpus.json"
+          check "$STDLIB/library/std/channel.mncs" "$STDLIB/examples/execution/channel-corpus.json"
+          check "$STDLIB/library/std/chunk.mncs" "$STDLIB/examples/execution/chunk-corpus.json"
+          check "$STDLIB/library/std/sort.mncs" "$STDLIB/examples/execution/sort-corpus.json"
+          check "$STDLIB/library/std/relation.mncs" "$STDLIB/examples/execution/relation-corpus.json"
+          check "$STDLIB/library/std/sha256.mncs" "$STDLIB/examples/execution/sha256-corpus.json"
+          check "$STDLIB/library/std/store.mncs" "$STDLIB/examples/execution/store-corpus.json"
           check examples/source/fs-scan.mncs examples/execution/fs-scan-corpus.json \
             "--grant-fs fs_root=examples/fs-fixture"
       - name: Machine-readable backend envelope

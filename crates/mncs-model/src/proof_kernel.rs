@@ -1,8 +1,8 @@
 //! RFC 0007 proof-core bootstrap: canonical artifacts, the independent
 //! reference checker, and proof-bound evidence.
 //!
-//! The MNCS-native kernel lives in `library/core/proof_term.mncs` and
-//! `library/core/proof_check.mncs`; this module is bootstrap debt by design:
+//! The MNCS-native kernel lives in `mncs-stdlib/library/core/proof_term.mncs` and
+//! `mncs-stdlib/library/core/proof_check.mncs`; this module is bootstrap debt by design:
 //! canonical serialization, content identity, a second checker implementation
 //! for differential validation, and the bridge that binds kernel verdicts to
 //! compiler obligations. Every item here is inventoried in
@@ -1096,6 +1096,19 @@ mod tests {
     use super::*;
     use crate::validation::tests::valid_program;
 
+    /// Stage F: stdlib-owned corpora read across repos from the
+    /// `mncs-stdlib` checkout (explicit `MNCS_STDLIB_ROOT` or sibling).
+    fn stdlib_checkout_dir() -> std::path::PathBuf {
+        // Test inputs need a real checkout: an explicitly empty variable
+        // (the CLI's hermetic spelling) falls through to the sibling here.
+        if let Ok(root) = std::env::var("MNCS_STDLIB_ROOT") {
+            if !root.trim().is_empty() {
+                return std::path::PathBuf::from(root);
+            }
+        }
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../mncs-stdlib")
+    }
+
     fn test_cells() -> Vec<ProofCell> {
         // Eq Nat Zero Zero by Refl, padded to the buffer capacity.
         let mut cells = vec![
@@ -1131,8 +1144,8 @@ mod tests {
     #[test]
     fn reference_agrees_with_checked_in_corpus_expectations() {
         let path = format!(
-            "{}/../../examples/execution/proof-kernel-corpus.json",
-            env!("CARGO_MANIFEST_DIR")
+            "{}/examples/execution/proof-kernel-corpus.json",
+            stdlib_checkout_dir().display()
         );
         let text = std::fs::read_to_string(&path).expect("proof kernel corpus");
         let cases = parse_proof_corpus(&text).expect("parse proof kernel corpus");

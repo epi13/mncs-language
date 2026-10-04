@@ -1,6 +1,6 @@
 # RFC 0007 Tranche 0.2 — Genuine Dependency: calculus specification
 
-Status: **implementing**. Companion to `library/core/proof_dep.mncs`
+Status: **implementing**. Companion to `mncs-stdlib/library/core/proof_dep.mncs`
 (`mncs.core.proof_dep.v2`, kernel `mncs:proof-kernel:0.2`) and
 `crates/mncs-model/src/proof_dep.rs` (independent reference checker).
 Tranche 0.1 (`proof_term.v1` / `proof_check.v1`, kernel `0.1`) is frozen,

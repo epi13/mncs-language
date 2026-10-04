@@ -23,11 +23,24 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// Stage F: the `mncs-stdlib` checkout (explicit `MNCS_STDLIB_ROOT` or
+/// the sibling checkout).
+fn stdlib_root() -> PathBuf {
+    if let Ok(root) = std::env::var("MNCS_STDLIB_ROOT") {
+        if !root.trim().is_empty() {
+            return PathBuf::from(root);
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join("mncs-stdlib")
+}
+
 fn mncs() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_mncs"));
     command.env(
         "MNCS_LIBRARY_PATH",
-        repo_root().join("library").display().to_string(),
+        stdlib_root().join("library").display().to_string(),
     );
     command
 }
@@ -138,7 +151,7 @@ fn discover_obligation_and_operation(ssa: &serde_json::Value) -> (String, String
 
 fn open_refl_artifact(obligation: &str) -> DepArtifact {
     let text =
-        std::fs::read_to_string(repo_root().join("examples/execution/proof-dep-corpus.json"))
+        std::fs::read_to_string(stdlib_root().join("examples/execution/proof-dep-corpus.json"))
             .expect("proof-dep corpus");
     let cases = parse_proof_dep_corpus(&text).expect("parse corpus");
     let case = cases
@@ -435,7 +448,7 @@ fn proof_ingestion_rejects_tampered_seal() {
 fn proof_ingestion_rejects_fail_artifact() {
     let dir = scratch_dir("failproof");
     let text =
-        std::fs::read_to_string(repo_root().join("examples/execution/proof-dep-corpus.json"))
+        std::fs::read_to_string(stdlib_root().join("examples/execution/proof-dep-corpus.json"))
             .expect("proof-dep corpus");
     let cases = parse_proof_dep_corpus(&text).expect("parse corpus");
     let case = cases

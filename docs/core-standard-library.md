@@ -1,6 +1,16 @@
 # Core Standard Library Direction
 
-Status: **research-active / partially realized** (2026-08-27).
+Status: **boundary history — Stage F executed 2026-10-02** (was:
+research-active / partially realized, 2026-08-27).
+
+The library implementation and library-owned contracts moved to the
+independently owned `mncs-stdlib` repository (see
+`mncs-stdlib/ARCHITECTURE.md` and
+`mncs-stdlib/rfcs/0001-stdlib-extraction.md`). What follows is
+preserved as the direction record that earned the split: layering,
+the intrinsic boundary, identity and evidence rules, and non-goals.
+Module ground truth now lives in `mncs-stdlib/library/`; the
+conformance harnesses stay here and read across repositories.
 
 The current tranche is Profile 0.10 explicit polymorphism over the bounded
 sequence/view substrate. Overlapping core exports can still be consumed
@@ -370,12 +380,14 @@ Status: **planned / incremental**.
 
 ### Stage F — package stabilization and possible repository split
 
-Status: **future**.
+Status: **executed 2026-10-02** (was: future).
 
 - stabilize package/module identity and compatibility rules;
 - define release/version/signing/provenance policy as required;
 - make language-service resolution robust across library versions;
-- evaluate `mncs-stdlib` as a separate MNCS-family repository;
+- ~~evaluate `mncs-stdlib` as a separate MNCS-family repository~~
+  **done**: `mncs-stdlib` is the independently owned standard-library
+  repository (see `mncs-stdlib/rfcs/0001-stdlib-extraction.md`);
 - begin stronger self-hosting experiments using the stabilized library substrate.
 
 ## Initial implementation candidates
@@ -420,7 +432,9 @@ This track does not:
 - treat WASM as the canonical target;
 - let Forge or backend intrinsics define library semantics;
 - claim a production-ready stdlib before memory, storage, allocation, package, and compatibility semantics are mature;
-- move to a separate repository before the semantic/package boundary is stable;
+- ~~move to a separate repository before the semantic/package boundary is stable~~
+  (retired at Stage F: the module system, content-addressed bundle pin,
+  and profile mechanism constituted the stable boundary);
 - treat self-hosting as removal of bootstrap trust.
 
 The standard library should become a proving ground for the same central MNCS idea as the compiler itself: **stable explicit semantics, multiple evidence-bearing realizations, and machine-oriented freedom without hidden meaning or authority.**

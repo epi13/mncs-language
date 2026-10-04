@@ -98,7 +98,7 @@ generic gap as the next design boundary.
   modules with overlapping `clamp_i64` exports.
 - `examples/execution/profile09-stdlib-namespace-consumer-corpus.json` is its
   bounded research-bytecode and portable-WASM experiment corpus.
-- `library/core/bounds.mncs` intentionally adds namespace pressure without
+- `mncs-stdlib/library/core/bounds.mncs` intentionally adds namespace pressure without
   introducing arithmetic or unresolved contract obligations.
 - `crates/mncs-compiler/tests/module_imports.rs` covers qualified calls,
   duplicate fail-closed behavior, aliases, nominal type/variant identity,

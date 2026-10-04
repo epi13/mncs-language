@@ -39,7 +39,8 @@ An MNCS-oriented program should make it possible to answer:
 - `crates/mncs-syntax/` — source envelopes, lossless tokens/CST, a bounded spanned AST/parser, and deterministic source-representation metrics.
 - `crates/mncs-cli/` — validation, canonicalization, identity, graph/CFG, evidence, IR, SSA, obligation, verification, comparison, diagnostic, diff, compile, backend execution, translation validation, and syntax-tournament commands.
 - `examples/` — semantic manifests, competing source candidates, canonical semantic forms, machine-intent sketches, and semantic patches.
-- `library/` — the MNCS standard library written in MNCS source itself (`mncs.core.status/logic/ordering/result.v1`, Profile 0.5/0.6; bounded data and encoding in Profile 0.7, sequence-/view-typed exports; vector/mask kernels in Profile 0.8; namespace-aware consumers in Profile 0.9; explicit generic sequence/geometry primitives in Profile 0.10; weighted partitioning and generic ANSI/VT events), with bounded corpora under `examples/execution/`. See [the library README](library/README.md), [the core standard-library direction](docs/core-standard-library.md), [Source Profile 0.7](docs/source-profile-0.7.md), [Source Profile 0.8](docs/source-profile-0.8.md), [Source Profile 0.9](docs/source-profile-0.9.md), and [Source Profile 0.10](docs/source-profile-0.10.md).
+- `mncs-stdlib` (sibling repository) — the MNCS standard library written in MNCS source itself (61 modules across `mncs.core`/`mncs.std`/`mncs.family`/`mncs.jit`), resolved by this toolchain from the sibling checkout, `MNCS_STDLIB_ROOT`, or the content-addressed bundle pin. See [the core standard-library direction](docs/core-standard-library.md) for the boundary history, [Source Profile 0.7](docs/source-profile-0.7.md), [Source Profile 0.8](docs/source-profile-0.8.md), [Source Profile 0.9](docs/source-profile-0.9.md), and [Source Profile 0.10](docs/source-profile-0.10.md).
+- `stdlib-pin/` — the vendored stdlib bundle pin (lockfile, identity-checked; canonical pin owned by `mncs-stdlib`).
 
 Canonical semantic JSON remains an experimental bootstrap transport. Source Profile 0.1 is an executable but intentionally narrow grammar experiment, not a selected production grammar.
 
@@ -225,8 +226,8 @@ exports bind under collision rules, identities stay anchored to their
 declaring module (`Function.home_module`, `Program.dependencies`), and
 authority closure applies across module boundaries. The `source-study` command
 also reports deterministic module-resolution provenance, and
-`examples/source/library-consumer.mncs` is a runnable external-consumer
-witness. See
+`mncs-stdlib/examples/source/library-consumer.mncs` is a runnable
+external-consumer witness. See
 `docs/source-profile-0.6.md`. MNEL (`epi13/Machine-Native-Experimental-Learning`)
 is the active proving ground for this profile: its MNCS-native
 reconstruction spans eleven linked modules, and its conversion record

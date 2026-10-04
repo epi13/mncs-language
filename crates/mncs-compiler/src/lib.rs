@@ -1469,13 +1469,17 @@ mod tests {
         impl ModuleResolver for StatusResolver {
             fn resolve(&self, module: &str) -> Option<SourceEnvelope> {
                 (module == "mncs.core.status.v1").then(|| {
+                    // Stage F: resolve the stdlib module from the vendored
+                    // pin (hermetic; no sibling checkout required).
+                    let bundle = crate::bundle::pinned_bundle().expect("stdlib pin");
+                    let envelope = bundle
+                        .resolver()
+                        .resolve("mncs.core.status.v1")
+                        .expect("status module in pin");
                     SourceEnvelope::inline(
                         SourceArtifactKind::Program,
                         "mncs.core.status.v1",
-                        include_str!(concat!(
-                            env!("CARGO_MANIFEST_DIR"),
-                            "/../../library/core/status.mncs"
-                        )),
+                        envelope.text,
                     )
                 })
             }
@@ -1520,13 +1524,17 @@ mod tests {
         impl ModuleResolver for StatusResolver {
             fn resolve(&self, module: &str) -> Option<SourceEnvelope> {
                 (module == "mncs.core.status.v1").then(|| {
+                    // Stage F: resolve the stdlib module from the vendored
+                    // pin (hermetic; no sibling checkout required).
+                    let bundle = crate::bundle::pinned_bundle().expect("stdlib pin");
+                    let envelope = bundle
+                        .resolver()
+                        .resolve("mncs.core.status.v1")
+                        .expect("status module in pin");
                     SourceEnvelope::inline(
                         SourceArtifactKind::Program,
                         "mncs.core.status.v1",
-                        include_str!(concat!(
-                            env!("CARGO_MANIFEST_DIR"),
-                            "/../../library/core/status.mncs"
-                        )),
+                        envelope.text,
                     )
                 })
             }

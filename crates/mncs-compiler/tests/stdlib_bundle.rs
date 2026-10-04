@@ -15,8 +15,37 @@ use mncs_compiler::bundle::{
 use mncs_compiler::{elaborate_program_with_resolver_and_modules, ModuleResolver};
 use mncs_syntax::{parse, SourceArtifactKind, SourceEnvelope};
 
+/// Stage F: the `mncs-stdlib` checkout backing these tests: explicit
+/// `MNCS_STDLIB_ROOT` wins, else the `mncs-stdlib` sibling checkout.
+/// Fails closed with a clear message when absent.
+fn stdlib_checkout_dir() -> String {
+    // Test inputs need a real checkout: an explicitly empty variable
+    // (the CLI's hermetic spelling) falls through to the sibling here.
+    let explicit = std::env::var("MNCS_STDLIB_ROOT")
+        .ok()
+        .filter(|root| !root.trim().is_empty());
+    let checkout =
+        explicit.unwrap_or_else(|| format!("{}/../../../mncs-stdlib", env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        std::path::Path::new(&checkout).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    checkout
+}
+
+/// Stage F: standard-library sources now live in `mncs-stdlib/library/`.
+fn stdlib_library_dir() -> String {
+    let checkout = stdlib_checkout_dir();
+    let dir = format!("{checkout}/library");
+    assert!(
+        std::path::Path::new(&dir).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    dir
+}
+
 fn library_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library")
+    std::path::PathBuf::from(stdlib_library_dir())
 }
 
 fn parse_root(text: &str) -> mncs_syntax::AbstractSyntaxTree {
@@ -61,9 +90,10 @@ fn pinned_bundle_verifies_and_covers_the_library() {
 
 #[test]
 fn checked_in_bundle_matches_the_library_tree() {
-    // Freshness golden: regenerating from the working tree must reproduce
-    // the checked-in identity. A stdlib edit without `mncs bundle
-    // generate` (plus committing the result) fails here, not downstream.
+    // Stage F drift golden: the vendored pin (stdlib-pin/) must match a
+    // fresh rebuild from the mncs-stdlib checkout tree. A stdlib edit
+    // without re-pinning, or a canonical pin that was never re-vendored
+    // here, fails here instead of drifting downstream.
     let collected = collect_library_modules(&library_dir()).expect("library tree collects");
     let rebuilt = StdlibBundle::assemble("mncs bundle generate", "test", collected)
         .expect("rebuild assembles");
@@ -71,7 +101,19 @@ fn checked_in_bundle_matches_the_library_tree() {
     assert_eq!(
         rebuilt.bundle_identity(),
         pinned.bundle_identity(),
-        "checked-in pin drifts from library/; regenerate with `mncs bundle generate --library library --output library/stdlib-bundle.json --commit <hash>`"
+        "vendored pin drifts from the mncs-stdlib tree; re-vendor with `cp ../mncs-stdlib/dist/stdlib-bundle.json stdlib-pin/stdlib-bundle.json` (after ./tools/regen.sh over there)"
+    );
+    // And the vendored bytes must equal the canonical pin exactly, so a
+    // hand-edited or partially copied lockfile cannot pass on identity
+    // arithmetic alone.
+    let canonical =
+        std::fs::read_to_string(format!("{}/dist/stdlib-bundle.json", stdlib_checkout_dir()))
+            .expect("canonical pin readable");
+    let canonical_bundle = StdlibBundle::from_json(&canonical).expect("canonical pin verifies");
+    assert_eq!(
+        canonical_bundle.bundle_identity(),
+        pinned.bundle_identity(),
+        "vendored pin is not the canonical mncs-stdlib pin; re-vendor it"
     );
     assert_eq!(
         rebuilt.module_names(),

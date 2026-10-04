@@ -4,6 +4,29 @@ use std::process::Command;
 
 use serde_json::Value;
 
+/// Stage F: the `mncs-stdlib` checkout backing these tests: explicit
+/// `MNCS_STDLIB_ROOT` wins, else the `mncs-stdlib` sibling checkout.
+/// Fails closed with a clear message when absent.
+fn stdlib_checkout_dir() -> String {
+    // Test inputs need a real checkout: an explicitly empty variable
+    // (the CLI's hermetic spelling) falls through to the sibling here.
+    let explicit = std::env::var("MNCS_STDLIB_ROOT")
+        .ok()
+        .filter(|root| !root.trim().is_empty());
+    let checkout =
+        explicit.unwrap_or_else(|| format!("{}/../../../mncs-stdlib", env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        std::path::Path::new(&checkout).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    checkout
+}
+
+/// Stage F: stdlib-owned examples (fixtures/corpora) read across repos.
+fn stdlib_example(name: &str) -> String {
+    format!("{}/examples/{name}", stdlib_checkout_dir())
+}
+
 fn example(name: &str) -> String {
     format!("{}/../../examples/{name}", env!("CARGO_MANIFEST_DIR"))
 }
@@ -60,8 +83,8 @@ fn assert_corpus_agreement(source: &str, corpus: &str, expected_cases: usize) {
 #[test]
 fn scalar_branchless_selection_agrees_per_backend() {
     assert_corpus_agreement(
-        &example("source/profile08-branchless.mncs"),
-        &example("execution/profile08-branchless-corpus.json"),
+        &stdlib_example("source/profile08-branchless.mncs"),
+        &stdlib_example("execution/profile08-branchless-corpus.json"),
         4,
     );
 }
@@ -69,8 +92,8 @@ fn scalar_branchless_selection_agrees_per_backend() {
 #[test]
 fn masks_and_vectors_agree_per_backend() {
     assert_corpus_agreement(
-        &example("source/profile08-vectors.mncs"),
-        &example("execution/profile08-vectors-corpus.json"),
+        &stdlib_example("source/profile08-vectors.mncs"),
+        &stdlib_example("execution/profile08-vectors-corpus.json"),
         12,
     );
 }
@@ -108,7 +131,7 @@ fn profile08_library_modules_validate() {
         "library/core/mask.mncs",
         "library/std/simd.mncs",
     ] {
-        let path = format!("{}/../../{module}", env!("CARGO_MANIFEST_DIR"));
+        let path = format!("{}/{module}", stdlib_checkout_dir());
         let output = binary()
             .args(["validate", &path])
             .output()

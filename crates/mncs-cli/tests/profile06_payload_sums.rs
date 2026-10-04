@@ -2,6 +2,29 @@ use std::process::Command;
 
 use serde_json::Value;
 
+/// Stage F: the `mncs-stdlib` checkout backing these tests: explicit
+/// `MNCS_STDLIB_ROOT` wins, else the `mncs-stdlib` sibling checkout.
+/// Fails closed with a clear message when absent.
+fn stdlib_checkout_dir() -> String {
+    // Test inputs need a real checkout: an explicitly empty variable
+    // (the CLI's hermetic spelling) falls through to the sibling here.
+    let explicit = std::env::var("MNCS_STDLIB_ROOT")
+        .ok()
+        .filter(|root| !root.trim().is_empty());
+    let checkout =
+        explicit.unwrap_or_else(|| format!("{}/../../../mncs-stdlib", env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        std::path::Path::new(&checkout).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    checkout
+}
+
+/// Stage F: stdlib-owned examples (fixtures/corpora) read across repos.
+fn stdlib_example(name: &str) -> String {
+    format!("{}/examples/{name}", stdlib_checkout_dir())
+}
+
 fn example(name: &str) -> String {
     format!("{}/../../examples/{name}", env!("CARGO_MANIFEST_DIR"))
 }
@@ -24,8 +47,8 @@ fn source_study(path: &str) -> Value {
 /// realization must meet every corpus expectation.
 #[test]
 fn profile06_payload_sums_execute_and_agree_on_bytecode() {
-    let source = example("source/profile06-payload-sums.mncs");
-    let corpus = example("execution/profile06-payload-sums-corpus.json");
+    let source = stdlib_example("source/profile06-payload-sums.mncs");
+    let corpus = stdlib_example("execution/profile06-payload-sums-corpus.json");
     let output = binary()
         .args([
             "experiment",
@@ -60,8 +83,8 @@ fn profile06_payload_sums_execute_and_agree_on_bytecode() {
 /// the whole payload corpus must execute with every expectation met.
 #[test]
 fn portable_wasm_executes_payload_sums() {
-    let source = example("source/profile06-payload-sums.mncs");
-    let corpus = example("execution/profile06-payload-sums-corpus.json");
+    let source = stdlib_example("source/profile06-payload-sums.mncs");
+    let corpus = stdlib_example("execution/profile06-payload-sums-corpus.json");
     let output = binary()
         .args([
             "experiment",
@@ -127,8 +150,8 @@ fn profile06_negative_fixtures_are_rejected_with_intended_codes() {
 /// realization (9/9 layered cases).
 #[test]
 fn profile06_boolean_operators_agree_across_layers() {
-    let source = example("source/profile06-boolean-operators.mncs");
-    let corpus = example("execution/profile06-boolean-operators-corpus.json");
+    let source = stdlib_example("source/profile06-boolean-operators.mncs");
+    let corpus = stdlib_example("execution/profile06-boolean-operators-corpus.json");
     let output = binary()
         .args(["check-backend-execution", &source, &corpus])
         .output()

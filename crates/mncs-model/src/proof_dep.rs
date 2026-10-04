@@ -1,6 +1,6 @@
 //! RFC 0007 proof-kernel tranche 0.2: genuine dependency reference checker.
 //!
-//! The MNCS-native kernel lives in `library/core/proof_dep.mncs`; this module
+//! The MNCS-native kernel lives in `mncs-stdlib/library/core/proof_dep.mncs`; this module
 //! is the independent second implementation for differential validation. It
 //! encodes the same v2 calculus as `docs/rfc-0007-tranche-02-calculus.md`
 //! with deliberate implementation diversity: direct recursive evaluation
@@ -15,13 +15,13 @@
 //! no verdict upgrade path (UNKNOWN stays UNKNOWN no matter what this
 //! checker says), and disagreement is always a safety stop, never a tie
 //! broken in either implementation's favour. Authoritative admission and
-//! binding live in `library/core/proof_admit.mncs` (`mncs.core.proof_admit.v1`)
+//! binding live in `mncs-stdlib/library/core/proof_admit.mncs` (`mncs.core.proof_admit.v1`)
 //! and execute through the MNCS toolchain; see `mncs-compiler` admission.
 //!
 //! The differential contract is verdict-class agreement (PASS / FAIL /
 //! UNKNOWN) plus exact agreement on canonical assumption sets and probe
 //! outputs over the shared corpus (`examples/execution/proof-dep-corpus.json`,
-//! produced by `scripts/gen_proof_dep_corpus.py`). Agreement is evidence of
+//! produced by `mncs-stdlib/scripts/gen_proof_dep_corpus.py`). Agreement is evidence of
 //! consistency, never a proof of checker correctness. If the two ever
 //! disagree, the dispute is resolved in favour of NEITHER implementation:
 //! both are bugs until the calculus document adjudicates.
@@ -1558,7 +1558,7 @@ fn used_hypotheses(
 /// corpus, and MUST NOT appear in the authority protocol: bindings,
 /// admission, and reuse compare canonical [`DepAssumptionSet`] values, and
 /// the MNCS side compares `dep.AssumptionSet` records. See
-/// `library/core/proof_admit.mncs`.
+/// `mncs-stdlib/library/core/proof_admit.mncs`.
 pub fn dep_assumptions(cells: Vec<DepCell>, count: usize, proof: usize, prop: usize) -> i64 {
     let Some(used) = used_hypotheses(&cells, count, proof, prop) else {
         return -1;
@@ -1926,6 +1926,19 @@ pub fn run_dep_case(case: &DepCorpusCase) -> i64 {
 mod tests {
     use super::*;
 
+    /// Stage F: stdlib-owned corpora read across repos from the
+    /// `mncs-stdlib` checkout (explicit `MNCS_STDLIB_ROOT` or sibling).
+    fn stdlib_checkout_dir() -> std::path::PathBuf {
+        // Test inputs need a real checkout: an explicitly empty variable
+        // (the CLI's hermetic spelling) falls through to the sibling here.
+        if let Ok(root) = std::env::var("MNCS_STDLIB_ROOT") {
+            if !root.trim().is_empty() {
+                return std::path::PathBuf::from(root);
+            }
+        }
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../mncs-stdlib")
+    }
+
     fn cell(tag: DepTag, args: [i64; 4]) -> DepCell {
         DepCell::new(tag, args)
     }
@@ -1943,7 +1956,7 @@ mod tests {
     }
 
     /// The flagship: Pi (n : Nat). Eq Nat (Plus n Zero) n by induction.
-    /// Mirrors `flagship_plus_zero_right` in `scripts/gen_proof_dep_corpus.py`
+    /// Mirrors `flagship_plus_zero_right` in `mncs-stdlib/scripts/gen_proof_dep_corpus.py`
     /// cell for cell; any drift between the two is a bug in one of them.
     fn flagship_cells() -> Vec<DepCell> {
         vec![
@@ -2452,8 +2465,8 @@ mod tests {
     #[test]
     fn reference_agrees_with_checked_in_corpus_expectations() {
         let path = format!(
-            "{}/../../examples/execution/proof-dep-corpus.json",
-            env!("CARGO_MANIFEST_DIR")
+            "{}/examples/execution/proof-dep-corpus.json",
+            stdlib_checkout_dir().display()
         );
         let text = std::fs::read_to_string(&path).expect("proof-dep corpus");
         let cases = parse_proof_dep_corpus(&text).expect("parse proof-dep corpus");

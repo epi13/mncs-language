@@ -1182,13 +1182,13 @@
     ]
   },
   "compiler_inventory_identity": "sha256:c1352e7c7b1fb943a7cf8c0356c17b458ae091f1bbf6f824d705089eef3837fd",
-  "content_identity": "sha256:a502671f67e5654f880b10984368c70486c2d681f863ef9f6b4eb42e46d6bfff",
+  "content_identity": "sha256:a9ffa11c4e59e7bbacadbc0a55e529a0cf56353d0bb75a57880eb48810672988",
   "current_profile": "0.18",
   "examples": [
     {
       "compiler_source_identity": "mncs:source:artifact:bc4c2d21bd9fec099418ea3192d43252ee4f0bfdfce796b2d49ec074fa5ae4dd",
       "identity": "mncs.example/bounded-collections/1",
-      "inventory_identity": "sha256:53053d020bb4894839b60c2b5034a7600f5a9f4937acac4f36590ebfe8a44b4f",
+      "inventory_identity": "sha256:4edc0840706eb0786372beea8c6c3512f4d376109e602ef35226bd84c2ee1c09",
       "path": "examples/source/bounded-min.mncs",
       "profile": "0.2",
       "source_identity": "sha256:a40ef04b6eeb82aa79d0d3ad8d07fdceab34ecb0cb6d2a9994292ef332fe7ed1",
@@ -1200,7 +1200,7 @@
     {
       "compiler_source_identity": "mncs:source:artifact:164b322f220531cecafbffbc3e21304777d2d7c7e558c027c70b04c6fb460672",
       "identity": "mncs.example/identity/1",
-      "inventory_identity": "sha256:f2c27d20d50491c0822f50ea84edc0eff7902cd8e9c3b6fa99f5503af4ceaf2d",
+      "inventory_identity": "sha256:659869841a7a448efc16a023f52d4033a934ad39b4b92e17f02f98f2784c0125",
       "path": "examples/source/identity.mncs",
       "profile": "0.1",
       "source_identity": "sha256:da274a91b9adeeb34d3a0c19ede84475ca4e28d72df2bd068797d08c4b3f29f2",
@@ -1212,7 +1212,7 @@
     {
       "compiler_source_identity": "mncs:source:artifact:11f8dc2a465ae2190f7db814d162a9239e8f8b25542e17979a59bf194928ca4b",
       "identity": "mncs.example/effects/1",
-      "inventory_identity": "sha256:e57e163132bbc0dfea4abb82b2c324fdfbd89fe56e63404fce138c5ff6de7a42",
+      "inventory_identity": "sha256:fa2320453e2745bc7ed0d1de896308ac1c2b0bdae7819cb0fac2ccfa2344af93",
       "path": "examples/source/cre3-retry-authority.mncs",
       "profile": "0.4",
       "source_identity": "sha256:2a523615014d98435d5339cfef5581ae78835641f287abc40c7f16cc7462dd9a",
@@ -1224,7 +1224,7 @@
     {
       "compiler_source_identity": "mncs:source:artifact:ba0159ab8e371cece592be60efcee7bbc43140e54b1273b0ec7da34ef17acbbd",
       "identity": "mncs.example/structured-artifacts/1",
-      "inventory_identity": "sha256:66ee044ac5ea3cd83506e7d0a8f482c4208b6403e14cf8bbbab27d92d1adfd3d",
+      "inventory_identity": "sha256:65e8a0c17b6c07368ebe2caf6decb984f07f8cde32bf7a04d3c0b45ca820f508",
       "path": "examples/source/structured-artifact.mncs",
       "profile": "0.18",
       "source_identity": "sha256:da5c47990cf8722fb2eb3ee3e4c7943d988baac9da97a4af3285171c8ac09521",
@@ -1236,8 +1236,8 @@
     {
       "compiler_source_identity": "mncs:source:artifact:f8b459bd4ff8d72fc34873873121afd2e77bd27e83209b446d31e70ec8844165",
       "identity": "mncs.example/applications/1",
-      "inventory_identity": "sha256:8ddf4c15410f492e1faa1734fbd7836626830c2e459f3a3aabb03083870debfd",
-      "path": "examples/source/application-entry.mncs",
+      "inventory_identity": "sha256:21e826654e8103d2a842455472c06cc40fea9220a7a9dc018cea15cbe7447868",
+      "path": "mncs-stdlib/examples/source/application-entry.mncs",
       "profile": "0.16",
       "source_identity": "sha256:323eb56ab3010bc614d747303fa5959d5e4ad5b34114907b10391559c5f52fb6",
       "topics": [
@@ -1611,9 +1611,9 @@
         "clamp_i64"
       ],
       "imports": [],
-      "inventory_identity": "sha256:e66440ab499454257cf96d242941b9419a9dd1b62a848401e66cebca6219128a",
+      "inventory_identity": "sha256:585ee96fdcb50821e1013823d7c6942be7349e1b7915c4ed2f96d4a85383b4b5",
       "module": "mncs.core.bounds.v1",
-      "path": "library/core/bounds.mncs",
+      "path": "mncs-stdlib/library/core/bounds.mncs",
       "profile": "0.5",
       "source_identity": "sha256:ed11a325208e0450ad196998c297f33ac2cae3f810ea29089f9cdd07ac6d0f62",
       "symbols": [
@@ -1651,9 +1651,9 @@
         "xor"
       ],
       "imports": [],
-      "inventory_identity": "sha256:28874bbb93d6be57e6f71cd04a58a74aac4f0bc7d84c643c17a3eb8098c02463",
+      "inventory_identity": "sha256:abb0f6331f6fc524744a0accca9d41d8cced2f6f047732e7e5e62c104e37c895",
       "module": "mncs.core.bytes.v1",
-      "path": "library/core/bytes.mncs",
+      "path": "mncs-stdlib/library/core/bytes.mncs",
       "profile": "0.7",
       "source_identity": "sha256:02a87c9fe7c8c5f8eee9e177c5090bd57614ad6a05b84a339ebab5b90f61f337",
       "symbols": [
@@ -1776,9 +1776,9 @@
       "imports": [
         "mncs.core.logic.v1"
       ],
-      "inventory_identity": "sha256:27dc18cae63653b1e7ecae15af341cdc725b1833aabc72e44b0b6f31106fa8d3",
+      "inventory_identity": "sha256:459352254c0393bb77f791d7c182d364a3f8ff3c9470f05a184ea77288666bc0",
       "module": "mncs.core.contracts.v1",
-      "path": "library/core/contracts.mncs",
+      "path": "mncs-stdlib/library/core/contracts.mncs",
       "profile": "0.13",
       "source_identity": "sha256:343902e73e4a6b0bb07e078906da2ed1e5f3c1b1a11971245ab347e0875938cb",
       "symbols": [
@@ -1895,9 +1895,9 @@
       "imports": [
         "mncs.core.ordering.v1"
       ],
-      "inventory_identity": "sha256:44ce7486cf042ec99062f3f32638cd333c98daeaca76bce0e108ad228f616efc",
+      "inventory_identity": "sha256:631a08035bd68ff42ee7426d71e3ff0aab10fcbcfe793bfb4430d774e2a14ad5",
       "module": "mncs.core.geometry.v1",
-      "path": "library/core/geometry.mncs",
+      "path": "mncs-stdlib/library/core/geometry.mncs",
       "profile": "0.13",
       "source_identity": "sha256:6ea8f9a6a160a707048fef415b3a4e5d07b7f72b1e01914e84cfbe08fbddb0ca",
       "symbols": [
@@ -2208,9 +2208,9 @@
         "zero_bytes"
       ],
       "imports": [],
-      "inventory_identity": "sha256:56ba2764c5330348d25b166113cac2cde547fb58954f6c09fa1d5922a1558e31",
+      "inventory_identity": "sha256:188bfe6c849bf8cf170feec344e197b140e167c1d086683a88afead6abd35100",
       "module": "mncs.core.identity.v1",
-      "path": "library/core/identity.mncs",
+      "path": "mncs-stdlib/library/core/identity.mncs",
       "profile": "0.13",
       "source_identity": "sha256:0348822874eab9bfa496024809b36983e1a00e8241357a753dc79148faa528d2",
       "symbols": [
@@ -2301,9 +2301,9 @@
       "imports": [
         "mncs.core.contracts.v1"
       ],
-      "inventory_identity": "sha256:9a38d39080955de37bec5fc8b5213d30765077e821a48cd5dbe2ae1ed6e962b9",
+      "inventory_identity": "sha256:1a54bbf38ff419f83ab213316724efb4010e519d1f95a9c23f5fb4c067503862",
       "module": "mncs.core.image.v1",
-      "path": "library/core/image.mncs",
+      "path": "mncs-stdlib/library/core/image.mncs",
       "profile": "0.13",
       "source_identity": "sha256:cc53b671cfd4eda6275ed5d07610e776a132a00e59e9288e980d65750ae36138",
       "symbols": [
@@ -2506,9 +2506,9 @@
       "imports": [
         "mncs.core.identity.v1"
       ],
-      "inventory_identity": "sha256:fb1bbffe1185b18d7ae60eaa0da846cd9b9cbcf3c41b7aecf4f13c6f54981cb8",
+      "inventory_identity": "sha256:20ccbe895595e37c345344ab7ae8b09ed78b3d154890bf41915c2c3edd4504e7",
       "module": "mncs.core.lineage.v1",
-      "path": "library/core/lineage.mncs",
+      "path": "mncs-stdlib/library/core/lineage.mncs",
       "profile": "0.10",
       "source_identity": "sha256:b26698131716bdbdc6baf34a4f33d7c0477a43c5641dba2a5c53f6477c6ae061",
       "symbols": [
@@ -2546,9 +2546,9 @@
         "bool_xor"
       ],
       "imports": [],
-      "inventory_identity": "sha256:cb260bcc31cf01d624332999d79dc3cb6b9f453548782b64babea2678e4bd01e",
+      "inventory_identity": "sha256:528a44b45ee7e25b14b374d9734861f5ee1a7b5dfd45490ecd45c3eb8ba7d250",
       "module": "mncs.core.logic.v1",
-      "path": "library/core/logic.mncs",
+      "path": "mncs-stdlib/library/core/logic.mncs",
       "profile": "0.13",
       "source_identity": "sha256:3cc836943a01ff32ee3efd690f4b9de0c5757dd9718af33ed48ae924588ac32a",
       "symbols": [
@@ -2598,9 +2598,9 @@
         "xor4"
       ],
       "imports": [],
-      "inventory_identity": "sha256:a6526eb0d1a766932cc1b2d71f06f9e0c770521ab3c195ac9a94b6682f59ad92",
+      "inventory_identity": "sha256:b0519858d1ce2c8b133136115ce4ae494f617e0c1669781d1a5043eae8d91fa2",
       "module": "mncs.core.mask.v1",
-      "path": "library/core/mask.mncs",
+      "path": "mncs-stdlib/library/core/mask.mncs",
       "profile": "0.8",
       "source_identity": "sha256:8a979917d86ca80bf61d65bcf737f22c735ecb648fd9773765d4b5fabbaf70b7",
       "symbols": [
@@ -2680,9 +2680,9 @@
       "imports": [
         "mncs.core.ordering.v1"
       ],
-      "inventory_identity": "sha256:6652b56b2ed1949ca7c996b6e1702033f34d9a92927618ffb3bb21e71d1b70f1",
+      "inventory_identity": "sha256:c8e014c71d3e9312d1e4502bd0d9f3494c0c0ae7cd93abdc02a0e599a31a037c",
       "module": "mncs.core.numeric.v1",
-      "path": "library/core/numeric.mncs",
+      "path": "mncs-stdlib/library/core/numeric.mncs",
       "profile": "0.8",
       "source_identity": "sha256:567c2ed24d833a597670176b2c7be09cb73788aee6e860429a8eed24a01b863c",
       "symbols": [
@@ -2731,9 +2731,9 @@
         "min_i64"
       ],
       "imports": [],
-      "inventory_identity": "sha256:c00894aab6c5ce36141a278e118bc5a22df7731d1b33b13169cc63525f88437e",
+      "inventory_identity": "sha256:ca6ab75bed37dd875532b047f90eea6ec88fc5a9ad85f856956e8abc4a36b254",
       "module": "mncs.core.ordering.v1",
-      "path": "library/core/ordering.mncs",
+      "path": "mncs-stdlib/library/core/ordering.mncs",
       "profile": "0.5",
       "source_identity": "sha256:5773304071aab4adc80ada57aa00f8ea94949b74f9c1b32852d7571e4117f76d",
       "symbols": [
@@ -2794,9 +2794,9 @@
         "weights_invalid4"
       ],
       "imports": [],
-      "inventory_identity": "sha256:8ac1c04c8b5eaf1aac7924106dbf80eb38abff37e28fa403cdd84413cd67d696",
+      "inventory_identity": "sha256:7f0d0952478cedbd411a80189adaab4111a7c66b8c5678d6966817feb1b4a5c9",
       "module": "mncs.core.partition.v1",
-      "path": "library/core/partition.mncs",
+      "path": "mncs-stdlib/library/core/partition.mncs",
       "profile": "0.8",
       "source_identity": "sha256:e942038c0143515c4a7877ba16e025b35a2a52270acdcea99b2fc6b56b6d8e9f",
       "symbols": [
@@ -2912,9 +2912,9 @@
       "imports": [
         "mncs.core.proof_dep.v2"
       ],
-      "inventory_identity": "sha256:606c3c1fda1a6df932d9ed3ee4effb7cdf906fad1f584f6573d42243d4c99f11",
+      "inventory_identity": "sha256:77d096933e96a78a599ffbd9185811a4cb3d0c43d011b8424353c871aebf742e",
       "module": "mncs.core.proof_admit.v1",
-      "path": "library/core/proof_admit.mncs",
+      "path": "mncs-stdlib/library/core/proof_admit.mncs",
       "profile": "0.13",
       "source_identity": "sha256:ccdff8991beeff8144669e3888b19b83a4ee0fa5e53c9c63bf5724160b9c7d58",
       "symbols": [
@@ -3018,9 +3018,9 @@
         "mncs.core.proof_term.v1",
         "mncs.core.status.v1"
       ],
-      "inventory_identity": "sha256:14894188f25d38885d6af1183eb09323ea1fc968d443244fde47b027f09deb01",
+      "inventory_identity": "sha256:1f77ca351d7272d156cdcdf5cd4a13a400ff466fe95940b91a41d0b339d4f56e",
       "module": "mncs.core.proof_check.v1",
-      "path": "library/core/proof_check.mncs",
+      "path": "mncs-stdlib/library/core/proof_check.mncs",
       "profile": "0.10",
       "source_identity": "sha256:de683d8680f697a60c4c406c607d0bea501ffe703546e20a8c860bbeb26884c6",
       "symbols": [
@@ -3357,9 +3357,9 @@
       "imports": [
         "mncs.core.status.v1"
       ],
-      "inventory_identity": "sha256:5c9188be146af0469c70c952e304a9561b8f99c9b7f0ec3b6619893ba3fd762e",
+      "inventory_identity": "sha256:912f3e847e2bce4b26639a01e25a9f778e24bfb5a199f25c9eaa37856657f9a4",
       "module": "mncs.core.proof_dep.v2",
-      "path": "library/core/proof_dep.mncs",
+      "path": "mncs-stdlib/library/core/proof_dep.mncs",
       "profile": "0.10",
       "source_identity": "sha256:782f74d6354a824891c8c27bc4b855127508d7fded0cd21b567419e28ef3aa61",
       "symbols": [
@@ -4249,9 +4249,9 @@
         "type_universe"
       ],
       "imports": [],
-      "inventory_identity": "sha256:0507e044d6445415f4e35784ba01ae4394881a3b3e9b231450bf35bb29eefbac",
+      "inventory_identity": "sha256:c54e6f370cf4ff88931d7f516f626ec31d9bd3fb5aaf4d1c8dda135e4e6075a7",
       "module": "mncs.core.proof_term.v1",
-      "path": "library/core/proof_term.mncs",
+      "path": "mncs-stdlib/library/core/proof_term.mncs",
       "profile": "0.10",
       "source_identity": "sha256:158550265441cd2189bb40ded0118d9cb228027d41d4d64059d56b9b81be7c33",
       "symbols": [
@@ -4334,9 +4334,9 @@
         "two_bounded"
       ],
       "imports": [],
-      "inventory_identity": "sha256:05066a1763b8f9be5f0ae5627e5a21f3c34557f4771e1ce33350d3286fe1f3bb",
+      "inventory_identity": "sha256:a16ea1fa02e03b72a30e0d74aee1910bf7f635a66c315293eeaab79342fb38ce",
       "module": "mncs.core.random.v1",
-      "path": "library/core/random.mncs",
+      "path": "mncs-stdlib/library/core/random.mncs",
       "profile": "0.6",
       "source_identity": "sha256:98c9628fbcb7942d9249e97486f9e42a77a04bc5a04af7882d812cc6311d78a4",
       "symbols": [
@@ -4405,9 +4405,9 @@
         "value_or"
       ],
       "imports": [],
-      "inventory_identity": "sha256:cbf3bc4465e18f460d0025e45ee884d9d63f29cb68238172d77dc7c4801702cb",
+      "inventory_identity": "sha256:a7c9b05c0462e3d6772c7b0d3ceab330ee13f4334bbd21846daf17eb12c0224b",
       "module": "mncs.core.result.v1",
-      "path": "library/core/result.mncs",
+      "path": "mncs-stdlib/library/core/result.mncs",
       "profile": "0.6",
       "source_identity": "sha256:37ab3f0187ee27fc334ebe1feae6d11eb38b495e4014da874634e65dbc34b9ad",
       "symbols": [
@@ -4513,9 +4513,9 @@
         "sum4"
       ],
       "imports": [],
-      "inventory_identity": "sha256:01deb77f7569b2ab204eeb3d3d5a51c52c8aa350494ebf1db4bdf3f80c9539e1",
+      "inventory_identity": "sha256:a1f4dcbd047d9b6066d67d06e9e3ffea5443f3e748c20c17174e26a5393af5b8",
       "module": "mncs.core.sequences.v1",
-      "path": "library/core/sequences.mncs",
+      "path": "mncs-stdlib/library/core/sequences.mncs",
       "profile": "0.13",
       "source_identity": "sha256:ef8fc2bdb651071fdba8c9d8b3ec520db5dee5b2b27ad310c5ff727f1f23731c",
       "symbols": [
@@ -4856,9 +4856,9 @@
         "summary_step"
       ],
       "imports": [],
-      "inventory_identity": "sha256:16e433b82678a4ef444ca21fd411016c30004377c6dd812c61a0b112acc03aed",
+      "inventory_identity": "sha256:0c23a259eb689b0baf237a74c44df70c3243da545f82732e6d16b78624062e74",
       "module": "mncs.core.status.v1",
-      "path": "library/core/status.mncs",
+      "path": "mncs-stdlib/library/core/status.mncs",
       "profile": "0.13",
       "source_identity": "sha256:7690a6d6bff4d74cb60fa930a87d078db8d31a0a7e7533a876ed7daa7cd52ff6",
       "symbols": [
@@ -4944,9 +4944,9 @@
         "replace2"
       ],
       "imports": [],
-      "inventory_identity": "sha256:a5c0334892f408fc50e91402e89b284ea8d9ddc8b37c0007e188f3fa2fe94211",
+      "inventory_identity": "sha256:caa459f63184c92cf222b6c5f27b29c20b02709944d879ddce93125d8967a972",
       "module": "mncs.core.vector.v1",
-      "path": "library/core/vector.mncs",
+      "path": "mncs-stdlib/library/core/vector.mncs",
       "profile": "0.8",
       "source_identity": "sha256:8e4b72d710a6a928186c547cda613b77587ea73d77cbc0dfdcf3d5ff2bfb2259",
       "symbols": [
@@ -5007,9 +5007,9 @@
         "satisfies"
       ],
       "imports": [],
-      "inventory_identity": "sha256:38ee3bc9d18f9715f88281aba09bcdc0d2f202e24b8716a08dd906198f121078",
+      "inventory_identity": "sha256:a2ec134bbbe2fdcc30227e7ced7bb25405e37fa3fa66cf6a26f8ab6ce4833016",
       "module": "mncs.core.version.v1",
-      "path": "library/core/version.mncs",
+      "path": "mncs-stdlib/library/core/version.mncs",
       "profile": "0.6",
       "source_identity": "sha256:686a9a08d0739b6e7c6fd43b3dda2fd3c74463deb293fccb634cb547d5272c3b",
       "symbols": [
@@ -5119,9 +5119,9 @@
         "mncs.core.geometry.v1",
         "mncs.core.image.v1"
       ],
-      "inventory_identity": "sha256:da03f422e525eb885652186c9d13ebab958141bc5c022d8a1d0673469ff95337",
+      "inventory_identity": "sha256:a629c802b04b76d94d5bc4fd2b20f63176e56775de4368fb373e5789f1573f5a",
       "module": "mncs.core.vision.v1",
-      "path": "library/core/vision.mncs",
+      "path": "mncs-stdlib/library/core/vision.mncs",
       "profile": "0.13",
       "source_identity": "sha256:41f8b1a80caf3f61b18979bf874b8508388a9c37459e86de2ad7ca20c38d6227",
       "symbols": [
@@ -5441,9 +5441,9 @@
         "mncs.core.status.v1",
         "mncs.core.version.v1"
       ],
-      "inventory_identity": "sha256:f8f50befd53246a81a6a5df5b08a88152627c7e7380d3ddd069e4b199978dfdc",
+      "inventory_identity": "sha256:c13c9eedb224ff6a25ab837d0409b457ba49bfb4de3561da63f82cf331edfab7",
       "module": "mncs.family.coherence.v01",
-      "path": "library/family/coherence.mncs",
+      "path": "mncs-stdlib/library/family/coherence.mncs",
       "profile": "0.13",
       "source_identity": "sha256:7f9230b52c6ae95732006287527991f859534c34e7591fc53a0b13127cd017cf",
       "symbols": [
@@ -5618,9 +5618,9 @@
         "mncs.core.lineage.v1",
         "mncs.core.status.v1"
       ],
-      "inventory_identity": "sha256:d85d746415ac49ed54b3597dda13c392d63f308e550ae482b2b17b8e0150f9d6",
+      "inventory_identity": "sha256:ad89b4c10f277beeb4105c8cf4ee8e10e2f1ef7f9bedeab350a4d188f89c89d6",
       "module": "mncs.family.journal.v1",
-      "path": "library/family/journal.mncs",
+      "path": "mncs-stdlib/library/family/journal.mncs",
       "profile": "0.10",
       "source_identity": "sha256:a9cfa0e10dfbeccce0b83ebfbcdf6f0dba5faea157bff74f0cb74183fb1c22c9",
       "symbols": [
@@ -5800,9 +5800,9 @@
       "imports": [
         "mncs.core.status.v1"
       ],
-      "inventory_identity": "sha256:a159ee83b6746ce521e12a1ba11bca881e923877824a9d76383aceda810a758d",
+      "inventory_identity": "sha256:31c9fa2eda54cc302c15898419900ef028b06846d07a34286f7c004410247823",
       "module": "mncs.family.rfc_status.v1",
-      "path": "library/family/rfc_status.mncs",
+      "path": "mncs-stdlib/library/family/rfc_status.mncs",
       "profile": "0.10",
       "source_identity": "sha256:bd8afffcd37a1381ebdfc733074924776a959b0fcefce54684498c4fbfca1594",
       "symbols": [
@@ -5898,9 +5898,9 @@
         "mncs.jit.session.v1",
         "mncs.jit.types.v1"
       ],
-      "inventory_identity": "sha256:b6efb670efef2994ec358300f7815d03fa15d36415bb5ae9a8ff4bc0c2780dbb",
+      "inventory_identity": "sha256:7a6e73a587b3fb2ef21c880647dcb91fa128be17ce51d77a7f40ef8b3d704dda",
       "module": "mncs.jit.binding.v1",
-      "path": "library/jit/binding.mncs",
+      "path": "mncs-stdlib/library/jit/binding.mncs",
       "profile": "0.13",
       "source_identity": "sha256:9517c094badc3c60bbd7fd0f236b3d5a23d26f5c479b2c317dc45751f121cbd0",
       "symbols": [
@@ -6078,9 +6078,9 @@
       "imports": [
         "mncs.jit.types.v1"
       ],
-      "inventory_identity": "sha256:546ed6679f9c3dd12f5ab5b26947852b1c9ae8a948b11133618120dbaad13bdb",
+      "inventory_identity": "sha256:5fae9c473740ad010589f9a8003b84eb046fb544a4f2c2948487822774cbcfe3",
       "module": "mncs.jit.depends.v1",
-      "path": "library/jit/depends.mncs",
+      "path": "mncs-stdlib/library/jit/depends.mncs",
       "profile": "0.13",
       "source_identity": "sha256:4a07aaed3e0385fca8d17f6999876cabefcb72cd26d28b4a39f32edfcf0f10ac",
       "symbols": [
@@ -6247,9 +6247,9 @@
       "imports": [
         "mncs.jit.types.v1"
       ],
-      "inventory_identity": "sha256:321e1517736c745801bf881ecfa81643d9f15215d76da08975e39967971c7fe0",
+      "inventory_identity": "sha256:4b8c8680f906f8c77811cc5cb522a61bd98a180fe266c9ebad05a51d30138ccd",
       "module": "mncs.jit.lifecycle.v1",
-      "path": "library/jit/lifecycle.mncs",
+      "path": "mncs-stdlib/library/jit/lifecycle.mncs",
       "profile": "0.13",
       "source_identity": "sha256:f4656413e1bc5f19950407749b6cc21f68c1d98d7e753a4317be6aaa9bf0e622",
       "symbols": [
@@ -6314,9 +6314,9 @@
       "imports": [
         "mncs.jit.types.v1"
       ],
-      "inventory_identity": "sha256:381782d906161554e971ca1e33bed4a0f8b4b79971998aa84f1cfe58600ea576",
+      "inventory_identity": "sha256:5ed2410e5450696f01b122a0bf073afe947622a337fd25d4a937759084315f94",
       "module": "mncs.jit.plan.v1",
-      "path": "library/jit/plan.mncs",
+      "path": "mncs-stdlib/library/jit/plan.mncs",
       "profile": "0.13",
       "source_identity": "sha256:6c5e71ce936f72157876c35f7a82f8f3f22258f1c13bc94a17513507b54213ef",
       "symbols": [
@@ -6394,9 +6394,9 @@
         "saturating_add"
       ],
       "imports": [],
-      "inventory_identity": "sha256:92e42e5762efbb7424b4a0ff46062e60a0ddf50fad5243ed2393fb7bb93aa92b",
+      "inventory_identity": "sha256:4a6079b8f5b72a20771db150e007399f4e2c3f48c664b244daf32a934d399f28",
       "module": "mncs.jit.profile.v1",
-      "path": "library/jit/profile.mncs",
+      "path": "mncs-stdlib/library/jit/profile.mncs",
       "profile": "0.13",
       "source_identity": "sha256:366038a748de23925abfc39a4d6c0dc89eef9cb5b5c4ac58d145d8d2e39c3415",
       "symbols": [
@@ -6467,9 +6467,9 @@
         "proof_current"
       ],
       "imports": [],
-      "inventory_identity": "sha256:bcb18a3d48f4c8e73f00cfa1e72a38fdb61d2ac4bda45a935cc6c06c85ce5e35",
+      "inventory_identity": "sha256:380e356cf08ec67b0ed1e262f3a2eb343a40bf996189b3b3f302a318dbcb68a4",
       "module": "mncs.jit.proof.v1",
-      "path": "library/jit/proof.mncs",
+      "path": "mncs-stdlib/library/jit/proof.mncs",
       "profile": "0.13",
       "source_identity": "sha256:9df360436fc3f1d85ac5506232ab6755295f736b472643736829d965bca3ea19",
       "symbols": [
@@ -6559,9 +6559,9 @@
         "mncs.jit.lifecycle.v1",
         "mncs.jit.types.v1"
       ],
-      "inventory_identity": "sha256:ad91f94d9a7b8a197e25e34b259f25b5cab0a55b088ee78091b245aef594aa5c",
+      "inventory_identity": "sha256:f8a3f423cc67043f302ffb2b939d82793d6843aaa14a0900ce4eebb14220bcb0",
       "module": "mncs.jit.session.v1",
-      "path": "library/jit/session.mncs",
+      "path": "mncs-stdlib/library/jit/session.mncs",
       "profile": "0.13",
       "source_identity": "sha256:731c0e25ee0c66885810aeec9674aab87e2070048a87219eafbbed670f01f5c5",
       "symbols": [
@@ -6800,9 +6800,9 @@
         "workload_of"
       ],
       "imports": [],
-      "inventory_identity": "sha256:932962786541aa439a567e73a8f79e3f9982bddc65eb43069fec61043cec8eca",
+      "inventory_identity": "sha256:eb19505bd6e9abaa3def4720415e32a6a17b687279725d81ec1b42e84a907428",
       "module": "mncs.jit.types.v1",
-      "path": "library/jit/types.mncs",
+      "path": "mncs-stdlib/library/jit/types.mncs",
       "profile": "0.13",
       "source_identity": "sha256:2017f25e2c0df0a00e651fc330459d56967c4b82e29886a992cda950fdc27fb5",
       "symbols": [
@@ -7060,9 +7060,9 @@
       "imports": [
         "mncs.core.bytes.v1"
       ],
-      "inventory_identity": "sha256:ed207dc68f5a48b88883d7ee132bd96772a9fe110515d447c8463a083de9c3c3",
+      "inventory_identity": "sha256:e2cae9e5fb0e9b42daa5c57a861b719179ee15a104fdd5b7f0315c4a98398147",
       "module": "mncs.std.ansi.v1",
-      "path": "library/std/ansi.mncs",
+      "path": "mncs-stdlib/library/std/ansi.mncs",
       "profile": "0.8",
       "source_identity": "sha256:634e6acece32a5875e448a8b03c06cecb602a5326950c0f81b60fb928ae37e53",
       "symbols": [
@@ -7151,9 +7151,9 @@
         "success"
       ],
       "imports": [],
-      "inventory_identity": "sha256:79c80f3e80d09b3800b297f4dcda59fe5eb33482c54c3a14e084d2c70d2249d9",
+      "inventory_identity": "sha256:7ef6a136741786a26dba76659259507265fc2afc30137943fe789fa91b96fc11",
       "module": "mncs.std.application.v1",
-      "path": "library/std/application.mncs",
+      "path": "mncs-stdlib/library/std/application.mncs",
       "profile": "0.16",
       "source_identity": "sha256:d10591c3f9ec3e5b4c72bdef0ae9e0e2a0fcf1f120acc6379491c8528088b0e0",
       "symbols": [
@@ -7210,9 +7210,9 @@
         "send"
       ],
       "imports": [],
-      "inventory_identity": "sha256:bb8fe03d3152c558568bfd3012c24f586ff6b7fe4f60b8638942751d563925ba",
+      "inventory_identity": "sha256:0e4fabf4e0b0366d5cacfa104fca08a471d10d12ca385bc6c1979fd3d8166cbd",
       "module": "mncs.std.channel.v1",
-      "path": "library/std/channel.mncs",
+      "path": "mncs-stdlib/library/std/channel.mncs",
       "profile": "0.13",
       "source_identity": "sha256:b8f76368658b8add78e2c0df7baab89bde173ac2b3b669422c93e5f777165b31",
       "symbols": [
@@ -7310,9 +7310,9 @@
         "next_line_generic"
       ],
       "imports": [],
-      "inventory_identity": "sha256:bff51802f23a08062af4930dc70b24a03c5924aacb9f1670a948ee8097297f98",
+      "inventory_identity": "sha256:92970daf7b67f23d24884f1668295c9e148a55cc80f56e37cefd7e734c3544b1",
       "module": "mncs.std.chunk.v1",
-      "path": "library/std/chunk.mncs",
+      "path": "mncs-stdlib/library/std/chunk.mncs",
       "profile": "0.13",
       "source_identity": "sha256:70e505eec17a7cc10c8e8fb4cf549a412758527570a85040dac739595b658311",
       "symbols": [
@@ -7403,9 +7403,9 @@
         "fresh_within"
       ],
       "imports": [],
-      "inventory_identity": "sha256:e011d03532d6758b0b22e2414041d638724205b78faa341a3fe811064c5dc27e",
+      "inventory_identity": "sha256:9a2d4e0c22f22fd09833a8996b338f28ef0efaf8a5a68936236b7fc123cffe0e",
       "module": "mncs.std.clock.v1",
-      "path": "library/std/clock.mncs",
+      "path": "mncs-stdlib/library/std/clock.mncs",
       "profile": "0.10",
       "source_identity": "sha256:a825fe196cc3569576e2cadd2106b1b298be562df4582c5d6b9440221e0773b6",
       "symbols": [
@@ -7451,9 +7451,9 @@
         "version_roundtrip"
       ],
       "imports": [],
-      "inventory_identity": "sha256:976b9e6ea26575d674edbb604c523e5246462f598342f0e8e701f370aa5fa1a3",
+      "inventory_identity": "sha256:b0b8dbdb72ed9b0b5346aae77a799c8ed467aec48a42d86ccd328b2234a04031",
       "module": "mncs.std.encoding.v1",
-      "path": "library/std/encoding.mncs",
+      "path": "mncs-stdlib/library/std/encoding.mncs",
       "profile": "0.13",
       "source_identity": "sha256:86c3cab77708b87dc2d01ff484416ebf815ef6c0c3b0776fde99745f3b8eb9c5",
       "symbols": [
@@ -7565,9 +7565,9 @@
         "sub"
       ],
       "imports": [],
-      "inventory_identity": "sha256:0eb1a55cb167a02b14b0a03da4ea4dfcc6d189d3c557d124b84300674ee97b55",
+      "inventory_identity": "sha256:3bd5a8016a09689f6cba510aff60cf1272b959bbea980145ddc25ea07dd16070",
       "module": "mncs.std.fixed.v1",
-      "path": "library/std/fixed.mncs",
+      "path": "mncs-stdlib/library/std/fixed.mncs",
       "profile": "0.6",
       "source_identity": "sha256:62bc1be04c3af5f6413362799dab3bb652f6c741a32f3cb46162b9e2eefa9899",
       "symbols": [
@@ -7628,9 +7628,9 @@
         "step"
       ],
       "imports": [],
-      "inventory_identity": "sha256:45a9a57de1792cd8a8a2d4574ff05ad1b39abaa553d9f19ddf29c9106aca8a63",
+      "inventory_identity": "sha256:0cb30f8ec5f3bc60c77082b50025052cac232a8fb988babdec7bcf9c33d34c52",
       "module": "mncs.std.fnv1a.v1",
-      "path": "library/std/fnv1a.mncs",
+      "path": "mncs-stdlib/library/std/fnv1a.mncs",
       "profile": "0.13",
       "source_identity": "sha256:33502607a12639ea8a75def86a4ed7093018b5c0a9ca838a1fa8385516373590",
       "symbols": [
@@ -7678,9 +7678,9 @@
         "stack_weight"
       ],
       "imports": [],
-      "inventory_identity": "sha256:e01e3e89b33aac69d5c0451f1e98b3fe5896dd9178e6166191c56b6446cdc177",
+      "inventory_identity": "sha256:6e591e40a4c09655b1e6282a1e252aeeafee4394f7434b43cc199e25a56c0910",
       "module": "mncs.std.json.v1",
-      "path": "library/std/json.mncs",
+      "path": "mncs-stdlib/library/std/json.mncs",
       "profile": "0.13",
       "source_identity": "sha256:bbf08cfd0b220b5ed50aa3276cdd099efb518820f187841b5a5f2dd51418506c",
       "symbols": [
@@ -7809,9 +7809,9 @@
         "zero_key"
       ],
       "imports": [],
-      "inventory_identity": "sha256:0a2e301f846446f808d6ecea71fe280b12f0daf0672697df6322c5b9690e2f85",
+      "inventory_identity": "sha256:8ddb863c0d22ea85d5e56b8a4cfa733cb39e46ccb697c4e1989f207d00030039",
       "module": "mncs.std.json_cursor.v1",
-      "path": "library/std/json_cursor.mncs",
+      "path": "mncs-stdlib/library/std/json_cursor.mncs",
       "profile": "0.10",
       "source_identity": "sha256:3ac6292bbff6f7c531aca51b1c83b5674540397a76cced1a47026da7ad71e36e",
       "symbols": [
@@ -7934,9 +7934,9 @@
         "str_value"
       ],
       "imports": [],
-      "inventory_identity": "sha256:71b98fc8c8ec6e873b3540a7ad2013e619c3b07f200cb8f1f20cc5cbbe3876d2",
+      "inventory_identity": "sha256:d8394570b5bc6ca2e41ccabbd415b78bd8635e21520ba64da122632cc20b12b1",
       "module": "mncs.std.json_emit.v1",
-      "path": "library/std/json_emit.mncs",
+      "path": "mncs-stdlib/library/std/json_emit.mncs",
       "profile": "0.13",
       "source_identity": "sha256:509b80aa679dfadffcb526d96aa4da28fb612bc75976dc955b62be9222dd84dd",
       "symbols": [
@@ -8113,9 +8113,9 @@
         "projection_value_match"
       ],
       "imports": [],
-      "inventory_identity": "sha256:b169e86c03d97c87719fdfc68e82d07c32ba4bd3cafda0563a431fa437e78d16",
+      "inventory_identity": "sha256:81d373779b65e64f0bd0dd177ca85b8cdf82e120500ff94a866b5f3cb193ddac",
       "module": "mncs.std.json_projection.v1",
-      "path": "library/std/json_projection.mncs",
+      "path": "mncs-stdlib/library/std/json_projection.mncs",
       "profile": "0.13",
       "source_identity": "sha256:d6927c358ec88d62c4d0d93ca063d32dc6bbe431c76dac98ca789eb606f6925b",
       "symbols": [
@@ -8214,9 +8214,9 @@
         "unicode_remaining"
       ],
       "imports": [],
-      "inventory_identity": "sha256:bcb830edd664d901cab863d575cb0412100114b4975ead02805a04ac15038771",
+      "inventory_identity": "sha256:11d21b31328c1af6a50bad6aebb9255cb448bc24d7f448e9c32020bf2750fe6f",
       "module": "mncs.std.json_stream.v1",
-      "path": "library/std/json_stream.mncs",
+      "path": "mncs-stdlib/library/std/json_stream.mncs",
       "profile": "0.13",
       "source_identity": "sha256:fa5f414698be449b0336949733d901e61bdb3ca99c50bac232c543e6a5cdc707",
       "symbols": [
@@ -8343,9 +8343,9 @@
         "version_satisfies"
       ],
       "imports": [],
-      "inventory_identity": "sha256:e464d3670e5a7c9b895f925e8c121b84dba841191083ab3dc5a18956eef1e34b",
+      "inventory_identity": "sha256:826c33428b1b579f9df4c514167768272e990839fea279ab9618b57b357c99b6",
       "module": "mncs.std.platform.v1",
-      "path": "library/std/platform.mncs",
+      "path": "mncs-stdlib/library/std/platform.mncs",
       "profile": "0.6",
       "source_identity": "sha256:bc07d20cc2790928877c618dd046644265d82c84bea50f9ef174508f3627702e",
       "symbols": [
@@ -8569,9 +8569,9 @@
         "start"
       ],
       "imports": [],
-      "inventory_identity": "sha256:ae12e473caefe2601cd7d1cb9d4c6d21050f48cde43f5c874e1abff511cb5616",
+      "inventory_identity": "sha256:131d55a2e385ab9e11b0aaa042fe96b684ca3222567ef35052b30da284531615",
       "module": "mncs.std.process.v1",
-      "path": "library/std/process.mncs",
+      "path": "mncs-stdlib/library/std/process.mncs",
       "profile": "0.18",
       "source_identity": "sha256:40ba08b66a095e791d6aa3b55fe67c3bb5dc3421be660bb0c6ef4d78cc9d928c",
       "symbols": [
@@ -8670,9 +8670,9 @@
         "visited_has"
       ],
       "imports": [],
-      "inventory_identity": "sha256:8f7cf5e24656ebf6b3791880bd581a52d855625062d975aa2e4826d6d5f226c2",
+      "inventory_identity": "sha256:6eee0fc7ad1f43c816e10248ac7f5a882c8dfb2f9c2d45b2a5d1cbd45d15abfe",
       "module": "mncs.std.relation.v1",
-      "path": "library/std/relation.mncs",
+      "path": "mncs-stdlib/library/std/relation.mncs",
       "profile": "0.13",
       "source_identity": "sha256:f0fcd04818e5286f7a696927922b0bc16e849dc88a128a1be58454d1fb528971",
       "symbols": [
@@ -8815,9 +8815,9 @@
         "state_of"
       ],
       "imports": [],
-      "inventory_identity": "sha256:5297e3e8808789af51386a967fb3253d5fbed1f70a2d89a94d27e64366f7f1d3",
+      "inventory_identity": "sha256:018d8e8f9bcf287497c54f24d76c2cbffcf3b07b0878e68084704894788d6a51",
       "module": "mncs.std.scope.v1",
-      "path": "library/std/scope.mncs",
+      "path": "mncs-stdlib/library/std/scope.mncs",
       "profile": "0.13",
       "source_identity": "sha256:cff2b5ce6cc05c2bcaea9779f61bc4d77d79644250532d25aabe6936a6aad873",
       "symbols": [
@@ -8978,9 +8978,9 @@
       "imports": [
         "mncs.std.encoding.v1"
       ],
-      "inventory_identity": "sha256:7d3b89ae97ce54ade06382e5ee00c83cb8e19a990a87ff531260365c8b1dae65",
+      "inventory_identity": "sha256:c159b9c8154632c6a25b2a610411b2b8c23bb5005a3f89b6538035e36e82534b",
       "module": "mncs.std.sha256.v1",
-      "path": "library/std/sha256.mncs",
+      "path": "mncs-stdlib/library/std/sha256.mncs",
       "profile": "0.14",
       "source_identity": "sha256:9065c75f7b3e3ea81f4786ff587b0e47da1eed82b70fe9d166340b695fffff6c",
       "symbols": [
@@ -9104,9 +9104,9 @@
         "affine_relu_sum4"
       ],
       "imports": [],
-      "inventory_identity": "sha256:8f42dc46a54f0e536069b0b260bff7c4a66b4dc48f86df4a823b3c50a6a61f46",
+      "inventory_identity": "sha256:4a3f3ed9379f49e47520402c7ed12a390e751218e3d605e3c40a6afdb15a9639",
       "module": "mncs.std.simd.v1",
-      "path": "library/std/simd.mncs",
+      "path": "mncs-stdlib/library/std/simd.mncs",
       "profile": "0.8",
       "source_identity": "sha256:c50c38f9c5d92c7f63ed5287ef1394df9c498ee14cab22f3a76b499b55b785d1",
       "symbols": [
@@ -9131,9 +9131,9 @@
         "sort_up"
       ],
       "imports": [],
-      "inventory_identity": "sha256:d0b518002fb225d8b9abf3ceb46757098450201c6e52bb7b023f2e39b47d4572",
+      "inventory_identity": "sha256:59553d7a22eb35b36cc2bd658c70ca5cee615ca0f5d166c4cb05ab841749dd0e",
       "module": "mncs.std.sort.v1",
-      "path": "library/std/sort.mncs",
+      "path": "mncs-stdlib/library/std/sort.mncs",
       "profile": "0.13",
       "source_identity": "sha256:9fb698dbd9c40abe2bb963afd157c27ab0bf04dd1fcfb7656549e31069f0f08e",
       "symbols": [
@@ -9195,9 +9195,9 @@
         "release"
       ],
       "imports": [],
-      "inventory_identity": "sha256:25e9eb10adf46d537ec97d4d995ec3fff1f9b345934cea549ec7bc7c13801eff",
+      "inventory_identity": "sha256:6c0839b44b8a588d44b10a395d130d5a16f179f37b7a0c56aa89fcd78396c04c",
       "module": "mncs.std.store.v1",
-      "path": "library/std/store.mncs",
+      "path": "mncs-stdlib/library/std/store.mncs",
       "profile": "0.13",
       "source_identity": "sha256:e968d2293dd8af808c063ab790f2af890e19fc1d48e772835220c1d4db9696d7",
       "symbols": [
@@ -9294,9 +9294,9 @@
         "was_cancelled"
       ],
       "imports": [],
-      "inventory_identity": "sha256:9ac2f28d6818d7d1a090cbbc0913c54eb64d4f289b11ad1daabb5f0cb50635b5",
+      "inventory_identity": "sha256:2769a48d48ed024f2fe816aad150f970cbb68e101111af811a6679f403506b24",
       "module": "mncs.std.task.v1",
-      "path": "library/std/task.mncs",
+      "path": "mncs-stdlib/library/std/task.mncs",
       "profile": "0.8",
       "source_identity": "sha256:169d17cb48d9c818f5e11eae79d9c74d8a2f3b5e477469762eb2ea3e0b0c6ce8",
       "symbols": [
@@ -9387,9 +9387,9 @@
       "imports": [
         "mncs.std.text_view.v1"
       ],
-      "inventory_identity": "sha256:9507b7f644d5d6b87ab64cc0017e12bc867f004da58fa916e5107cdeaa899020",
+      "inventory_identity": "sha256:3269b09230df6d381ae50529c652ccb1148a71850fe4d0c93b272b37489d5383",
       "module": "mncs.std.text_map.v1",
-      "path": "library/std/text_map.mncs",
+      "path": "mncs-stdlib/library/std/text_map.mncs",
       "profile": "0.13",
       "source_identity": "sha256:e30c79a0316b0a7b723241d2a6385ccf5fdb65150e766c25079591d87234276d",
       "symbols": [
@@ -9460,9 +9460,9 @@
       "imports": [
         "mncs.core.bytes.v1"
       ],
-      "inventory_identity": "sha256:1ff484bdf85fc6af02361e00c384cfba7e71271d1f11491537151d83b96da670",
+      "inventory_identity": "sha256:c7ec68d5025664e92a2cc7606e44bd24f921d95de6b90b1d89921604e9a58eb4",
       "module": "mncs.std.text_scan.v1",
-      "path": "library/std/text_scan.mncs",
+      "path": "mncs-stdlib/library/std/text_scan.mncs",
       "profile": "0.13",
       "source_identity": "sha256:9d09428028957c4f1002bc86024e6c2b672ec895241484a3e0a46183f3f865a9",
       "symbols": [
@@ -9597,9 +9597,9 @@
       "imports": [
         "mncs.std.json_cursor.v1"
       ],
-      "inventory_identity": "sha256:f5c9e6dc13eb50320ffbf3b141744835f4b21a49e039fe591a1dbf69ea8b3222",
+      "inventory_identity": "sha256:776f389fcb8e2b13ad3ba70da2ea590f0a87eba89b29d55082a5298de3d73156",
       "module": "mncs.std.text_utf8.v1",
-      "path": "library/std/text_utf8.mncs",
+      "path": "mncs-stdlib/library/std/text_utf8.mncs",
       "profile": "0.13",
       "source_identity": "sha256:471d10a104d9a3f8f60ff425965369d44d29fd36ea7b96762da9c82b8b4c9fe0",
       "symbols": [
@@ -9675,9 +9675,9 @@
         "span"
       ],
       "imports": [],
-      "inventory_identity": "sha256:6b5e4928d4f7f862f3915d5674cf3aaea24d361f343481a00566a1b4b4e3f49e",
+      "inventory_identity": "sha256:f99a5c6a1069a329633909989bd6c5b434ed87487377ff7f58f1130012f09f1d",
       "module": "mncs.std.text_view.v1",
-      "path": "library/std/text_view.mncs",
+      "path": "mncs-stdlib/library/std/text_view.mncs",
       "profile": "0.10",
       "source_identity": "sha256:dec9ee39f224b0064a593bbdc536d798d20d5248c3cb8cca37ef33dd7dc3735f",
       "symbols": [
@@ -9746,9 +9746,9 @@
         "top_index"
       ],
       "imports": [],
-      "inventory_identity": "sha256:954900a770dfb2ce5e3ea26f822e1af90e63918087b411bad6a20ef94c229564",
+      "inventory_identity": "sha256:eca1c62a077528c69c042eed28a2e607052ac1bb27218fa85a97bea59b74b53a",
       "module": "mncs.std.token_set.v1",
-      "path": "library/std/token_set.mncs",
+      "path": "mncs-stdlib/library/std/token_set.mncs",
       "profile": "0.13",
       "source_identity": "sha256:c4e12abaff46b259ee7cda9efae1beeed2d0c36d0e89be48189767fc20dc29d3",
       "symbols": [
@@ -10182,11 +10182,6 @@
     },
     {
       "kind": "canonical_example",
-      "path": "examples/source/application-entry.mncs",
-      "source_identity": "sha256:323eb56ab3010bc614d747303fa5959d5e4ad5b34114907b10391559c5f52fb6"
-    },
-    {
-      "kind": "canonical_example",
       "path": "examples/source/bounded-min.mncs",
       "source_identity": "sha256:a40ef04b6eeb82aa79d0d3ad8d07fdceab34ecb0cb6d2a9994292ef332fe7ed1"
     },
@@ -10206,317 +10201,337 @@
       "source_identity": "sha256:da5c47990cf8722fb2eb3ee3e4c7943d988baac9da97a4af3285171c8ac09521"
     },
     {
+      "kind": "canonical_example",
+      "path": "mncs-stdlib/examples/source/application-entry.mncs",
+      "source_identity": "sha256:323eb56ab3010bc614d747303fa5959d5e4ad5b34114907b10391559c5f52fb6"
+    },
+    {
       "kind": "library_module",
-      "path": "library/core/bounds.mncs",
+      "path": "mncs-stdlib/library/core/bounds.mncs",
       "source_identity": "sha256:ed11a325208e0450ad196998c297f33ac2cae3f810ea29089f9cdd07ac6d0f62"
     },
     {
       "kind": "library_module",
-      "path": "library/core/bytes.mncs",
+      "path": "mncs-stdlib/library/core/bytes.mncs",
       "source_identity": "sha256:02a87c9fe7c8c5f8eee9e177c5090bd57614ad6a05b84a339ebab5b90f61f337"
     },
     {
       "kind": "library_module",
-      "path": "library/core/contracts.mncs",
+      "path": "mncs-stdlib/library/core/contracts.mncs",
       "source_identity": "sha256:343902e73e4a6b0bb07e078906da2ed1e5f3c1b1a11971245ab347e0875938cb"
     },
     {
       "kind": "library_module",
-      "path": "library/core/geometry.mncs",
+      "path": "mncs-stdlib/library/core/geometry.mncs",
       "source_identity": "sha256:6ea8f9a6a160a707048fef415b3a4e5d07b7f72b1e01914e84cfbe08fbddb0ca"
     },
     {
       "kind": "library_module",
-      "path": "library/core/identity.mncs",
+      "path": "mncs-stdlib/library/core/identity.mncs",
       "source_identity": "sha256:0348822874eab9bfa496024809b36983e1a00e8241357a753dc79148faa528d2"
     },
     {
       "kind": "library_module",
-      "path": "library/core/image.mncs",
+      "path": "mncs-stdlib/library/core/image.mncs",
       "source_identity": "sha256:cc53b671cfd4eda6275ed5d07610e776a132a00e59e9288e980d65750ae36138"
     },
     {
       "kind": "library_module",
-      "path": "library/core/lineage.mncs",
+      "path": "mncs-stdlib/library/core/lineage.mncs",
       "source_identity": "sha256:b26698131716bdbdc6baf34a4f33d7c0477a43c5641dba2a5c53f6477c6ae061"
     },
     {
       "kind": "library_module",
-      "path": "library/core/logic.mncs",
+      "path": "mncs-stdlib/library/core/logic.mncs",
       "source_identity": "sha256:3cc836943a01ff32ee3efd690f4b9de0c5757dd9718af33ed48ae924588ac32a"
     },
     {
       "kind": "library_module",
-      "path": "library/core/mask.mncs",
+      "path": "mncs-stdlib/library/core/mask.mncs",
       "source_identity": "sha256:8a979917d86ca80bf61d65bcf737f22c735ecb648fd9773765d4b5fabbaf70b7"
     },
     {
       "kind": "library_module",
-      "path": "library/core/numeric.mncs",
+      "path": "mncs-stdlib/library/core/numeric.mncs",
       "source_identity": "sha256:567c2ed24d833a597670176b2c7be09cb73788aee6e860429a8eed24a01b863c"
     },
     {
       "kind": "library_module",
-      "path": "library/core/ordering.mncs",
+      "path": "mncs-stdlib/library/core/ordering.mncs",
       "source_identity": "sha256:5773304071aab4adc80ada57aa00f8ea94949b74f9c1b32852d7571e4117f76d"
     },
     {
       "kind": "library_module",
-      "path": "library/core/partition.mncs",
+      "path": "mncs-stdlib/library/core/partition.mncs",
       "source_identity": "sha256:e942038c0143515c4a7877ba16e025b35a2a52270acdcea99b2fc6b56b6d8e9f"
     },
     {
       "kind": "library_module",
-      "path": "library/core/proof_admit.mncs",
+      "path": "mncs-stdlib/library/core/proof_admit.mncs",
       "source_identity": "sha256:ccdff8991beeff8144669e3888b19b83a4ee0fa5e53c9c63bf5724160b9c7d58"
     },
     {
       "kind": "library_module",
-      "path": "library/core/proof_check.mncs",
+      "path": "mncs-stdlib/library/core/proof_check.mncs",
       "source_identity": "sha256:de683d8680f697a60c4c406c607d0bea501ffe703546e20a8c860bbeb26884c6"
     },
     {
       "kind": "library_module",
-      "path": "library/core/proof_dep.mncs",
+      "path": "mncs-stdlib/library/core/proof_dep.mncs",
       "source_identity": "sha256:782f74d6354a824891c8c27bc4b855127508d7fded0cd21b567419e28ef3aa61"
     },
     {
       "kind": "library_module",
-      "path": "library/core/proof_term.mncs",
+      "path": "mncs-stdlib/library/core/proof_term.mncs",
       "source_identity": "sha256:158550265441cd2189bb40ded0118d9cb228027d41d4d64059d56b9b81be7c33"
     },
     {
       "kind": "library_module",
-      "path": "library/core/random.mncs",
+      "path": "mncs-stdlib/library/core/random.mncs",
       "source_identity": "sha256:98c9628fbcb7942d9249e97486f9e42a77a04bc5a04af7882d812cc6311d78a4"
     },
     {
       "kind": "library_module",
-      "path": "library/core/result.mncs",
+      "path": "mncs-stdlib/library/core/result.mncs",
       "source_identity": "sha256:37ab3f0187ee27fc334ebe1feae6d11eb38b495e4014da874634e65dbc34b9ad"
     },
     {
       "kind": "library_module",
-      "path": "library/core/sequences.mncs",
+      "path": "mncs-stdlib/library/core/sequences.mncs",
       "source_identity": "sha256:ef8fc2bdb651071fdba8c9d8b3ec520db5dee5b2b27ad310c5ff727f1f23731c"
     },
     {
       "kind": "library_module",
-      "path": "library/core/status.mncs",
+      "path": "mncs-stdlib/library/core/status.mncs",
       "source_identity": "sha256:7690a6d6bff4d74cb60fa930a87d078db8d31a0a7e7533a876ed7daa7cd52ff6"
     },
     {
       "kind": "library_module",
-      "path": "library/core/vector.mncs",
+      "path": "mncs-stdlib/library/core/vector.mncs",
       "source_identity": "sha256:8e4b72d710a6a928186c547cda613b77587ea73d77cbc0dfdcf3d5ff2bfb2259"
     },
     {
       "kind": "library_module",
-      "path": "library/core/version.mncs",
+      "path": "mncs-stdlib/library/core/version.mncs",
       "source_identity": "sha256:686a9a08d0739b6e7c6fd43b3dda2fd3c74463deb293fccb634cb547d5272c3b"
     },
     {
       "kind": "library_module",
-      "path": "library/core/vision.mncs",
+      "path": "mncs-stdlib/library/core/vision.mncs",
       "source_identity": "sha256:41f8b1a80caf3f61b18979bf874b8508388a9c37459e86de2ad7ca20c38d6227"
     },
     {
       "kind": "library_module",
-      "path": "library/family/coherence.mncs",
+      "path": "mncs-stdlib/library/family/coherence.mncs",
       "source_identity": "sha256:7f9230b52c6ae95732006287527991f859534c34e7591fc53a0b13127cd017cf"
     },
     {
       "kind": "library_module",
-      "path": "library/family/journal.mncs",
+      "path": "mncs-stdlib/library/family/journal.mncs",
       "source_identity": "sha256:a9cfa0e10dfbeccce0b83ebfbcdf6f0dba5faea157bff74f0cb74183fb1c22c9"
     },
     {
       "kind": "library_module",
-      "path": "library/family/rfc_status.mncs",
+      "path": "mncs-stdlib/library/family/rfc_status.mncs",
       "source_identity": "sha256:bd8afffcd37a1381ebdfc733074924776a959b0fcefce54684498c4fbfca1594"
     },
     {
       "kind": "library_module",
-      "path": "library/jit/binding.mncs",
+      "path": "mncs-stdlib/library/jit/binding.mncs",
       "source_identity": "sha256:9517c094badc3c60bbd7fd0f236b3d5a23d26f5c479b2c317dc45751f121cbd0"
     },
     {
       "kind": "library_module",
-      "path": "library/jit/depends.mncs",
+      "path": "mncs-stdlib/library/jit/depends.mncs",
       "source_identity": "sha256:4a07aaed3e0385fca8d17f6999876cabefcb72cd26d28b4a39f32edfcf0f10ac"
     },
     {
       "kind": "library_module",
-      "path": "library/jit/lifecycle.mncs",
+      "path": "mncs-stdlib/library/jit/lifecycle.mncs",
       "source_identity": "sha256:f4656413e1bc5f19950407749b6cc21f68c1d98d7e753a4317be6aaa9bf0e622"
     },
     {
       "kind": "library_module",
-      "path": "library/jit/plan.mncs",
+      "path": "mncs-stdlib/library/jit/plan.mncs",
       "source_identity": "sha256:6c5e71ce936f72157876c35f7a82f8f3f22258f1c13bc94a17513507b54213ef"
     },
     {
       "kind": "library_module",
-      "path": "library/jit/profile.mncs",
+      "path": "mncs-stdlib/library/jit/profile.mncs",
       "source_identity": "sha256:366038a748de23925abfc39a4d6c0dc89eef9cb5b5c4ac58d145d8d2e39c3415"
     },
     {
       "kind": "library_module",
-      "path": "library/jit/proof.mncs",
+      "path": "mncs-stdlib/library/jit/proof.mncs",
       "source_identity": "sha256:9df360436fc3f1d85ac5506232ab6755295f736b472643736829d965bca3ea19"
     },
     {
       "kind": "library_module",
-      "path": "library/jit/session.mncs",
+      "path": "mncs-stdlib/library/jit/session.mncs",
       "source_identity": "sha256:731c0e25ee0c66885810aeec9674aab87e2070048a87219eafbbed670f01f5c5"
     },
     {
       "kind": "library_module",
-      "path": "library/jit/types.mncs",
+      "path": "mncs-stdlib/library/jit/types.mncs",
       "source_identity": "sha256:2017f25e2c0df0a00e651fc330459d56967c4b82e29886a992cda950fdc27fb5"
     },
     {
       "kind": "library_module",
-      "path": "library/std/ansi.mncs",
+      "path": "mncs-stdlib/library/std/ansi.mncs",
       "source_identity": "sha256:634e6acece32a5875e448a8b03c06cecb602a5326950c0f81b60fb928ae37e53"
     },
     {
       "kind": "library_module",
-      "path": "library/std/application.mncs",
+      "path": "mncs-stdlib/library/std/application.mncs",
       "source_identity": "sha256:d10591c3f9ec3e5b4c72bdef0ae9e0e2a0fcf1f120acc6379491c8528088b0e0"
     },
     {
       "kind": "library_module",
-      "path": "library/std/channel.mncs",
+      "path": "mncs-stdlib/library/std/channel.mncs",
       "source_identity": "sha256:b8f76368658b8add78e2c0df7baab89bde173ac2b3b669422c93e5f777165b31"
     },
     {
       "kind": "library_module",
-      "path": "library/std/chunk.mncs",
+      "path": "mncs-stdlib/library/std/chunk.mncs",
       "source_identity": "sha256:70e505eec17a7cc10c8e8fb4cf549a412758527570a85040dac739595b658311"
     },
     {
       "kind": "library_module",
-      "path": "library/std/clock.mncs",
+      "path": "mncs-stdlib/library/std/clock.mncs",
       "source_identity": "sha256:a825fe196cc3569576e2cadd2106b1b298be562df4582c5d6b9440221e0773b6"
     },
     {
       "kind": "library_module",
-      "path": "library/std/encoding.mncs",
+      "path": "mncs-stdlib/library/std/encoding.mncs",
       "source_identity": "sha256:86c3cab77708b87dc2d01ff484416ebf815ef6c0c3b0776fde99745f3b8eb9c5"
     },
     {
       "kind": "library_module",
-      "path": "library/std/fixed.mncs",
+      "path": "mncs-stdlib/library/std/fixed.mncs",
       "source_identity": "sha256:62bc1be04c3af5f6413362799dab3bb652f6c741a32f3cb46162b9e2eefa9899"
     },
     {
       "kind": "library_module",
-      "path": "library/std/fnv1a.mncs",
+      "path": "mncs-stdlib/library/std/fnv1a.mncs",
       "source_identity": "sha256:33502607a12639ea8a75def86a4ed7093018b5c0a9ca838a1fa8385516373590"
     },
     {
       "kind": "library_module",
-      "path": "library/std/json.mncs",
+      "path": "mncs-stdlib/library/std/json.mncs",
       "source_identity": "sha256:bbf08cfd0b220b5ed50aa3276cdd099efb518820f187841b5a5f2dd51418506c"
     },
     {
       "kind": "library_module",
-      "path": "library/std/json_cursor.mncs",
+      "path": "mncs-stdlib/library/std/json_cursor.mncs",
       "source_identity": "sha256:3ac6292bbff6f7c531aca51b1c83b5674540397a76cced1a47026da7ad71e36e"
     },
     {
       "kind": "library_module",
-      "path": "library/std/json_emit.mncs",
+      "path": "mncs-stdlib/library/std/json_emit.mncs",
       "source_identity": "sha256:509b80aa679dfadffcb526d96aa4da28fb612bc75976dc955b62be9222dd84dd"
     },
     {
       "kind": "library_module",
-      "path": "library/std/json_projection.mncs",
+      "path": "mncs-stdlib/library/std/json_projection.mncs",
       "source_identity": "sha256:d6927c358ec88d62c4d0d93ca063d32dc6bbe431c76dac98ca789eb606f6925b"
     },
     {
       "kind": "library_module",
-      "path": "library/std/json_stream.mncs",
+      "path": "mncs-stdlib/library/std/json_stream.mncs",
       "source_identity": "sha256:fa5f414698be449b0336949733d901e61bdb3ca99c50bac232c543e6a5cdc707"
     },
     {
       "kind": "library_module",
-      "path": "library/std/platform.mncs",
+      "path": "mncs-stdlib/library/std/platform.mncs",
       "source_identity": "sha256:bc07d20cc2790928877c618dd046644265d82c84bea50f9ef174508f3627702e"
     },
     {
       "kind": "library_module",
-      "path": "library/std/process.mncs",
+      "path": "mncs-stdlib/library/std/process.mncs",
       "source_identity": "sha256:40ba08b66a095e791d6aa3b55fe67c3bb5dc3421be660bb0c6ef4d78cc9d928c"
     },
     {
       "kind": "library_module",
-      "path": "library/std/relation.mncs",
+      "path": "mncs-stdlib/library/std/relation.mncs",
       "source_identity": "sha256:f0fcd04818e5286f7a696927922b0bc16e849dc88a128a1be58454d1fb528971"
     },
     {
       "kind": "library_module",
-      "path": "library/std/scope.mncs",
+      "path": "mncs-stdlib/library/std/scope.mncs",
       "source_identity": "sha256:cff2b5ce6cc05c2bcaea9779f61bc4d77d79644250532d25aabe6936a6aad873"
     },
     {
       "kind": "library_module",
-      "path": "library/std/sha256.mncs",
+      "path": "mncs-stdlib/library/std/sha256.mncs",
       "source_identity": "sha256:9065c75f7b3e3ea81f4786ff587b0e47da1eed82b70fe9d166340b695fffff6c"
     },
     {
       "kind": "library_module",
-      "path": "library/std/simd.mncs",
+      "path": "mncs-stdlib/library/std/simd.mncs",
       "source_identity": "sha256:c50c38f9c5d92c7f63ed5287ef1394df9c498ee14cab22f3a76b499b55b785d1"
     },
     {
       "kind": "library_module",
-      "path": "library/std/sort.mncs",
+      "path": "mncs-stdlib/library/std/sort.mncs",
       "source_identity": "sha256:9fb698dbd9c40abe2bb963afd157c27ab0bf04dd1fcfb7656549e31069f0f08e"
     },
     {
       "kind": "library_module",
-      "path": "library/std/store.mncs",
+      "path": "mncs-stdlib/library/std/store.mncs",
       "source_identity": "sha256:e968d2293dd8af808c063ab790f2af890e19fc1d48e772835220c1d4db9696d7"
     },
     {
       "kind": "library_module",
-      "path": "library/std/task.mncs",
+      "path": "mncs-stdlib/library/std/task.mncs",
       "source_identity": "sha256:169d17cb48d9c818f5e11eae79d9c74d8a2f3b5e477469762eb2ea3e0b0c6ce8"
     },
     {
       "kind": "library_module",
-      "path": "library/std/text_map.mncs",
+      "path": "mncs-stdlib/library/std/text_map.mncs",
       "source_identity": "sha256:e30c79a0316b0a7b723241d2a6385ccf5fdb65150e766c25079591d87234276d"
     },
     {
       "kind": "library_module",
-      "path": "library/std/text_scan.mncs",
+      "path": "mncs-stdlib/library/std/text_scan.mncs",
       "source_identity": "sha256:9d09428028957c4f1002bc86024e6c2b672ec895241484a3e0a46183f3f865a9"
     },
     {
       "kind": "library_module",
-      "path": "library/std/text_utf8.mncs",
+      "path": "mncs-stdlib/library/std/text_utf8.mncs",
       "source_identity": "sha256:471d10a104d9a3f8f60ff425965369d44d29fd36ea7b96762da9c82b8b4c9fe0"
     },
     {
       "kind": "library_module",
-      "path": "library/std/text_view.mncs",
+      "path": "mncs-stdlib/library/std/text_view.mncs",
       "source_identity": "sha256:dec9ee39f224b0064a593bbdc536d798d20d5248c3cb8cca37ef33dd7dc3735f"
     },
     {
       "kind": "library_module",
-      "path": "library/std/token_set.mncs",
+      "path": "mncs-stdlib/library/std/token_set.mncs",
       "source_identity": "sha256:c4e12abaff46b259ee7cda9efae1beeed2d0c36d0e89be48189767fc20dc29d3"
+    },
+    {
+      "kind": "stdlib_manifest",
+      "path": "mncs-stdlib/stdlib-manifest.json",
+      "source_identity": "sha256:0b7579d7ab0cff8362bafeee2bc896635a4972d135b7e22ea658c63182a34522"
     },
     {
       "kind": "projection_generator",
       "path": "scripts/generate_language_capabilities.py",
-      "source_identity": "sha256:b2d07ab99e2a657ab7d411d57d2e6af78d92dc3ae472d26f88de97c175f1c834"
+      "source_identity": "sha256:15af548487bc85a2baae9df4b500631044a37aeb62b32fb07e31490b4c658662"
     }
   ],
   "schema_version": "mncs.language-capabilities/1",
+  "stdlib": {
+    "bundle_identity": "mncs:stdlib-bundle:702ef9426c07e0f5a6acf0b4048734c1fdf2e581ef596362532dcbe6f03b49c3",
+    "manifest_identity": "sha256:0b7579d7ab0cff8362bafeee2bc896635a4972d135b7e22ea658c63182a34522",
+    "manifest_path": "mncs-stdlib/stdlib-manifest.json",
+    "module_count": 61,
+    "requires_profile": {
+      "max": "0.18",
+      "min": "0.5"
+    }
+  },
   "topics": [
     {
       "description": "Use statically bounded sequences, vectors, and builders so capacity is explicit.",

@@ -13,8 +13,42 @@ use std::process::Command;
 
 use serde_json::Value;
 
+/// Stage F: the `mncs-stdlib` checkout backing these tests: explicit
+/// `MNCS_STDLIB_ROOT` wins, else the `mncs-stdlib` sibling checkout.
+/// Fails closed with a clear message when absent.
+fn stdlib_checkout_dir() -> String {
+    // Test inputs need a real checkout: an explicitly empty variable
+    // (the CLI's hermetic spelling) falls through to the sibling here.
+    let explicit = std::env::var("MNCS_STDLIB_ROOT")
+        .ok()
+        .filter(|root| !root.trim().is_empty());
+    let checkout =
+        explicit.unwrap_or_else(|| format!("{}/../../../mncs-stdlib", env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        std::path::Path::new(&checkout).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    checkout
+}
+
+/// Stage F: standard-library sources now live in `mncs-stdlib/library/`.
+fn stdlib_library_dir() -> String {
+    let checkout = stdlib_checkout_dir();
+    let dir = format!("{checkout}/library");
+    assert!(
+        std::path::Path::new(&dir).is_dir(),
+        "mncs-stdlib checkout missing at {checkout}; set MNCS_STDLIB_ROOT"
+    );
+    dir
+}
+
+/// Stage F: stdlib-owned examples (fixtures/corpora) read across repos.
+fn stdlib_example(name: &str) -> String {
+    format!("{}/examples/{name}", stdlib_checkout_dir())
+}
+
 fn library_dir() -> String {
-    format!("{}/../../library", env!("CARGO_MANIFEST_DIR"))
+    stdlib_library_dir()
 }
 
 fn binary() -> Command {
@@ -69,7 +103,7 @@ fn assert_all_met(result: &Value, backend: &str, expected_cases: usize) {
 #[test]
 fn scope_contracts_agree_on_every_executable_backend() {
     let source = format!("{}/std/scope.mncs", library_dir());
-    let corpus = example("execution/scope-corpus.json");
+    let corpus = stdlib_example("execution/scope-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let result = run(&source, &corpus, backend);
         assert_all_met(&result, backend, 5);
@@ -84,7 +118,7 @@ fn scope_contracts_agree_across_layers() {
         .args([
             "check-backend-execution",
             &format!("{}/std/scope.mncs", library_dir()),
-            &example("execution/scope-corpus.json"),
+            &stdlib_example("execution/scope-corpus.json"),
         ])
         .output()
         .expect("run layered scope check");
@@ -103,7 +137,7 @@ fn scope_contracts_agree_across_layers() {
 #[test]
 fn scope_witnesses_are_deterministically_repeatable() {
     let source = format!("{}/std/scope.mncs", library_dir());
-    let corpus = example("execution/scope-corpus.json");
+    let corpus = stdlib_example("execution/scope-corpus.json");
     let first = run(&source, &corpus, "mncs-research-bytecode");
     let second = run(&source, &corpus, "mncs-research-bytecode");
     let witness = |result: &Value| {

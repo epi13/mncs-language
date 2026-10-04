@@ -1,7 +1,7 @@
 # MNCS-native JIT / execution architecture
 
 Status: **implemented, experimental** (branch `feat/mncs-native-jit`).
-Implementation: `library/jit/` (MNCS language). Tests:
+Implementation: `mncs-stdlib/library/jit/` (MNCS language). Tests:
 `examples/execution/jit-*-corpus.json`,
 `crates/mncs-cli/tests/jit_orchestration.rs`,
 `crates/mncs-embed/tests/jit_execution.rs`.
@@ -257,7 +257,7 @@ FUTURE SELF-HOSTED COMPILER RESPONSIBILITY:
 
 ## 11. Future extraction into `mncs-jit`
 
-Extraction unit: `library/jit/` (8 modules) + its 8 corpora + the
+Extraction unit: `mncs-stdlib/library/jit/` (8 modules) + its 8 corpora + the
 two test files' JIT portions + this document. The modules import
 only `mncs.core.logic.v1` outside the family, use no backend-
 specific surface, and exchange only u64/bool/record values across
