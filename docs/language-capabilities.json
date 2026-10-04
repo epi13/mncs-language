@@ -1182,7 +1182,7 @@
     ]
   },
   "compiler_inventory_identity": "sha256:c1352e7c7b1fb943a7cf8c0356c17b458ae091f1bbf6f824d705089eef3837fd",
-  "content_identity": "sha256:20d4abe5f9e2db66eb641ae66da2b92a2cddec375982a948de2981da50779524",
+  "content_identity": "sha256:9851e1232e4a0b820eff0833c2c2a9a3c4f04d729bd92e7205f6cc698846d959",
   "current_profile": "0.18",
   "examples": [
     {
@@ -7140,7 +7140,7 @@
     },
     {
       "capabilities": [],
-      "compiler_source_identity": "mncs:source:artifact:9ed8924682f7e0ac973f435ee2aecd3c7ac3788327e72545e1a8c7ec2fd03a79",
+      "compiler_source_identity": "mncs:source:artifact:0967c0eb3dc7a0257d70238d518eaba5a0c12a8928518de3fef0d67b28db68a8",
       "effects": [],
       "exports": [
         "ApplicationContext",
@@ -7151,11 +7151,11 @@
         "success"
       ],
       "imports": [],
-      "inventory_identity": "sha256:7ef6a136741786a26dba76659259507265fc2afc30137943fe789fa91b96fc11",
+      "inventory_identity": "sha256:04adaf402818b56f748fba1b8a7553b7027d3a5a2e5605106486f6a28efcacbd",
       "module": "mncs.std.application.v1",
       "path": "library/std/application.mncs",
       "profile": "0.16",
-      "source_identity": "sha256:d10591c3f9ec3e5b4c72bdef0ae9e0e2a0fcf1f120acc6379491c8528088b0e0",
+      "source_identity": "sha256:5669f67e921e71c0f54742325f06fddfe3b11692c1fe3d27ee515f8a3fd30c7e",
       "symbols": [
         {
           "identity": "mncs:0.2:function:mncs.std.application.v1::context_is_bounded",
@@ -7173,7 +7173,7 @@
           "name": "success"
         },
         {
-          "identity": "mncs:0.2:record-type:mncs.std.application.v1::ApplicationContext::application_identity%3A%5Bbyte%3B%2032%5D%3Bargv%3A%5B%5Bbyte%3B%20up_to%201024%5D%3B%20up_to%2016%5D%3Bargv_count%3Au64%3Bcurrent_dir%3A%5Bbyte%3B%20up_to%201024%5D%3Benvironment%3A%5BEnvironmentEntry%3B%20up_to%2016%5D%3Benvironment_count%3Au64%3Bstdin%3A%5Bbyte%3B%20up_to%201024%5D%3B",
+          "identity": "mncs:0.2:record-type:mncs.std.application.v1::ApplicationContext::application_identity%3A%5Bbyte%3B%2032%5D%3Bargv%3A%5B%5Bbyte%3B%20up_to%201024%5D%3B%20up_to%20256%5D%3Bargv_count%3Au64%3Bcurrent_dir%3A%5Bbyte%3B%20up_to%201024%5D%3Benvironment%3A%5BEnvironmentEntry%3B%20up_to%20256%5D%3Benvironment_count%3Au64%3Bstdin%3A%5Bbyte%3B%20up_to%201024%5D%3B",
           "kind": "record_type",
           "name": "ApplicationContext"
         },
@@ -8525,7 +8525,7 @@
       "capabilities": [
         "process_capability"
       ],
-      "compiler_source_identity": "mncs:source:artifact:c6b2121895ce944c184be3ebc7558d9e15ac3248346551d191f48430cc0f2e10",
+      "compiler_source_identity": "mncs:source:artifact:69f1a5b8ecaa534533ed52c0949525696536c1ca9b1ed57dade853c4eae1d77a",
       "effects": [
         {
           "capability": "process_capability",
@@ -8569,11 +8569,11 @@
         "start"
       ],
       "imports": [],
-      "inventory_identity": "sha256:131d55a2e385ab9e11b0aaa042fe96b684ca3222567ef35052b30da284531615",
+      "inventory_identity": "sha256:0f8d67ddeef4ae1b22a6bf3d12b6dadba037c5305b73f1be002faa89ce3a4eee",
       "module": "mncs.std.process.v1",
       "path": "library/std/process.mncs",
       "profile": "0.18",
-      "source_identity": "sha256:40ba08b66a095e791d6aa3b55fe67c3bb5dc3421be660bb0c6ef4d78cc9d928c",
+      "source_identity": "sha256:959073ba146668743ab5c9766cf864af34c633fcb3c12f09741f43e49eb231cd",
       "symbols": [
         {
           "identity": "mncs:0.2:finite-type:mncs.std.process.v1::ProcessStatus",
@@ -8621,7 +8621,7 @@
           "name": "ProcessObservation"
         },
         {
-          "identity": "mncs:0.2:record-type:mncs.std.process.v1::ProcessRequest::argv%3A%5B%5Bbyte%3B%20up_to%201024%5D%3B%20up_to%2016%5D%3Bargv_count%3Au64%3Bcurrent_dir%3A%5Bbyte%3B%20up_to%201024%5D%3Bdeadline_ms%3Au64%3Benvironment%3A%5BEnvironmentEntry%3B%20up_to%2016%5D%3Benvironment_count%3Au64%3Bprogram%3A%5Bbyte%3B%20up_to%201024%5D%3Bresources%3AProcessResourceEnvelope%3Bstderr_limit%3Au64%3Bstdin%3A%5Bbyte%3B%20up_to%201024%5D%3Bstdout_limit%3Au64%3B",
+          "identity": "mncs:0.2:record-type:mncs.std.process.v1::ProcessRequest::argv%3A%5B%5Bbyte%3B%20up_to%201024%5D%3B%20up_to%20256%5D%3Bargv_count%3Au64%3Bcurrent_dir%3A%5Bbyte%3B%20up_to%201024%5D%3Bdeadline_ms%3Au64%3Benvironment%3A%5BEnvironmentEntry%3B%20up_to%20256%5D%3Benvironment_count%3Au64%3Bprogram%3A%5Bbyte%3B%20up_to%201024%5D%3Bresources%3AProcessResourceEnvelope%3Bstderr_limit%3Au64%3Bstdin%3A%5Bbyte%3B%20up_to%201024%5D%3Bstdout_limit%3Au64%3B",
           "kind": "record_type",
           "name": "ProcessRequest"
         },
@@ -10383,7 +10383,7 @@
     {
       "kind": "library_module",
       "path": "library/std/application.mncs",
-      "source_identity": "sha256:d10591c3f9ec3e5b4c72bdef0ae9e0e2a0fcf1f120acc6379491c8528088b0e0"
+      "source_identity": "sha256:5669f67e921e71c0f54742325f06fddfe3b11692c1fe3d27ee515f8a3fd30c7e"
     },
     {
       "kind": "library_module",
@@ -10448,7 +10448,7 @@
     {
       "kind": "library_module",
       "path": "library/std/process.mncs",
-      "source_identity": "sha256:40ba08b66a095e791d6aa3b55fe67c3bb5dc3421be660bb0c6ef4d78cc9d928c"
+      "source_identity": "sha256:959073ba146668743ab5c9766cf864af34c633fcb3c12f09741f43e49eb231cd"
     },
     {
       "kind": "library_module",

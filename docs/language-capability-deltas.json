@@ -10,44 +10,6 @@
         "added": [],
         "removed": []
       },
-      "current_content_identity": "sha256:8dab5b8f673a2d79d27f1f90eebb14500483e9942cd1b06b105458bf96385294",
-      "effects": {
-        "added": [],
-        "removed": []
-      },
-      "exports": {
-        "added": [],
-        "removed": []
-      },
-      "from_profile": "0.18",
-      "intrinsics": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "modules": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "previous_content_identity": "sha256:1746d9027e327118b2777326149536376bee8d041ce3d6444ad90254aebc877f",
-      "profiles": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "to_profile": "0.18"
-    },
-    {
-      "canonical_examples": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "capabilities": {
-        "added": [],
-        "removed": []
-      },
       "current_content_identity": "sha256:d9de82516aff2f3a85c5392341fbd29e0d4c2e41c20a5acb8cdcf80ebc65b35f",
       "effects": {
         "added": [],
@@ -399,9 +361,50 @@
         "removed": []
       },
       "to_profile": "0.18"
+    },
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [],
+        "removed": []
+      },
+      "current_content_identity": "sha256:9851e1232e4a0b820eff0833c2c2a9a3c4f04d729bd92e7205f6cc698846d959",
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "exports": {
+        "added": [],
+        "removed": []
+      },
+      "from_profile": "0.18",
+      "intrinsics": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "modules": {
+        "added": [],
+        "changed": [
+          "mncs.std.application.v1",
+          "mncs.std.process.v1"
+        ],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:20d4abe5f9e2db66eb641ae66da2b92a2cddec375982a948de2981da50779524",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "to_profile": "0.18"
     }
   ],
-  "history_identity": "sha256:df95bc050f61db28d5a828fd7dad29f9f0376ec7e293b7b224b5e4e87a0c96dd",
+  "history_identity": "sha256:314a64e2d5d6a1cafd091e3aaf9ad700e38c5444ceff8d0532232d3ca0539d5e",
   "retention": 8,
   "schema_version": "mncs.language-capability-deltas/1"
 }
