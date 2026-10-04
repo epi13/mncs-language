@@ -49,7 +49,7 @@
         "crates/mncs-cli/src/"
       ],
       "kind": "compiler-runtime",
-      "note": "Tracks implementation sources and build manifests; executable test sources are scoped to their own repository obligations.",
+      "notes": "Tracks implementation sources and build manifests; executable test sources are scoped to their own repository obligations.",
       "stability": "experimental",
       "version": "1"
     },
@@ -89,7 +89,7 @@
   "purpose": "MNCS Language investigates the opposite arrangement from conventional languages: contracts, effects, capabilities, assumptions, failure semantics, resource bounds, machine intent, and evidence are part of a program's meaning from the beginning -- machine-native without being machine-exclusive.",
   "repository": "mncs-language",
   "schema_version": "mncs.project-view/1",
-  "source_identity": "sha256:4e44174606ade7f9e72f825f28d78b360483f78de9d1948c192f8099f1d22a9c",
+  "source_identity": "sha256:5c26f18c4bc64835fb1f11bfc88f71164338bbe822525e47e9200ff522e95283",
   "structure": {
     "layout": "mncs.repository-layout/1",
     "surfaces": [
