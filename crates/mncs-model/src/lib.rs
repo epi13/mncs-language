@@ -140,6 +140,8 @@ pub use execution::{
     MAX_STATEFUL_CALLS, STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION,
     STATEFUL_EXECUTION_SCHEMA_VERSION,
 };
+pub use process::PROCESS_LAUNCH_VECTOR_CAPACITY;
+
 pub use experiment::{
     BoundedRefinementCandidateDecision, BoundedRefinementCycle, FamilyExperimentObservation,
     FamilyExperimentReference, LanguageExperimentCaseObservation, LanguageExperimentComparison,

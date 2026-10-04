@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::canonical::{canonical_json_value, sha256_hex};
 use crate::identity::{function_id, parameter_id, value_id, SemanticId};
+use crate::process::{MAX_CAPTURE_BYTES, PROCESS_LAUNCH_VECTOR_CAPACITY};
 use crate::structured::canonical_external_value;
 use crate::{
     ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator,
@@ -857,7 +858,9 @@ pub(crate) fn process_request_from_value(
             .ok_or_else(|| "process request is missing argv_count".to_owned())?,
         "argv_count",
     )?;
-    if argv_count as usize != argv_values.len() || argv_values.len() > 16 {
+    if argv_count as usize != argv_values.len()
+        || argv_values.len() > PROCESS_LAUNCH_VECTOR_CAPACITY
+    {
         return Err("process request argv_count does not match its bounded argv".to_owned());
     }
     let mut argv = Vec::with_capacity(argv_values.len());
@@ -878,7 +881,9 @@ pub(crate) fn process_request_from_value(
             .ok_or_else(|| "process request is missing environment_count".to_owned())?,
         "environment_count",
     )?;
-    if environment_count as usize != environment_values.len() || environment_values.len() > 16 {
+    if environment_count as usize != environment_values.len()
+        || environment_values.len() > PROCESS_LAUNCH_VECTOR_CAPACITY
+    {
         return Err(
             "process request environment_count does not match its bounded environment".to_owned(),
         );
@@ -930,10 +935,13 @@ pub(crate) fn process_request_from_value(
             .ok_or_else(|| "process request is missing stderr_limit".to_owned())?,
         "stderr_limit",
     )?;
-    if stdout_limit > MAX_SEQUENCE_BOUND as u64 || stderr_limit > MAX_SEQUENCE_BOUND as u64 {
+    // The capture budget is bounded by the runtime capture ceiling, not by
+    // the typed observation window: materialization truncates observations
+    // to the 1KB window and reports truncation.
+    if stdout_limit > MAX_CAPTURE_BYTES as u64 || stderr_limit > MAX_CAPTURE_BYTES as u64 {
         return Err(format!(
-            "process capture limit exceeds the {}-byte typed result bound",
-            MAX_SEQUENCE_BOUND
+            "process capture limit exceeds the {}-byte runtime capture bound",
+            MAX_CAPTURE_BYTES
         ));
     }
     let deadline_ms = process_u64(
@@ -982,6 +990,22 @@ pub(crate) fn process_request_from_value(
             process_max: optional_limit("process_max")?,
         },
     })
+}
+
+/// Bytes of captured output carried by one typed process observation.
+///
+/// The capture budget is request-driven (up to the runtime ceiling); this
+/// window is the transport twin of the stdlib `up_to 1024` observation
+/// bound. Materialization truncates to this window and reports truncation
+/// instead of rejecting legitimately chatty executions.
+pub const PROCESS_OBSERVATION_OUTPUT_WINDOW: usize = 1024;
+
+fn process_observation_output(bytes: &[u8]) -> (&[u8], bool) {
+    if bytes.len() > PROCESS_OBSERVATION_OUTPUT_WINDOW {
+        (&bytes[..PROCESS_OBSERVATION_OUTPUT_WINDOW], true)
+    } else {
+        (bytes, false)
+    }
 }
 
 fn process_bytes_value(bytes: &[u8]) -> ExecutionValue {
@@ -1087,14 +1111,9 @@ pub(crate) fn process_observation_value(
         .iter()
         .find(|record| record.identity == *identity)
         .ok_or_else(|| "process observation record declaration is unavailable".to_owned())?;
-    if observation.stdout.len() > MAX_SEQUENCE_BOUND as usize
-        || observation.stderr.len() > MAX_SEQUENCE_BOUND as usize
-    {
-        return Err(format!(
-            "process observation output exceeds the {}-byte source record bound",
-            MAX_SEQUENCE_BOUND
-        ));
-    }
+    // Captured output beyond the transport window is truncated at
+    // materialization with truncation reported; only the requested capture
+    // budget bounds execution.
     let mut fields = Vec::with_capacity(declaration.fields.len());
     for field in &declaration.fields {
         let value =
@@ -1141,10 +1160,14 @@ fn process_observation_field(
             observation.status == crate::process_runtime::ProcessLifecycleStatus::Exited
                 && observation.exit_code == Some(0),
         ),
-        "stdout" => process_bytes_value(&observation.stdout),
-        "stderr" => process_bytes_value(&observation.stderr),
-        "stdout_truncated" => boolean(observation.stdout_truncated),
-        "stderr_truncated" => boolean(observation.stderr_truncated),
+        "stdout" => process_bytes_value(process_observation_output(&observation.stdout).0),
+        "stderr" => process_bytes_value(process_observation_output(&observation.stderr).0),
+        "stdout_truncated" => boolean(
+            observation.stdout_truncated || process_observation_output(&observation.stdout).1,
+        ),
+        "stderr_truncated" => boolean(
+            observation.stderr_truncated || process_observation_output(&observation.stderr).1,
+        ),
         "output_exhausted" => boolean(observation.output_exhausted),
         "timed_out" | "deadline_exceeded" => boolean(observation.deadline_exceeded),
         "cancellation_requested" => boolean(observation.cancellation_requested),
@@ -1242,13 +1265,17 @@ fn process_result_field(
         "timed_out" => Some(ExecutionValue::Boolean {
             value: result.timed_out,
         }),
-        "stdout" => Some(process_bytes_value(&result.stdout)),
-        "stderr" => Some(process_bytes_value(&result.stderr)),
+        "stdout" => Some(process_bytes_value(
+            process_observation_output(&result.stdout).0,
+        )),
+        "stderr" => Some(process_bytes_value(
+            process_observation_output(&result.stderr).0,
+        )),
         "stdout_truncated" => Some(ExecutionValue::Boolean {
-            value: result.stdout_truncated,
+            value: result.stdout_truncated || process_observation_output(&result.stdout).1,
         }),
         "stderr_truncated" => Some(ExecutionValue::Boolean {
-            value: result.stderr_truncated,
+            value: result.stderr_truncated || process_observation_output(&result.stderr).1,
         }),
         "duration_ms" => Some(ExecutionValue::Integer {
             value: i128::from(result.duration_ms),
@@ -1275,14 +1302,8 @@ pub(crate) fn process_result_value(
         .iter()
         .find(|record| record.identity == *identity)
         .ok_or_else(|| "process_run result record declaration is unavailable".to_owned())?;
-    if result.stdout.len() > MAX_SEQUENCE_BOUND as usize
-        || result.stderr.len() > MAX_SEQUENCE_BOUND as usize
-    {
-        return Err(format!(
-            "process result output exceeds the {}-byte source record bound",
-            MAX_SEQUENCE_BOUND
-        ));
-    }
+    // See the observation path: the transport window truncates, the capture
+    // budget bounds.
     let mut fields = Vec::with_capacity(declaration.fields.len());
     for field in &declaration.fields {
         let Some(value) = process_result_field(&field.name, result) else {
@@ -1489,7 +1510,7 @@ fn validate_standard_process_record_type(
                 "program" | "current_dir" => Some(byte_view(SequenceBound::UpTo(1024))),
                 "argv" => Some(BodyType::Sequence {
                     element: Box::new(byte_view(SequenceBound::UpTo(1024))),
-                    bound: SequenceBound::UpTo(16),
+                    bound: SequenceBound::UpTo(PROCESS_LAUNCH_VECTOR_CAPACITY as u32),
                 }),
                 "environment" => {
                     let identity = program
@@ -1507,7 +1528,7 @@ fn validate_standard_process_record_type(
                             identity,
                             name: "EnvironmentEntry".to_owned(),
                         }),
-                        bound: SequenceBound::UpTo(16),
+                        bound: SequenceBound::UpTo(PROCESS_LAUNCH_VECTOR_CAPACITY as u32),
                     })
                 }
                 "resources" => standard_record("ProcessResourceEnvelope"),

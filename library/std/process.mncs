@@ -25,12 +25,17 @@ record ProcessResourceEnvelope {
     process_max: u64
 }
 
+// Process launch vectors admit 256 entries: real invocations routinely
+// carry dozens of arguments and environment entries, and the per-element
+// 1024-byte cap already bounds the worst-case request. This capacity must
+// agree with mncs.std.application.v1 and the language runtime's process
+// launch validation.
 record ProcessRequest {
     program: [byte; up_to 1024],
-    argv: [[byte; up_to 1024]; up_to 16],
+    argv: [[byte; up_to 1024]; up_to 256],
     argv_count: u64,
     current_dir: [byte; up_to 1024],
-    environment: [EnvironmentEntry; up_to 16],
+    environment: [EnvironmentEntry; up_to 256],
     environment_count: u64,
     resources: ProcessResourceEnvelope,
     stdin: [byte; up_to 1024],

@@ -15,11 +15,13 @@ record EnvironmentEntry {
     value: [byte; up_to 1024]
 }
 
+// Launch-vector capacity agrees with mncs.std.process.v1: 256 entries.
+// See the ProcessRequest contract note for the rationale.
 record ApplicationContext {
     application_identity: [byte; 32],
-    argv: [[byte; up_to 1024]; up_to 16],
+    argv: [[byte; up_to 1024]; up_to 256],
     argv_count: u64,
-    environment: [EnvironmentEntry; up_to 16],
+    environment: [EnvironmentEntry; up_to 256],
     environment_count: u64,
     current_dir: [byte; up_to 1024],
     stdin: [byte; up_to 1024]

@@ -15,9 +15,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const MAX_ARGUMENTS: usize = 128;
+/// Maximum entries in a typed process launch vector (argv or environment).
+/// This is the runtime twin of the `up_to 256` declaration in
+/// `mncs.std.process.v1` / `mncs.std.application.v1`; the embed boundary
+/// enforces the declared capacity generically, and this constant keeps the
+/// host-side process validation, nominal shape checks, and the CLI launcher
+/// in agreement with it.
+pub const PROCESS_LAUNCH_VECTOR_CAPACITY: usize = 256;
+pub const MAX_ARGUMENTS: usize = PROCESS_LAUNCH_VECTOR_CAPACITY;
 pub const MAX_ARGUMENT_BYTES: usize = 16 * 1024;
-pub const MAX_ENVIRONMENT: usize = 128;
+pub const MAX_ENVIRONMENT: usize = PROCESS_LAUNCH_VECTOR_CAPACITY;
 pub const MAX_ENVIRONMENT_BYTES: usize = 64 * 1024;
 pub const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;

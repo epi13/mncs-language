@@ -44,6 +44,7 @@ use mncs_model::{
     LoweringExecutionStatus, ObligationStatus, ObservationCapturePolicy, ObservedExecutionResult,
     Program, RealizationRequest, SemanticDiff, SemanticId, SsaModule, StatefulExecutionCase,
     StatefulExecutionResult, TargetContractRef, ValidatorRequirement,
+    PROCESS_LAUNCH_VECTOR_CAPACITY,
 };
 use mncs_syntax::{
     analyze, SourceArtifactKind, SourceEnvelope, SourceMetrics, SourceOrigin, SourceOriginKind,
@@ -558,8 +559,8 @@ where
 }
 
 const NATIVE_APPLICATION_DESCRIPTOR_SCHEMA_VERSION: &str = "mncs.native-application/1";
-const APPLICATION_CONTEXT_MAX_ARGV: usize = 16;
-const APPLICATION_CONTEXT_MAX_ENVIRONMENT: usize = 16;
+const APPLICATION_CONTEXT_MAX_ARGV: usize = PROCESS_LAUNCH_VECTOR_CAPACITY;
+const APPLICATION_CONTEXT_MAX_ENVIRONMENT: usize = PROCESS_LAUNCH_VECTOR_CAPACITY;
 const APPLICATION_CONTEXT_MAX_STDIN: usize = 1024;
 const APPLICATION_CONTEXT_MAX_CWD: usize = 1024;
 

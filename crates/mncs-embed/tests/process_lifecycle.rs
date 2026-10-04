@@ -7,7 +7,7 @@ use std::{
 
 use mncs_compiler::{ReferenceCompiler, bundle::pinned_bundle};
 use mncs_embed::{Artifact, CallOptions, Grant, Session};
-use mncs_model::{ArtifactRepresentation, ExecutionValue};
+use mncs_model::{ArtifactRepresentation, ExecutionValue, PROCESS_LAUNCH_VECTOR_CAPACITY};
 use mncs_syntax::{SourceArtifactKind, SourceEnvelope};
 use serde_json::{Value, json};
 
@@ -113,6 +113,8 @@ fn process_request(program: &str, argv: &[&str], environment: &[(&str, &str)]) -
         0,
         true,
         32,
+        1024,
+        1024,
     )
 }
 
@@ -126,6 +128,8 @@ fn process_request_with_envelope(
     swap_max_bytes: u64,
     has_swap_max: bool,
     process_max: u64,
+    stdout_limit: u64,
+    stderr_limit: u64,
 ) -> String {
     let resources = json!({
         "record": {
@@ -151,8 +155,8 @@ fn process_request_with_envelope(
                 "environment_count": integer(environment.len() as u64),
                 "resources": resources,
                 "stdin": byte_sequence(b""),
-                "stdout_limit": integer(1024),
-                "stderr_limit": integer(1024),
+                "stdout_limit": integer(stdout_limit),
+                "stderr_limit": integer(stderr_limit),
                 "deadline_ms": integer(10000)
             }
         }
@@ -228,6 +232,33 @@ fn observation_bool(observation: &ExecutionValue, name: &str) -> bool {
     match field(fields, name) {
         Some(ExecutionValue::Boolean { value }) => *value,
         other => panic!("boolean field {name} expected, got {other:?}"),
+    }
+}
+
+fn observe_until_terminal(
+    session: &Session,
+    handle: &ExecutionValue,
+    options: &CallOptions,
+    count: usize,
+) -> ExecutionValue {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let observed = call_observation(session, "inspect_owned", handle.clone(), options);
+        if observation_status(&observed) != 0 {
+            return observed;
+        }
+        assert!(Instant::now() < deadline, "{count} argv never left Running");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn observation_bytes_len(observation: &ExecutionValue, name: &str) -> usize {
+    let ExecutionValue::Record { fields, .. } = observation else {
+        panic!("ProcessObservation expected, got {observation:?}");
+    };
+    match field(fields, name) {
+        Some(ExecutionValue::Sequence { values }) => values.len(),
+        other => panic!("byte-sequence field {name} expected, got {other:?}"),
     }
 }
 
@@ -394,6 +425,8 @@ fn mncs_process_effect_reports_tiny_cgroup_memory_exhaustion() {
                 0,
                 true,
                 8,
+                1024,
+                1024,
             ),
             &options,
         )
@@ -440,4 +473,168 @@ fn mncs_process_effect_reports_tiny_cgroup_memory_exhaustion() {
         observation_unsigned(&completed, "memory_max_events").unwrap_or_default(),
         observation_unsigned(&completed, "oom_kill_events").unwrap_or_default(),
     );
+}
+
+#[test]
+fn process_launch_vectors_accept_capacity_and_reject_capacity_plus_one() {
+    assert_eq!(
+        PROCESS_LAUNCH_VECTOR_CAPACITY, 256,
+        "runtime agrees with the stdlib launch-vector declaration"
+    );
+    let session = open_session();
+    let options = process_grant("/bin/true");
+    // Acceptance ladder: 0, 1, 16, 24, and 256 arguments pass the typed
+    // boundary, start, and reach a terminal lifecycle state. Instantly
+    // exiting processes may legitimately observe Unknown when the provider
+    // never goes ready, so the ladder asserts boundary acceptance plus
+    // termination; healthy execution is proven separately below.
+    for count in [0usize, 1, 16, 24, PROCESS_LAUNCH_VECTOR_CAPACITY] {
+        let args: Vec<String> = (0..count).map(|index| format!("arg{index:03}")).collect();
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let started = session
+            .call_typed_json(
+                "app.process_lifecycle_embed",
+                "start_owned",
+                &process_request("/bin/true", &refs, &[]),
+                &options,
+            )
+            .unwrap_or_else(|error| panic!("{count} argv accepted: {error:?}"));
+        assert_eq!(
+            started.status, "returned",
+            "{count} argv: {:?}",
+            started.failure_reason
+        );
+        let handle = process_handle(&started.returned[0]);
+        let observed = observe_until_terminal(&session, &handle, &options, count);
+        assert_ne!(observation_status(&observed), 0, "{count} argv terminates");
+        let reaped = call_observation(&session, "reap_owned", handle, &options);
+        assert_ne!(observation_status(&reaped), 0, "{count} argv reaps");
+    }
+    // One healthy end-to-end execution through the same path.
+    let sleep_options = process_grant("/usr/bin/sleep");
+    let started = session
+        .call_typed_json(
+            "app.process_lifecycle_embed",
+            "start_owned",
+            &process_request("/usr/bin/sleep", &["0.2"], &[]),
+            &sleep_options,
+        )
+        .expect("sleep starts");
+    let handle = process_handle(&started.returned[0]);
+    let observed = observe_until_terminal(&session, &handle, &sleep_options, 1);
+    assert_eq!(observation_status(&observed), 1, "sleep exits");
+    assert!(observation_bool(&observed, "success"));
+    let reaped = call_observation(&session, "reap_owned", handle, &sleep_options);
+    assert_eq!(observation_status(&reaped), 1, "sleep reaps");
+    // One past capacity is rejected at the typed boundary, never executed.
+    let over_args: Vec<String> = (0..=PROCESS_LAUNCH_VECTOR_CAPACITY)
+        .map(|index| format!("arg{index:03}"))
+        .collect();
+    let over_refs: Vec<&str> = over_args.iter().map(String::as_str).collect();
+    let rejected = session
+        .call_typed_json(
+            "app.process_lifecycle_embed",
+            "start_owned",
+            &process_request("/bin/true", &over_refs, &[]),
+            &options,
+        )
+        .expect_err("257 argv rejected");
+    assert!(
+        rejected.message.contains("capacity"),
+        "capacity diagnosed: {rejected:?}"
+    );
+    // The environment vector shares the launch-vector capacity.
+    let env: Vec<(String, String)> = (0..PROCESS_LAUNCH_VECTOR_CAPACITY)
+        .map(|index| (format!("K{index:03}"), "v".to_owned()))
+        .collect();
+    let env_refs: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let started = session
+        .call_typed_json(
+            "app.process_lifecycle_embed",
+            "start_owned",
+            &process_request("/bin/true", &[], &env_refs),
+            &options,
+        )
+        .expect("256 environment entries accepted");
+    let handle = process_handle(&started.returned[0]);
+    let observed = observe_until_terminal(&session, &handle, &options, 0);
+    assert_ne!(
+        observation_status(&observed),
+        0,
+        "256 environment entries terminate"
+    );
+    let reaped = call_observation(&session, "reap_owned", handle, &options);
+    assert_ne!(
+        observation_status(&reaped),
+        0,
+        "256 environment entries reap"
+    );
+    let mut over_env = env_refs.clone();
+    over_env.push(("K257", "v"));
+    let rejected = session
+        .call_typed_json(
+            "app.process_lifecycle_embed",
+            "start_owned",
+            &process_request("/bin/true", &[], &over_env),
+            &options,
+        )
+        .expect_err("257 environment entries rejected");
+    assert!(
+        rejected.message.contains("capacity"),
+        "capacity diagnosed: {rejected:?}"
+    );
+}
+
+#[test]
+fn process_observation_carries_a_truncated_window_of_chatty_output() {
+    // Output within the requested capture budget but beyond the 1KB typed
+    // observation window terminates normally; the observation carries the
+    // window with truncation reported instead of failing the execution.
+    let session = open_session();
+    let options = process_grant("/bin/echo");
+    let args: Vec<String> = (0..256).map(|index| format!("word{index:03}")).collect();
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let started = session
+        .call_typed_json(
+            "app.process_lifecycle_embed",
+            "start_owned",
+            &process_request_with_envelope(
+                "/bin/echo",
+                &refs,
+                &[],
+                128 * 1024 * 1024,
+                256 * 1024 * 1024,
+                0,
+                true,
+                32,
+                65536,
+                65536,
+            ),
+            &options,
+        )
+        .expect("chatty execution starts");
+    assert_eq!(
+        started.status, "returned",
+        "chatty start: {:?}",
+        started.failure_reason
+    );
+    let handle = process_handle(&started.returned[0]);
+    let observed = observe_until_terminal(&session, &handle, &options, 256);
+    let status = observation_status(&observed);
+    assert_ne!(status, 0, "chatty execution terminates");
+    assert_ne!(status, 5, "within-budget output is not OutputExhausted");
+    assert!(
+        observation_bool(&observed, "stdout_truncated"),
+        "window truncation reported"
+    );
+    assert_eq!(
+        observation_bytes_len(&observed, "stdout"),
+        1024,
+        "observation carries exactly the transport window"
+    );
+    let reaped = call_observation(&session, "reap_owned", handle, &options);
+    assert_ne!(observation_status(&reaped), 0, "chatty execution reaps");
 }
