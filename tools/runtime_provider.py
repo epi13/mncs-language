@@ -123,7 +123,9 @@ def build(executable: Path, cargo: str):
         raise RuntimeError("selected Stage-0/reference build failed: " + result.stderr[-3000:])
     runtime = inspect(expected)
     if runtime.get("build_origin", {}).get("status") != "matches-embedded-inputs":
-        raise RuntimeError("rebuilt Stage-0/reference executable does not match its embedded inputs")
+        origin = runtime.get("build_origin", {})
+        raise RuntimeError("rebuilt Stage-0/reference executable does not match its embedded inputs: "
+                           + json.dumps(origin.get("mismatches", []), sort_keys=True))
     return {"schema_version": "mncs.language.build-operation/1", "status": "built-and-verified-locally",
             "build_command": [cargo, "build", "--offline", "--locked", "--release", "-p", "mncs-cli"],
             "runtime_identity": runtime, "build_stderr_tail": result.stderr[-1000:]}

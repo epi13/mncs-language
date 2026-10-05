@@ -34,7 +34,7 @@ fn collect(path: &Path, files: &mut BTreeSet<PathBuf>) {
     if path.is_dir() {
         if matches!(
             path.file_name().and_then(|value| value.to_str()),
-            Some("target" | ".git" | ".worktrees" | ".mncs")
+            Some("target" | ".git" | ".worktrees" | ".mncs" | "tests" | "examples" | "benches")
         ) {
             return;
         }
