@@ -20,6 +20,8 @@ Declared capabilities (declarations do not establish execution health):
 - `compiler-inventory/1` — compiler-introspection-interface (experimental)
 - `compiler-runtime/1` — compiler-runtime (experimental)
 - `core-standard-library/1` — mncs-library (experimental)
+- `reference-build/1` — build-provider (experimental)
+- `reference-runtime/1` — selected-reference-runtime (experimental)
 - `semantic-identity/1` — identity-artifact (experimental)
 - `source-profile/0.18` — language-profile (experimental)
 

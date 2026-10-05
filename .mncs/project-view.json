@@ -79,6 +79,75 @@
       "kind": "compiler-cli",
       "stability": "experimental",
       "version": "1"
+    },
+    {
+      "artifact_contract": {
+        "build_receipt_schema": "mncs.language-build-receipt/1"
+      },
+      "contract": "reference-runtime",
+      "effects": [
+        "read"
+      ],
+      "fingerprint_sources": [
+        "crates/mncs-cli/build.rs",
+        "crates/mncs-cli/src/main.rs",
+        "tools/runtime_provider.py"
+      ],
+      "invocation": {
+        "fixed_argv": [
+          "inspect"
+        ],
+        "kind": "python",
+        "path": "tools/runtime_provider.py",
+        "toolchain": {
+          "path": "target/release/mncs",
+          "repository": "mncs-language"
+        },
+        "toolchain_env": "MNCS_REFERENCE_BIN"
+      },
+      "kind": "selected-reference-runtime",
+      "stability": "experimental",
+      "version": "1"
+    },
+    {
+      "artifact_contract": {
+        "build_receipt_schema": "mncs.language-build-receipt/1",
+        "runtime_schema": "mncs.language.selected-runtime/1"
+      },
+      "contract": "reference-build",
+      "effects": [
+        "write"
+      ],
+      "fingerprint_sources": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/mncs-cli/build.rs",
+        "crates/mncs-cli/Cargo.toml",
+        "crates/mncs-cli/src/",
+        "crates/mncs-model/",
+        "crates/mncs-syntax/",
+        "crates/mncs-compiler/",
+        "crates/mncs-codegen/",
+        "crates/mncs-embed/",
+        "crates/mncs-translation-check/",
+        "crates/mncs-conformance/",
+        "tools/runtime_provider.py"
+      ],
+      "invocation": {
+        "fixed_argv": [
+          "build"
+        ],
+        "kind": "python",
+        "path": "tools/runtime_provider.py",
+        "toolchain": {
+          "path": "target/release/mncs",
+          "repository": "mncs-language"
+        },
+        "toolchain_env": "MNCS_REFERENCE_BIN"
+      },
+      "kind": "build-provider",
+      "stability": "experimental",
+      "version": "1"
     }
   ],
   "dependencies": [],
@@ -89,7 +158,7 @@
   "purpose": "MNCS Language investigates the opposite arrangement from conventional languages: contracts, effects, capabilities, assumptions, failure semantics, resource bounds, machine intent, and evidence are part of a program's meaning from the beginning -- machine-native without being machine-exclusive.",
   "repository": "mncs-language",
   "schema_version": "mncs.project-view/1",
-  "source_identity": "sha256:5c26f18c4bc64835fb1f11bfc88f71164338bbe822525e47e9200ff522e95283",
+  "source_identity": "sha256:8432dd4faa9fa66bd26f01f4403f381cac911641cc3ecd0e73fad31baa865ccb",
   "structure": {
     "layout": "mncs.repository-layout/1",
     "surfaces": [
