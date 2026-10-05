@@ -11,10 +11,10 @@ use std::{
 
 use mncs_codegen::{
     backend_adapter, backend_capabilities, backend_family_matrix, backend_names,
-    compare_body_ssa_and_backend, execute_backend, lower_selected_ssa, portable_wasm_plan,
-    emit_verified_native_ssa_c11, NativeSsaScalarModule,
-    selected_ssa_ref, target_for_backend, target_is_portable_wasm, target_is_ptx64,
-    BackendExecutionSession, BackendStatefulSession,
+    compare_body_ssa_and_backend, emit_verified_native_ssa_c11, execute_backend,
+    lower_selected_ssa, portable_wasm_plan, selected_ssa_ref, target_for_backend,
+    target_is_portable_wasm, target_is_ptx64, BackendExecutionSession, BackendStatefulSession,
+    NativeSsaScalarModule,
 };
 use mncs_compiler::{
     bundle::{collect_library_modules, StdlibBundle},
@@ -92,6 +92,10 @@ fn trace_application_timing(stage: &str, started: &Instant) {
 const CLI_WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 fn main() -> ExitCode {
+    if env::args().nth(1).as_deref() == Some("--build-info") && env::args().nth(2).is_none() {
+        println!("{}", include_str!(concat!(env!("OUT_DIR"), "/mncs-language-build-receipt.json")));
+        return ExitCode::SUCCESS;
+    }
     std::thread::Builder::new()
         .name("mncs-cli".to_owned())
         .stack_size(CLI_WORKER_STACK_BYTES)
@@ -6842,15 +6846,17 @@ fn impact_command(mut args: impl Iterator<Item = String>) -> ExitCode {
             let _ = print_json(&front_end.diagnostics);
             return ExitCode::FAILURE;
         }
-        let source_subject = front_end.test_inventory.as_ref().map(|inventory| {
-            SourceSubjectProjection {
-                source_artifact_identity: inventory.source_artifact_identity.clone(),
-                module: inventory.module.clone(),
-                source_profile: inventory.source_profile.clone(),
-                subject_identity: inventory.subject_identity.to_string(),
-                subject_fingerprint: inventory.subject_fingerprint.clone(),
-            }
-        });
+        let source_subject =
+            front_end
+                .test_inventory
+                .as_ref()
+                .map(|inventory| SourceSubjectProjection {
+                    source_artifact_identity: inventory.source_artifact_identity.clone(),
+                    module: inventory.module.clone(),
+                    source_profile: inventory.source_profile.clone(),
+                    subject_identity: inventory.subject_identity.to_string(),
+                    subject_fingerprint: inventory.subject_fingerprint.clone(),
+                });
         let Some(program) = front_end.program else {
             eprintln!("error: valid source front end did not produce a semantic program");
             return ExitCode::from(2);
