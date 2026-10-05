@@ -102,8 +102,17 @@ fn main() {
     ] {
         println!("cargo:rerun-if-env-changed={key}");
     }
+    // Cargo must refresh the observation after a commit/worktree HEAD change.
+    // Tracking HEAD alone misses same-branch commits, which move the branch
+    // ref without rewriting HEAD; track the symbolic ref's path as well.
     if let Some(head) = git(&root, &["rev-parse", "--git-path", "HEAD"]) {
-        println!("cargo:rerun-if-changed={}", root.join(head).display());
+        println!("cargo:rerun-if-changed={}", root.join(&head).display());
+        if let Some(reference) = git(&root, &["symbolic-ref", "-q", "HEAD"]) {
+            let path = git(&root, &["rev-parse", "--git-path", reference.as_str()]).unwrap_or(reference);
+            if root.join(&path) != root.join(&head) {
+                println!("cargo:rerun-if-changed={}", root.join(&path).display());
+            }
+        }
     }
     let revision = git(&root, &["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".to_owned());
     let status = git(
