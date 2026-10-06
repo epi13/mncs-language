@@ -3210,10 +3210,15 @@ impl<'a> Parser<'a> {
             }));
         }
         if segments.len() >= 3 {
-            return Some(AstExpr::QualifiedPath {
+            // Keep a multi-segment path as one semantic primary, then allow
+            // ordinary postfix indexing or slicing on its resolved value.
+            // Without this, `frame.inner.items[i]` stops at `]` and is
+            // rejected even though `project_chain` supports the same suffix
+            // on shorter dotted values and calls.
+            return Some(self.project_chain(AstExpr::QualifiedPath {
                 segments,
                 span: path_span,
-            });
+            }));
         }
         let variant = segments.last()?.clone();
         let type_name = SpannedText {
@@ -5735,6 +5740,62 @@ mod tests {
                 .unwrap()
                 .text,
             "order"
+        );
+    }
+
+    #[test]
+    fn profile_09_allows_indexing_after_multi_segment_value_paths() {
+        let source = "mncs 0.18;\nmodule example.postfix;\nfn at(frame: u64, index: u64) -> (result: u64) { return frame.inner.items[index]; }\n";
+        let envelope =
+            SourceEnvelope::inline(SourceArtifactKind::Program, "multi-segment-index", source);
+        let parsed = parse(&envelope);
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+        let ast = parsed.ast.expect("valid AST");
+        let AstExpr::Index { base, index, .. } = &ast.functions[0].body.returned_value else {
+            panic!("expected an index over the qualified value path");
+        };
+        assert!(matches!(index.as_ref(), AstExpr::Name(name) if name.text == "index"));
+        let AstExpr::QualifiedPath { segments, .. } = base.as_ref() else {
+            panic!("expected the resolved multi-segment path to stay intact");
+        };
+        assert_eq!(
+            segments
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<Vec<_>>(),
+            ["frame", "inner", "items"]
+        );
+
+        let malformed_source = "mncs 0.18;\nmodule example.postfix;\nfn at(frame: u64, index: u64) -> (result: u64) { return frame.inner.items[index; }\n";
+        let malformed = parse(&SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "missing-index-close",
+            malformed_source,
+        ));
+        assert!(
+            has_code(&malformed, "MNP155"),
+            "{:#?}",
+            malformed.diagnostics
+        );
+        let diagnostic = malformed
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "MNP155")
+            .expect("missing close bracket diagnostic");
+        assert_eq!(
+            &malformed_source[diagnostic.span.start..diagnostic.span.end],
+            ";"
+        );
+
+        let old_profile = parse(&SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "old-index-profile",
+            "mncs 0.6;\nmodule example.postfix;\nfn at(frame: u64, index: u64) -> (result: u64) { return frame.inner.items[index]; }\n",
+        ));
+        assert!(
+            has_code(&old_profile, "MNP153"),
+            "{:#?}",
+            old_profile.diagnostics
         );
     }
 
