@@ -5,8 +5,8 @@
 //! Large-allocation loops pin loop-region reclamation and the distinct
 //! bounded native arena envelopes. Research bytecode and portable WASM
 //! reclaim all iterations; C11/LLVM remain bounded at 16 MiB; Cranelift's
-//! JIT arena admits the compiler-frontier and ~50 MiB workloads under its
-//! 64 MiB cap. C11/LLVM must report structured exhaustion at their smaller
+//! JIT arena admits compiler-frontier workloads under its bounded 128 MiB
+//! cap. C11/LLVM must report structured exhaustion at their smaller
 //! cap rather than trapping.
 
 use std::process::Command;
@@ -60,6 +60,7 @@ fn large_value_loops_return_where_reclamation_exists() {
     let source = example("source/pressure-loop-region.mncs");
     let corpus = example("execution/pressure-loop-region-corpus.json");
     let expectations = [
+        ("carry-huge", 1024_u64),
         ("carry", 1024_u64),
         ("carry-mid", 1024_u64),
         ("nested", 2047_u64),
@@ -72,7 +73,7 @@ fn large_value_loops_return_where_reclamation_exists() {
         let cases = result["cases"].as_array().unwrap_or_else(|| {
             panic!("{backend}: missing cases; stderr={stderr} result={result:#}")
         });
-        assert_eq!(cases.len(), 6, "{backend}: case count changed; {result:#}");
+        assert_eq!(cases.len(), 7, "{backend}: case count changed; {result:#}");
         for (id, expected) in expectations {
             let case = cases
                 .iter()
@@ -121,6 +122,7 @@ fn large_value_loops_return_where_reclamation_exists() {
             .unwrap_or_else(|| panic!("{backend}: missing carry-mid case"));
         if backend == "mncs-cranelift" {
             for (id, expected) in [
+                ("carry-huge", 1024),
                 ("carry", 1024),
                 ("carry-mid", 1024),
                 ("nested", 2047),
@@ -153,7 +155,7 @@ fn large_value_loops_return_where_reclamation_exists() {
 
 /// C11 and LLVM report structured resource exhaustion — with the stable
 /// diagnostic, never a trap — on loops whose total allocation exceeds their
-/// 16 MiB arenas. Cranelift's separate 64 MiB boundary is covered by the
+/// 16 MiB arenas. Cranelift's separate 128 MiB boundary is covered by the
 /// return canaries above and its advertised configuration test.
 #[test]
 fn large_value_loops_exhaust_natives_structurally() {
@@ -164,7 +166,7 @@ fn large_value_loops_exhaust_natives_structurally() {
         let cases = result["cases"].as_array().unwrap_or_else(|| {
             panic!("{backend}: missing cases; stderr={stderr} result={result:#}")
         });
-        let exhausted = ["carry-mid", "carry", "nested", "nested-loops"].as_slice();
+        let exhausted = ["carry-mid", "carry", "carry-huge", "nested", "nested-loops"].as_slice();
         for &id in exhausted {
             let case = cases
                 .iter()

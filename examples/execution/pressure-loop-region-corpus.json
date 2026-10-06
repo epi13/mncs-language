@@ -3,6 +3,30 @@
  "name": "pressure-loop-region",
  "cases": [
   {
+   "id": "carry-huge",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.loop_region",
+     "function": "carry_huge"
+    },
+    "arguments": [],
+    "step_budget": 8000000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1024,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
    "id": "carry",
    "request": {
     "schema_version": "0.1",
