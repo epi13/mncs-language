@@ -1,13 +1,13 @@
 //! WEB-P-012: bounded loops rebuilding large aggregate cells every trip.
 //!
-//! Total allocation (~50 MiB) exceeds every fixed backend arena, so only
-//! loop-region reclamation keeps the peak bounded. The reclamation
-//! backends (research interpreter, portable WASM) must return the exact
-//! carried values; the bump-only native backends must report structured
-//! `MNCS_RSRC_EXHAUSTED` budget exhaustion rather than trapping. The
-//! small-footprint invariant case returns everywhere, pinning that
-//! pre-loop composites read inside a loop survive the backedge reset,
-//! and the nested case pins the inner/outer activation discipline.
+//! WEB-P-012: bounded loops rebuilding large aggregate cells every trip.
+//!
+//! Large-allocation loops pin loop-region reclamation and the distinct
+//! bounded native arena envelopes. Research bytecode and portable WASM
+//! reclaim all iterations; C11/LLVM remain bounded at 16 MiB; Cranelift's
+//! JIT arena admits the measured 24 MiB canary but rejects the ~50 MiB
+//! cases over its own arena. Every backend must report structured
+//! exhaustion rather than trapping when its cap is exceeded.
 
 use std::process::Command;
 
@@ -61,6 +61,7 @@ fn large_value_loops_return_where_reclamation_exists() {
     let corpus = example("execution/pressure-loop-region-corpus.json");
     let expectations = [
         ("carry", 1024_u64),
+        ("carry-mid", 1024_u64),
         ("nested", 2047_u64),
         ("invariant", 116736_u64),
         ("nested-loops", 1024_u64),
@@ -71,7 +72,7 @@ fn large_value_loops_return_where_reclamation_exists() {
         let cases = result["cases"].as_array().unwrap_or_else(|| {
             panic!("{backend}: missing cases; stderr={stderr} result={result:#}")
         });
-        assert_eq!(cases.len(), 5, "{backend}: case count changed; {result:#}");
+        assert_eq!(cases.len(), 6, "{backend}: case count changed; {result:#}");
         for (id, expected) in expectations {
             let case = cases
                 .iter()
@@ -114,12 +115,35 @@ fn large_value_loops_return_where_reclamation_exists() {
                 "{backend} {id}: wrong value; {case:#}"
             );
         }
+        let mid = cases
+            .iter()
+            .find(|case| case["case_id"] == "carry-mid")
+            .unwrap_or_else(|| panic!("{backend}: missing carry-mid case"));
+        if backend == "mncs-cranelift" {
+            assert_eq!(mid["status"], "returned", "{backend} carry-mid: {mid:#}");
+            assert_eq!(
+                mid["returned"],
+                u64_value(1024),
+                "{backend} carry-mid: {mid:#}"
+            );
+        } else {
+            assert_eq!(
+                mid["status"], "budget_exhausted",
+                "{backend} carry-mid: {mid:#}"
+            );
+            let reason = mid["failure_reason"].as_str().unwrap_or("");
+            assert!(
+                reason.contains("MNCS_RSRC_EXHAUSTED"),
+                "{backend} carry-mid: exhaustion lacks the stable resource diagnostic; reason={reason:#}"
+            );
+        }
     }
 }
 
 /// Bump-only native backends report structured resource exhaustion — with
-/// the stable diagnostic, never a trap — on the loops whose total
-/// allocation exceeds their arena.
+/// the stable diagnostic, never a trap — on loops whose total allocation
+/// exceeds their arena. Cranelift admits the intermediate-size canary while
+/// keeping the larger workload bounded.
 #[test]
 fn large_value_loops_exhaust_natives_structurally() {
     let source = example("source/pressure-loop-region.mncs");
@@ -129,7 +153,12 @@ fn large_value_loops_exhaust_natives_structurally() {
         let cases = result["cases"].as_array().unwrap_or_else(|| {
             panic!("{backend}: missing cases; stderr={stderr} result={result:#}")
         });
-        for id in ["carry", "nested", "nested-loops"] {
+        let exhausted = if backend == "mncs-cranelift" {
+            ["carry", "nested"].as_slice()
+        } else {
+            ["carry-mid", "carry", "nested", "nested-loops"].as_slice()
+        };
+        for &id in exhausted {
             let case = cases
                 .iter()
                 .find(|case| case["case_id"] == id)

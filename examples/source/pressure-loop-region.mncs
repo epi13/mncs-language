@@ -2,7 +2,7 @@ mncs 0.13;
 
 // WEB-P-012 regression: bounded loops rebuilding large aggregate cells
 // every trip. Total allocation (trips x cell bytes, ~50 MiB here) exceeds
-// every fixed backend arena (32 MiB WASM, 16 MiB native); only
+// every fixed backend arena (32 MiB WASM/Cranelift, 16 MiB C/LLVM); only
 // per-iteration loop-region reclamation keeps the peak bounded, so the
 // reclamation backends return while the bump-only native backends report
 // structured MNCS_RSRC_EXHAUSTED exhaustion instead of trapping.
@@ -18,6 +18,8 @@ record Big2 { a: [u64; 1024], b: [u64; 1024], tag: u64 }
 
 record Wrap2 { n: u64, inner: Big2 }
 
+record Mid3 { a: [u64; 1024], b: [u64; 1024], c: [u64; 1024], tag: u64 }
+
 fn carry_wide() -> (result: u64) {
     iterate k up_to 1024 carrying acc: Big2 = Big2 { a: [0; 1024], b: [0; 1024], tag: 0 } {
         let extra1: [u64; 1024] = [acc.tag; 1024];
@@ -31,6 +33,18 @@ fn carry_wide() -> (result: u64) {
             b: extra2,
             tag: acc.tag + 1 + dead1[0] - dead1[0] + dead2[0] - dead2[0] + dead3[0] - dead3[0] + dead4[0] - dead4[0]
         };
+    }
+    return acc.tag;
+}
+
+// This workload allocates more than the former 16 MiB Cranelift cap but
+// remains below its measured 32 MiB compiler-frontier envelope.
+fn carry_mid() -> (result: u64) {
+    iterate k up_to 1024 carrying acc: Mid3 = Mid3 { a: [0; 1024], b: [0; 1024], c: [0; 1024], tag: 0 } {
+        let a: [u64; 1024] = [acc.tag; 1024];
+        let b: [u64; 1024] = [acc.tag; 1024];
+        let c: [u64; 1024] = [acc.tag; 1024];
+        next acc = Mid3 { a: a, b: b, c: c, tag: acc.tag + 1 };
     }
     return acc.tag;
 }

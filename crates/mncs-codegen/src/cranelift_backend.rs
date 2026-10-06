@@ -33,6 +33,11 @@ pub const CRANELIFT_BACKEND_VERSION: &str = "0.1";
 pub const CRANELIFT_TARGET: &str = "mncs:target:cranelift-0.1";
 pub const CRANELIFT_FORMAT: &str = "application/vnd.mncs.cranelift-clif+json; version=0.1";
 pub const CRANELIFT_ARTIFACT_KIND: &str = "cranelift_clif";
+/// The Cranelift JIT retains canonical cells for the full returned value and
+/// currently has no loop-region reclamation. The compiler source frontier
+/// needs more than the former 16 MiB shared native cap; keep this backend
+/// bounded while admitting the measured whole-module parse workload.
+const CRANELIFT_ARENA_BYTES: u64 = 32 * 1024 * 1024;
 
 pub struct CraneliftAdapter;
 
@@ -56,6 +61,10 @@ pub fn cranelift_configuration() -> BackendConfiguration {
         options: BTreeMap::from([
             ("isa".to_owned(), host_triple().to_owned()),
             ("opt-level".to_owned(), "none".to_owned()),
+            (
+                "canonical-cell-arena-bytes".to_owned(),
+                CRANELIFT_ARENA_BYTES.to_string(),
+            ),
         ]),
         target_features: ["scalar-ssa", "host-isa-jit", "no-memory"]
             .into_iter()
@@ -66,6 +75,7 @@ pub fn cranelift_configuration() -> BackendConfiguration {
             "Cranelift CLIF/JIT is a realization, not MNCS semantics".to_owned(),
             "JIT uses the host ISA advertised as a target fact, not a language machine model"
                 .to_owned(),
+            "Cranelift JIT uses a bounded 32 MiB canonical cell arena per request".to_owned(),
             "only the declared scalar selected-SSA envelope is lowered".to_owned(),
         ],
     }
@@ -3706,16 +3716,16 @@ extern "C" fn host_cell_alloc(bytes: u64) -> u64 {
             record_jit_diagnosis(format!(
                 "MNCS_RSRC_EXHAUSTED cranelift JIT canonical arena exhausted: requested {bytes} byte(s), {} of {} byte(s) used; bounded loops over large aggregate values allocate one fresh cell per functional update",
                 arena.len(),
-                crate::support::NATIVE_ARENA_BYTES
+                CRANELIFT_ARENA_BYTES
             ));
             return u64::MAX;
         };
-        if end > crate::support::NATIVE_ARENA_BYTES {
+        if end > CRANELIFT_ARENA_BYTES {
             JIT_EXHAUSTED.store(true, std::sync::atomic::Ordering::Relaxed);
             record_jit_diagnosis(format!(
                 "MNCS_RSRC_EXHAUSTED cranelift JIT canonical arena exhausted: requested {bytes} byte(s), {} of {} byte(s) used; bounded loops over large aggregate values allocate one fresh cell per functional update",
                 arena.len(),
-                crate::support::NATIVE_ARENA_BYTES
+                CRANELIFT_ARENA_BYTES
             ));
             return u64::MAX;
         }
@@ -4344,6 +4354,27 @@ impl CraneliftStatefulSession {
             }
             Err(reason) => execution_failure(result, ExecutionStatus::Unsupported, reason),
         }
+    }
+}
+
+#[cfg(test)]
+mod arena_configuration_tests {
+    use super::cranelift_configuration;
+
+    #[test]
+    fn jit_arena_capacity_is_bounded_and_advertised() {
+        let configuration = cranelift_configuration();
+        assert_eq!(
+            configuration
+                .options
+                .get("canonical-cell-arena-bytes")
+                .map(String::as_str),
+            Some("33554432")
+        );
+        assert!(configuration
+            .assumptions
+            .iter()
+            .any(|assumption| assumption.contains("bounded 32 MiB canonical cell arena")));
     }
 }
 

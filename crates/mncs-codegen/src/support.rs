@@ -15,13 +15,14 @@ use sha2::{Digest, Sha256};
 
 use crate::BackendExecutionResult;
 
-/// Canonical native cell-arena capacity in bytes, shared by every native
-/// realization (C11, LLVM IR, the AOT cell runtime, and the Cranelift JIT
-/// host runtime) so flagship-scale admission fits everywhere with headroom:
+/// Canonical native cell-arena capacity in bytes for C11, LLVM IR, and the
+/// AOT cell runtime so flagship-scale admission fits with headroom:
 /// measured peak is 6,020,616 bytes for `binding_reusable` over the
 /// 29-cell flagship (`admit-reuse-flagship`). The bump allocators still
 /// carry no in-band overflow guard, so genuine exhaustion stays a loud
-/// runner-level failure, never a silent verdict.
+/// runner-level failure, never a silent verdict. Cranelift has its own
+/// bounded 32 MiB JIT arena because compiler-source parses retain larger
+/// returned AST values than the shared AOT/native envelope.
 pub(crate) const NATIVE_ARENA_BYTES: u64 = 16 * 1024 * 1024;
 
 pub(crate) fn failed(diagnostics: Vec<CompilerDiagnostic>) -> BackendResult {
