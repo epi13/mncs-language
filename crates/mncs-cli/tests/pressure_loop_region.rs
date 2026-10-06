@@ -5,9 +5,9 @@
 //! Large-allocation loops pin loop-region reclamation and the distinct
 //! bounded native arena envelopes. Research bytecode and portable WASM
 //! reclaim all iterations; C11/LLVM remain bounded at 16 MiB; Cranelift's
-//! JIT arena admits the measured 24 MiB canary but rejects the ~50 MiB
-//! cases over its own arena. Every backend must report structured
-//! exhaustion rather than trapping when its cap is exceeded.
+//! JIT arena admits the compiler-frontier and ~50 MiB workloads under its
+//! 64 MiB cap. C11/LLVM must report structured exhaustion at their smaller
+//! cap rather than trapping.
 
 use std::process::Command;
 
@@ -120,12 +120,23 @@ fn large_value_loops_return_where_reclamation_exists() {
             .find(|case| case["case_id"] == "carry-mid")
             .unwrap_or_else(|| panic!("{backend}: missing carry-mid case"));
         if backend == "mncs-cranelift" {
-            assert_eq!(mid["status"], "returned", "{backend} carry-mid: {mid:#}");
-            assert_eq!(
-                mid["returned"],
-                u64_value(1024),
-                "{backend} carry-mid: {mid:#}"
-            );
+            for (id, expected) in [
+                ("carry", 1024),
+                ("carry-mid", 1024),
+                ("nested", 2047),
+                ("nested-loops", 1024),
+            ] {
+                let case = cases
+                    .iter()
+                    .find(|case| case["case_id"] == id)
+                    .unwrap_or_else(|| panic!("{backend}: missing {id} case"));
+                assert_eq!(case["status"], "returned", "{backend} {id}: {case:#}");
+                assert_eq!(
+                    case["returned"],
+                    u64_value(expected),
+                    "{backend} {id}: {case:#}"
+                );
+            }
         } else {
             assert_eq!(
                 mid["status"], "budget_exhausted",
@@ -140,24 +151,20 @@ fn large_value_loops_return_where_reclamation_exists() {
     }
 }
 
-/// Bump-only native backends report structured resource exhaustion — with
-/// the stable diagnostic, never a trap — on loops whose total allocation
-/// exceeds their arena. Cranelift admits the intermediate-size canary while
-/// keeping the larger workload bounded.
+/// C11 and LLVM report structured resource exhaustion — with the stable
+/// diagnostic, never a trap — on loops whose total allocation exceeds their
+/// 16 MiB arenas. Cranelift's separate 64 MiB boundary is covered by the
+/// return canaries above and its advertised configuration test.
 #[test]
 fn large_value_loops_exhaust_natives_structurally() {
     let source = example("source/pressure-loop-region.mncs");
     let corpus = example("execution/pressure-loop-region-corpus.json");
-    for backend in NATIVE_BACKENDS {
+    for backend in ["mncs-c11", "mncs-llvm-ir"] {
         let (_code, result, stderr) = run_experiment(&source, backend, &corpus);
         let cases = result["cases"].as_array().unwrap_or_else(|| {
             panic!("{backend}: missing cases; stderr={stderr} result={result:#}")
         });
-        let exhausted = if backend == "mncs-cranelift" {
-            ["carry", "nested"].as_slice()
-        } else {
-            ["carry-mid", "carry", "nested", "nested-loops"].as_slice()
-        };
+        let exhausted = ["carry-mid", "carry", "nested", "nested-loops"].as_slice();
         for &id in exhausted {
             let case = cases
                 .iter()

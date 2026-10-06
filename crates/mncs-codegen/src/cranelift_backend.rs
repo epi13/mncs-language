@@ -35,9 +35,10 @@ pub const CRANELIFT_FORMAT: &str = "application/vnd.mncs.cranelift-clif+json; ve
 pub const CRANELIFT_ARTIFACT_KIND: &str = "cranelift_clif";
 /// The Cranelift JIT retains canonical cells for the full returned value and
 /// currently has no loop-region reclamation. The compiler source frontier
-/// needs more than the former 16 MiB shared native cap; keep this backend
-/// bounded while admitting the measured whole-module parse workload.
-const CRANELIFT_ARENA_BYTES: u64 = 32 * 1024 * 1024;
+/// needs more than the former 16 MiB shared native cap and the measured
+/// 32 MiB compiler-frontier envelope; keep this backend bounded while
+/// admitting the whole-module parse workload.
+const CRANELIFT_ARENA_BYTES: u64 = 64 * 1024 * 1024;
 
 pub struct CraneliftAdapter;
 
@@ -75,7 +76,7 @@ pub fn cranelift_configuration() -> BackendConfiguration {
             "Cranelift CLIF/JIT is a realization, not MNCS semantics".to_owned(),
             "JIT uses the host ISA advertised as a target fact, not a language machine model"
                 .to_owned(),
-            "Cranelift JIT uses a bounded 32 MiB canonical cell arena per request".to_owned(),
+            "Cranelift JIT uses a bounded 64 MiB canonical cell arena per request".to_owned(),
             "only the declared scalar selected-SSA envelope is lowered".to_owned(),
         ],
     }
@@ -4369,12 +4370,12 @@ mod arena_configuration_tests {
                 .options
                 .get("canonical-cell-arena-bytes")
                 .map(String::as_str),
-            Some("33554432")
+            Some("67108864")
         );
         assert!(configuration
             .assumptions
             .iter()
-            .any(|assumption| assumption.contains("bounded 32 MiB canonical cell arena")));
+            .any(|assumption| assumption.contains("bounded 64 MiB canonical cell arena")));
     }
 }
 

@@ -1,11 +1,9 @@
 mncs 0.13;
 
 // WEB-P-012 regression: bounded loops rebuilding large aggregate cells
-// every trip. Total allocation (trips x cell bytes, ~50 MiB here) exceeds
-// every fixed backend arena (32 MiB WASM/Cranelift, 16 MiB C/LLVM); only
-// per-iteration loop-region reclamation keeps the peak bounded, so the
-// reclamation backends return while the bump-only native backends report
-// structured MNCS_RSRC_EXHAUSTED exhaustion instead of trapping.
+// every trip. The carry workload totals about 50 MiB: Cranelift's 64 MiB
+// bounded arena admits it, C11/LLVM report structured exhaustion at their
+// smaller arenas, and reclamation backends keep peak use below total use.
 // carry_wide pins a carried record with exact-sequence fields, carry_nested
 // pins a carried doubly-nested cell, invariant_big pins a pre-loop
 // composite read inside the loop (it must survive the backedge reset even
@@ -37,8 +35,8 @@ fn carry_wide() -> (result: u64) {
     return acc.tag;
 }
 
-// This workload allocates more than the former 16 MiB Cranelift cap but
-// remains below its measured 32 MiB compiler-frontier envelope.
+// This workload allocates about 24 MiB: above the former 16 MiB cap and
+// below the current bounded 64 MiB Cranelift compiler-frontier envelope.
 fn carry_mid() -> (result: u64) {
     iterate k up_to 1024 carrying acc: Mid3 = Mid3 { a: [0; 1024], b: [0; 1024], c: [0; 1024], tag: 0 } {
         let a: [u64; 1024] = [acc.tag; 1024];
