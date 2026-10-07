@@ -1,7 +1,7 @@
 mncs 0.13;
 
 // WEB-P-012 regression: bounded loops rebuilding large aggregate cells
-// every trip. The carry workloads exercise Cranelift's bounded 128 MiB
+// every trip. The carry workloads exercise Cranelift's bounded 1024 MiB
 // arena; C11/LLVM report structured exhaustion at their
 // smaller arenas, and reclamation backends keep peak use below total use.
 // carry_wide pins a carried record with exact-sequence fields, carry_nested
@@ -56,6 +56,55 @@ fn carry_huge() -> (result: u64) {
             b: extra2,
             tag: acc.tag + 1 + dead1[0] - dead1[0] + dead2[0] - dead2[0] + dead3[0] - dead3[0] + dead4[0] - dead4[0] + dead5[0] - dead5[0] + dead6[0] - dead6[0] + dead7[0] - dead7[0] + dead8[0] - dead8[0]
         };
+    }
+    return acc.tag;
+}
+
+// About 288 MiB of immutable aggregate cells are built over this bounded
+// loop. The case exceeds the previously measured 256 MiB compiler-project
+// demand while remaining within the retained Cranelift arena envelope.
+fn carry_beyond256() -> (result: u64) {
+    iterate k up_to 1024 carrying acc: Big2 = Big2 { a: [0; 1024], b: [0; 1024], tag: 0 } {
+        let a: [u64; 1024] = [acc.tag; 1024];
+        let b: [u64; 1024] = [acc.tag; 1024];
+        let dead1: [u64; 1024] = [acc.tag; 1024];
+        let dead2: [u64; 1024] = [acc.tag; 1024];
+        let dead3: [u64; 1024] = [acc.tag; 1024];
+        let dead4: [u64; 1024] = [acc.tag; 1024];
+        let dead5: [u64; 1024] = [acc.tag; 1024];
+        let dead6: [u64; 1024] = [acc.tag; 1024];
+        let dead7: [u64; 1024] = [acc.tag; 1024];
+        let dead8: [u64; 1024] = [acc.tag; 1024];
+        let dead9: [u64; 1024] = [acc.tag; 1024];
+        let dead10: [u64; 1024] = [acc.tag; 1024];
+        let dead11: [u64; 1024] = [acc.tag; 1024];
+        let dead12: [u64; 1024] = [acc.tag; 1024];
+        let dead13: [u64; 1024] = [acc.tag; 1024];
+        let dead14: [u64; 1024] = [acc.tag; 1024];
+        let dead15: [u64; 1024] = [acc.tag; 1024];
+        let dead16: [u64; 1024] = [acc.tag; 1024];
+        let dead17: [u64; 1024] = [acc.tag; 1024];
+        let dead18: [u64; 1024] = [acc.tag; 1024];
+        let dead19: [u64; 1024] = [acc.tag; 1024];
+        let dead20: [u64; 1024] = [acc.tag; 1024];
+        let dead21: [u64; 1024] = [acc.tag; 1024];
+        let dead22: [u64; 1024] = [acc.tag; 1024];
+        let dead23: [u64; 1024] = [acc.tag; 1024];
+        let dead24: [u64; 1024] = [acc.tag; 1024];
+        let dead25: [u64; 1024] = [acc.tag; 1024];
+        let dead26: [u64; 1024] = [acc.tag; 1024];
+        let dead27: [u64; 1024] = [acc.tag; 1024];
+        let dead28: [u64; 1024] = [acc.tag; 1024];
+        let dead29: [u64; 1024] = [acc.tag; 1024];
+        let dead30: [u64; 1024] = [acc.tag; 1024];
+        let dead31: [u64; 1024] = [acc.tag; 1024];
+        let dead32: [u64; 1024] = [acc.tag; 1024];
+        let n1: u64 = dead1[0] + dead2[0] + dead3[0] + dead4[0] + dead5[0] + dead6[0] + dead7[0] + dead8[0];
+        let n2: u64 = dead9[0] + dead10[0] + dead11[0] + dead12[0] + dead13[0] + dead14[0] + dead15[0] + dead16[0];
+        let n3: u64 = dead17[0] + dead18[0] + dead19[0] + dead20[0] + dead21[0] + dead22[0] + dead23[0] + dead24[0];
+        let n4: u64 = dead25[0] + dead26[0] + dead27[0] + dead28[0] + dead29[0] + dead30[0] + dead31[0] + dead32[0];
+        let noise: u64 = n1 + n2 + n3 + n4;
+        next acc = Big2 { a: a, b: b, tag: acc.tag + 1 + noise - noise };
     }
     return acc.tag;
 }
