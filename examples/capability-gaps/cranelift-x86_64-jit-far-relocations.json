@@ -1,0 +1,32 @@
+{
+  "artifact_kind": "mncs.capability_gap",
+  "contract_revision": "0.1",
+  "gap_id": "mncs-cranelift-jit/x86_64-far-relocations",
+  "source_artifact": "mncs-compiler:backend-artifact:965bd90b2e25704daf0b511500bbf0f74739308849ba1e7f74efed3fad9ff0cc; sha256:b3b3b2ef07b1c63d33d3be4e1d91f66e9b5e86eb23e2b84c0c2e71985980ebed",
+  "requested_semantics": "Execute the project compiler's native Cranelift artifact on x86_64 when a local function or symbol address is more than the signed 32-bit PC-relative range from generated code.",
+  "obstruction": "backend",
+  "active_profile": "0.18",
+  "backends": [
+    "mncs-cranelift/x86_64"
+  ],
+  "reproducer": "With Cranelift 0.121.2, retain a project-only mncs.compiler.project.v1 session for compile_project<N=1024,N=1024>, then compile a two-module source+lexer snapshot: retained_sessions=0 and JIT finalize panics in cranelift-jit CompiledBlob::perform_relocations with TryFromIntError(NegOverflow). Stage-0 accepts the source. A second cached attempt also retained zero sessions.",
+  "status": "FAIL",
+  "producer": "mncs-codegen-cranelift",
+  "compiler_identity": "mncs-language:3fa0c498533839fbef9901c066d4f3d543d7e0c7",
+  "source_revision": "3fa0c498533839fbef9901c066d4f3d543d7e0c7",
+  "source_location": "<local-path>/compiled_blob.rs",
+  "closest_supported_semantics": "Cranelift execution when function calls and symbol materializations remain within signed 32-bit PC-relative range.",
+  "protected_properties": [
+    "Stage-0 accepted project semantics and diagnostics remain unchanged",
+    "native execution does not depend on allocator placement or hide failed JIT finalization"
+  ],
+  "approximation_prohibited": true,
+  "evidence_requirements": [
+    "Cranelift JIT finalization succeeds for out-of-range x86_64 calls and symbol addresses",
+    "the source+lexer project retains a Cranelift session and agrees with the Stage-0 project oracle"
+  ],
+  "unresolved_fields": [
+    "Cranelift 0.121.2 lacks x86_64 far-call veneers and GOT-based far symbol materialization"
+  ],
+  "identity": "mncs:0.2:capability-gap:6cfd1d189a5ecf42892619ced1aa5aaeb26ed40d4e449859f888c2ad0b12805b"
+}

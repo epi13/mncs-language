@@ -372,10 +372,15 @@ fn jit_bits_to_f64(
     slot: cranelift_codegen::ir::StackSlot,
     bits: cranelift_codegen::ir::Value,
 ) -> cranelift_codegen::ir::Value {
-    builder.ins().stack_store(bits, slot, 0);
     builder
         .ins()
-        .stack_load(cranelift_codegen::ir::types::F64, slot, 0)
+        .stack_store(cranelift_codegen::ir::types::I64, bits, slot, 0);
+    builder.ins().stack_load(
+        cranelift_codegen::ir::types::I64,
+        cranelift_codegen::ir::types::F64,
+        slot,
+        0,
+    )
 }
 
 /// Reinterpret an f64 value as i64 bits through the reserved slot.
@@ -384,10 +389,15 @@ fn jit_f64_to_bits(
     slot: cranelift_codegen::ir::StackSlot,
     value: cranelift_codegen::ir::Value,
 ) -> cranelift_codegen::ir::Value {
-    builder.ins().stack_store(value, slot, 0);
     builder
         .ins()
-        .stack_load(cranelift_codegen::ir::types::I64, slot, 0)
+        .stack_store(cranelift_codegen::ir::types::I64, value, slot, 0);
+    builder.ins().stack_load(
+        cranelift_codegen::ir::types::I64,
+        cranelift_codegen::ir::types::I64,
+        slot,
+        0,
+    )
 }
 
 fn emit_clif(module: &ScalarModule) -> String {
@@ -2094,8 +2104,13 @@ fn host_isa() -> Result<std::sync::Arc<dyn cranelift_codegen::isa::TargetIsa>, S
     flag_builder
         .set("use_colocated_libcalls", "false")
         .map_err(|error| error.to_string())?;
+    let is_pic = if cfg!(target_arch = "x86_64") {
+        "true"
+    } else {
+        "false"
+    };
     flag_builder
-        .set("is_pic", "false")
+        .set("is_pic", is_pic)
         .map_err(|error| error.to_string())?;
     let _ = flag_builder.set("enable_verifier", "true");
     let isa_builder =
@@ -2211,7 +2226,7 @@ where
 {
     use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
     use cranelift_codegen::ir::immediates::Ieee64;
-    use cranelift_codegen::ir::{types, AbiParam, BlockArg, InstBuilder, MemFlags, Value};
+    use cranelift_codegen::ir::{types, AbiParam, BlockArg, InstBuilder, MemFlagsData, Value};
     use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
     use cranelift_module::{FuncId, Linkage, Module};
     use mncs_model::SemanticId;
@@ -2246,6 +2261,7 @@ where
         ctx.func.signature.params.push(AbiParam::new(types::I64));
         {
             let mut builder = FunctionBuilder::new(&mut ctx.func, &mut fn_ctx);
+            let trusted_flags = MemFlagsData::trusted();
             let mut blocks = BTreeMap::new();
             let mut values: BTreeMap<SemanticId, Value> = BTreeMap::new();
             // Value types for boxed-variant decisions during building.
@@ -2333,10 +2349,10 @@ where
             let exhausted_value = builder.ins().iconst(types::I64, 0);
             builder
                 .ins()
-                .store(MemFlags::trusted(), exhausted_status, status_ptr, 0);
+                .store(trusted_flags, exhausted_status, status_ptr, 0);
             builder
                 .ins()
-                .store(MemFlags::trusted(), exhausted_value, value_ptr, 0);
+                .store(trusted_flags, exhausted_value, value_ptr, 0);
             builder.ins().return_(&[]);
             // The body loop below emits scalar block 0 into the current
             // block (the historical layout puts the prologue alone in the
@@ -2396,8 +2412,8 @@ where
                         }
                         ScalarInst::BooleanNot { dest, src } => {
                             // Normalized 0/1 I64 cell: equality-against-zero
-                            // via proven `icmp_imm`/`uextend` primitives.
-                            let flag = builder.ins().icmp_imm(IntCC::Equal, values[src], 0);
+                            // via proven `icmp_imm_s`/`uextend` primitives.
+                            let flag = builder.ins().icmp_imm_s(IntCC::Equal, values[src], 0);
                             let produced = builder.ins().uextend(types::I64, flag);
                             values.insert(dest.id.clone(), produced);
                         }
@@ -3113,7 +3129,7 @@ where
                             let flag =
                                 builder
                                     .ins()
-                                    .icmp_imm(IntCC::NotEqual, values[condition], 0);
+                                    .icmp_imm_s(IntCC::NotEqual, values[condition], 0);
                             let produced =
                                 builder
                                     .ins()
@@ -3172,7 +3188,7 @@ where
                                 let dest_addr = builder.ins().iadd(allocated, offset);
                                 builder.ins().call(store, &[dest_addr, lane_value]);
                             }
-                            let scaled = builder.ins().ishl_imm(idx, 3);
+                            let scaled = builder.ins().ishl_imm_s(idx, 3);
                             let dest_addr = builder.ins().iadd(allocated, scaled);
                             builder.ins().call(store, &[dest_addr, values[element]]);
                             values.insert(dest.id.clone(), allocated);
@@ -3203,7 +3219,7 @@ where
                                 mncs_model::SequenceBound::UpTo(_) => {
                                     let base32 = builder.ins().ireduce(types::I32, src_v);
                                     let base = builder.ins().uextend(types::I64, base32);
-                                    let shifted = builder.ins().ushr_imm(src_v, 32);
+                                    let shifted = builder.ins().ushr_imm_u(src_v, 32);
                                     // `ushr_imm` keeps the operand width;
                                     // the high half already holds the
                                     // runtime length.
@@ -3288,9 +3304,9 @@ where
                                 let lt = builder.ins().icmp(IntCC::UnsignedLessThan, k, len_v);
                                 let in0 = builder.ins().select(lt, one, zero);
                                 let in1 = builder.ins().select(ge, in0, zero);
-                                let in_flag = builder.ins().icmp_imm(IntCC::NotEqual, in1, 0);
+                                let in_flag = builder.ins().icmp_imm_s(IntCC::NotEqual, in1, 0);
                                 let sk = builder.ins().iadd(src_at_v, k);
-                                let soff = builder.ins().ishl_imm(sk, 3);
+                                let soff = builder.ins().ishl_imm_s(sk, 3);
                                 let saddr = builder.ins().iadd(src_base_v, soff);
                                 let daddr = builder.ins().iadd(dst_base_v, lane_off);
                                 let use_addr = builder.ins().select(in_flag, saddr, daddr);
@@ -3339,11 +3355,11 @@ where
                                         builder.switch_to_block(cont);
                                         builder.seal_block(cont);
                                     }
-                                    (seq_v, builder.ins().ishl_imm(idx_v, 3))
+                                    (seq_v, builder.ins().ishl_imm_s(idx_v, 3))
                                 }
                                 mncs_model::SequenceBound::UpTo(_) => {
                                     if checked {
-                                        let len = builder.ins().ushr_imm(seq_v, 32);
+                                        let len = builder.ins().ushr_imm_u(seq_v, 32);
                                         let oob = builder.ins().icmp(
                                             IntCC::UnsignedGreaterThanOrEqual,
                                             idx_v,
@@ -3363,7 +3379,7 @@ where
                                     let mask = builder.ins().iconst(types::I64, 4_294_967_295);
                                     (
                                         builder.ins().band(seq_v, mask),
-                                        builder.ins().ishl_imm(idx_v, 3),
+                                        builder.ins().ishl_imm_s(idx_v, 3),
                                     )
                                 }
                                             mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => unreachable!("generic SequenceBound must be specialized before backend lowering"),
@@ -3386,7 +3402,7 @@ where
                                     builder.ins().iconst(types::I64, i64::from(*length))
                                 }
                                 mncs_model::SequenceBound::UpTo(_) => {
-                                    builder.ins().ushr_imm(values[seq], 32)
+                                    builder.ins().ushr_imm_u(values[seq], 32)
                                 }
                                             mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => unreachable!("generic SequenceBound must be specialized before backend lowering"),
 };
@@ -3407,7 +3423,7 @@ where
                                     builder.ins().iconst(types::I64, i64::from(*length))
                                 }
                                 mncs_model::SequenceBound::UpTo(_) => {
-                                    builder.ins().ushr_imm(values[source], 32)
+                                    builder.ins().ushr_imm_u(values[source], 32)
                                 }
                                             mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => unreachable!("generic SequenceBound must be specialized before backend lowering"),
 };
@@ -3441,10 +3457,10 @@ where
                                 }
                                             mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => unreachable!("generic SequenceBound must be specialized before backend lowering"),
 };
-                            let scaled = builder.ins().ishl_imm(start_v, 3);
+                            let scaled = builder.ins().ishl_imm_s(start_v, 3);
                             let addr = builder.ins().iadd(base, scaled);
-                            let lo = builder.ins().band_imm(addr, 4_294_967_295);
-                            let hi = builder.ins().ishl_imm(span, 32);
+                            let lo = builder.ins().band_imm_u(addr, 4_294_967_295);
+                            let hi = builder.ins().ishl_imm_s(span, 32);
                             let packed = builder.ins().bor(lo, hi);
                             values.insert(dest.id.clone(), packed);
                         }
@@ -3454,7 +3470,7 @@ where
                             new_cap,
                         } => {
                             let src_v = values[source];
-                            let span = builder.ins().ushr_imm(src_v, 32);
+                            let span = builder.ins().ushr_imm_u(src_v, 32);
                             let cap = builder.ins().iconst(types::I64, i64::from(*new_cap));
                             let bad = builder.ins().icmp(IntCC::UnsignedGreaterThan, span, cap);
                             let cont = builder.create_block();
@@ -3485,7 +3501,7 @@ where
                                     builder.ins().iconst(types::I64, i64::from(*length))
                                 }
                                 mncs_model::SequenceBound::UpTo(_) => {
-                                    builder.ins().ushr_imm(seq_v, 32)
+                                    builder.ins().ushr_imm_u(seq_v, 32)
                                 }
                                 mncs_model::SequenceBound::Param(_)
                                 | mncs_model::SequenceBound::UpToParam(_) => {
@@ -3520,14 +3536,12 @@ where
                             call_args.push(value_ptr);
                             // RFC 0047 §5: thread depth + 1 into the callee;
                             // the callee prologue enforces the ceiling.
-                            let depth_next = builder.ins().iadd_imm(depth, 1);
+                            let depth_next = builder.ins().iadd_imm_s(depth, 1);
                             call_args.push(depth_next);
                             builder.ins().call(callee_ref, &call_args);
                             let status =
-                                builder
-                                    .ins()
-                                    .load(types::I32, MemFlags::trusted(), status_ptr, 0);
-                            let failed = builder.ins().icmp_imm(IntCC::NotEqual, status, 0);
+                                builder.ins().load(types::I32, trusted_flags, status_ptr, 0);
+                            let failed = builder.ins().icmp_imm_s(IntCC::NotEqual, status, 0);
                             let cont = builder.create_block();
                             // A failed callee already stored its own status
                             // (1 for failure, 3 for fuel exhaustion) and a
@@ -3549,9 +3563,7 @@ where
                             builder.switch_to_block(cont);
                             builder.seal_block(cont);
                             let loaded =
-                                builder
-                                    .ins()
-                                    .load(types::I64, MemFlags::trusted(), value_ptr, 0);
+                                builder.ins().load(types::I64, trusted_flags, value_ptr, 0);
                             values.insert(dest.id.clone(), loaded);
                         }
                     }
@@ -3559,12 +3571,10 @@ where
                 match &block.term {
                     ScalarTerm::Return { value } => {
                         let zero = builder.ins().iconst(types::I32, 0);
+                        builder.ins().store(trusted_flags, zero, status_ptr, 0);
                         builder
                             .ins()
-                            .store(MemFlags::trusted(), zero, status_ptr, 0);
-                        builder
-                            .ins()
-                            .store(MemFlags::trusted(), values[value], value_ptr, 0);
+                            .store(trusted_flags, values[value], value_ptr, 0);
                         builder.ins().return_(&[]);
                     }
                     ScalarTerm::Jump { target, args } => {
@@ -3583,7 +3593,7 @@ where
                         else_args,
                     } => {
                         let cond_v = values[cond];
-                        let nz = builder.ins().icmp_imm(IntCC::NotEqual, cond_v, 0);
+                        let nz = builder.ins().icmp_imm_s(IntCC::NotEqual, cond_v, 0);
                         let then_values: Vec<BlockArg> = then_args
                             .iter()
                             .map(|arg| BlockArg::Value(values[arg]))
@@ -3608,11 +3618,11 @@ where
             builder.switch_to_block(fail);
             let one = builder.ins().iconst(types::I32, 1);
             let zero = builder.ins().iconst(types::I64, 0);
-            builder.ins().store(MemFlags::trusted(), one, status_ptr, 0);
-            builder.ins().store(MemFlags::trusted(), zero, value_ptr, 0);
+            builder.ins().store(trusted_flags, one, status_ptr, 0);
+            builder.ins().store(trusted_flags, zero, value_ptr, 0);
             builder.ins().return_(&[]);
             builder.seal_all_blocks();
-            builder.finalize();
+            builder.finalize(module.target_config());
         }
         let id = declared[&function.export_name];
         module
@@ -3652,8 +3662,8 @@ fn normalize_one(
     }
     if signed {
         let shift = 64 - i64::from(bits);
-        let widened = builder.ins().ishl_imm(value, shift);
-        builder.ins().sshr_imm(widened, shift)
+        let widened = builder.ins().ishl_imm_s(value, shift);
+        builder.ins().sshr_imm_s(widened, shift)
     } else {
         let mask = builder.ins().iconst(types::I64, (1_i64 << bits) - 1);
         builder.ins().band(value, mask)
@@ -4120,7 +4130,7 @@ fn declare_host_trampolines<M>(
 where
     M: cranelift_module::Module,
 {
-    use cranelift_codegen::ir::{types, AbiParam, InstBuilder, MemFlags};
+    use cranelift_codegen::ir::{types, AbiParam, InstBuilder, MemFlagsData};
     use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
     use cranelift_module::{Linkage, Module};
 
@@ -4149,6 +4159,7 @@ where
         let mut function_context = FunctionBuilderContext::new();
         {
             let mut builder = FunctionBuilder::new(&mut context.func, &mut function_context);
+            let trusted_flags = MemFlagsData::trusted();
             let entry = builder.create_block();
             builder.append_block_params_for_function_params(entry);
             builder.switch_to_block(entry);
@@ -4161,7 +4172,7 @@ where
             for argument_index in 0..function.params.len() {
                 arguments.push(builder.ins().load(
                     types::I64,
-                    MemFlags::trusted(),
+                    trusted_flags,
                     argument_buffer,
                     (argument_index * std::mem::size_of::<i64>()) as i32,
                 ));
@@ -4175,7 +4186,7 @@ where
             builder.ins().call(target, &arguments);
             builder.ins().return_(&[]);
             builder.seal_all_blocks();
-            builder.finalize();
+            builder.finalize(module.target_config());
         }
         module
             .define_function(id, &mut context)

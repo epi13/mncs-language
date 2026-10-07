@@ -1,4 +1,4 @@
-mncs 0.6;
+mncs 0.13;
 
 // Root of a linked two-module probe: every function executed by the corpus
 // lives in the imported module, so backend exports must resolve through
@@ -7,7 +7,9 @@ module conf.linked.root;
 
 use conf.linked.evidence;
 
-fn summarize(first: bool, second: bool) -> (reading: Reading) {
+fn summarize(first: bool, second: bool) -> (reading: Reading)
+    property prop_summarize_matches_inputs
+{
     let left: Reading = classify(7, first);
     let right: Reading = classify(11, second);
     if presence_is(left) {
@@ -24,4 +26,18 @@ fn presence_is(reading: Reading) -> (present: bool) {
         Presence.PRESENT => true,
         ABSENT => false,
     };
+}
+
+fn prop_summarize_matches_inputs(first: bool, second: bool) -> (result: bool) {
+    let reading: Reading = summarize(first, second);
+    if first {
+        if second {
+            return reading.value == 18 && presence_is(reading);
+        }
+        return reading.value == 7 && presence_is(reading);
+    }
+    if second {
+        return reading.value == 11 && presence_is(reading);
+    }
+    return reading.value == 0 && !presence_is(reading);
 }

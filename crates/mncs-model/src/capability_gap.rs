@@ -362,6 +362,24 @@ mod tests {
     }
 
     #[test]
+    fn cranelift_far_relocation_gap_fixture_round_trips() {
+        let raw = include_str!(
+            "../../../examples/capability-gaps/cranelift-x86_64-jit-far-relocations.json"
+        );
+        let gap: CapabilityGap = serde_json::from_str(raw).expect("fixture parses");
+        assert!(gap.verify_identity().is_ok());
+        assert_eq!(gap.obstruction, GapObstruction::Backend);
+        assert_eq!(gap.active_profile, "0.18");
+        assert_eq!(gap.status, GapStatus::Fail);
+        assert!(gap.approximation_prohibited);
+        assert_eq!(
+            gap.identity.as_str(),
+            "mncs:0.2:capability-gap:6cfd1d189a5ecf42892619ced1aa5aaeb26ed40d4e449859f888c2ad0b12805b"
+        );
+        assert!(!gap.source_location.contains("/home/"));
+    }
+
+    #[test]
     fn ptx_entry_annotation_fixture_round_trips() {
         let raw =
             include_str!("../../../examples/capability-gaps/ptx-kernel-entry-annotation.json");
