@@ -2136,6 +2136,7 @@ pub(crate) fn process_driver_cell_runtime(
     inputs: &[BackendValueContract],
     _output: Option<&BackendValueContract>,
     entry_depth: u64,
+    arena_bytes: u64,
 ) -> String {
     // Same native-symbol rule as the scalar driver: module and driver
     // must agree on `mncs_main`.
@@ -2146,42 +2147,48 @@ pub(crate) fn process_driver_cell_runtime(
         "extern unsigned char mncs_arena[{NATIVE_ARENA_BYTES}];\nextern uint64_t mncs_bump;"
     );
     let prefix = format!(
-        "static unsigned char mncs_arena[{NATIVE_ARENA_BYTES}];\nstatic uint64_t mncs_bump = 0;\nstatic uint64_t mncs_failed = 0;"
+        "static unsigned char mncs_arena[{arena_bytes}];\nstatic uint64_t mncs_bump = 0;\nstatic uint64_t mncs_failed = 0;"
     );
     let replacement = format!(
         "{prefix}\n\
          uint64_t mncs_cell_alloc(uint64_t bytes) {{\n  \
            uint64_t base;\n  \
            if (mncs_failed) return 0;\n  \
-           if (bytes > {NATIVE_ARENA_BYTES}u) {{ mncs_failed = 1; return 0; }}\n  \
-           if (mncs_bump > {NATIVE_ARENA_BYTES}u) {{ mncs_failed = 1; return 0; }}\n  \
+           if (bytes > {arena_bytes}u) {{ mncs_failed = 1; return 0; }}\n  \
+           if (mncs_bump > {arena_bytes}u) {{ mncs_failed = 1; return 0; }}\n  \
            base = (mncs_bump + 7u) & ~(uint64_t)7u;\n  \
-           if (base > {NATIVE_ARENA_BYTES}u - bytes) {{ mncs_failed = 1; return 0; }}\n  \
+           if (base > {arena_bytes}u - bytes) {{ mncs_failed = 1; return 0; }}\n  \
            mncs_bump = base + bytes;\n  \
            return base;\n\
+         }}\n\
+         uint64_t mncs_cell_cursor(void) {{ return mncs_bump; }}\n\
+         void mncs_cell_reset(uint64_t mark) {{\n  \
+           if (mark > mncs_bump) {{ mncs_failed = 1; return; }}\n  \
+           memset(mncs_arena + mark, 0, (size_t)(mncs_bump - mark));\n  \
+           mncs_bump = mark;\n\
          }}\n\
          void mncs_slot_store32(uint64_t at, uint64_t v) {{\n  \
            uint32_t x = (uint32_t)v;\n  \
            if (mncs_failed) return;\n  \
-           if (at > {NATIVE_ARENA_BYTES}u - 4u) {{ mncs_failed = 1; return; }}\n  \
+           if (at > {arena_bytes}u - 4u) {{ mncs_failed = 1; return; }}\n  \
            memcpy(mncs_arena + at, &x, sizeof x);\n\
          }}\n\
          void mncs_slot_store64(uint64_t at, uint64_t v) {{\n  \
            if (mncs_failed) return;\n  \
-           if (at > {NATIVE_ARENA_BYTES}u - 8u) {{ mncs_failed = 1; return; }}\n  \
+           if (at > {arena_bytes}u - 8u) {{ mncs_failed = 1; return; }}\n  \
            memcpy(mncs_arena + at, &v, sizeof v);\n\
          }}\n\
          uint64_t mncs_slot_load32(uint64_t at) {{\n  \
            uint32_t x = 0;\n  \
            if (mncs_failed) return 0;\n  \
-           if (at > {NATIVE_ARENA_BYTES}u - 4u) {{ mncs_failed = 1; return 0; }}\n  \
+           if (at > {arena_bytes}u - 4u) {{ mncs_failed = 1; return 0; }}\n  \
            memcpy(&x, mncs_arena + at, sizeof x);\n  \
            return x;\n\
          }}\n\
          uint64_t mncs_slot_load64(uint64_t at) {{\n  \
            uint64_t x = 0;\n  \
            if (mncs_failed) return 0;\n  \
-           if (at > {NATIVE_ARENA_BYTES}u - 8u) {{ mncs_failed = 1; return 0; }}\n  \
+           if (at > {arena_bytes}u - 8u) {{ mncs_failed = 1; return 0; }}\n  \
            memcpy(&x, mncs_arena + at, sizeof x);\n  \
            return x;\n\
          }}"
@@ -3255,12 +3262,15 @@ mod driver_tests {
             name: "Pair".to_owned(),
             fields: vec![],
         };
-        let driver = process_driver_cell_runtime("f", &[record], None, 0);
+        let driver = process_driver_cell_runtime("f", &[record], None, 0, 4_096);
         assert!(
             driver.contains("uint64_t mncs_cell_alloc"),
             "alloc symbol defined"
         );
         assert!(driver.contains("mncs_slot_load32"), "load32 defined");
+        assert!(driver.contains("mncs_cell_cursor"), "cursor symbol defined");
+        assert!(driver.contains("mncs_cell_reset"), "reset symbol defined");
+        assert!(driver.contains("static unsigned char mncs_arena[4096]"));
         assert!(
             !driver.contains("extern unsigned char mncs_arena"),
             "no externs remain"

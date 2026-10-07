@@ -169,7 +169,7 @@ impl NominalRefMap {
 /// Copy shape for one carried/live-out value: words copy inline, cells
 /// copy field-by-field with nested references recursed.
 #[derive(Debug, Clone)]
-enum CopyShape {
+pub(crate) enum CopyShape {
     /// One inline word (scalars, views, masks, unboxed tags).
     Word(crate::composite::SlotWidth),
     /// Canonical record cell: per-field (slot width, nested shape).
@@ -426,9 +426,82 @@ fn copy_class_of_ty(
     }
 }
 
+/// Copy plan for a cell-valued function result. Backends that reclaim a
+/// temporary allocation region at a call boundary use the same canonical
+/// composite layout facts as the WASM loop-region lowering. Recursive or
+/// otherwise unresolvable shapes return `None`, which is the safe bump-only
+/// fallback.
+pub(crate) fn cell_copy_shape_for_ty(
+    program: &mncs_model::Program,
+    ty: &BodyType,
+) -> Option<CopyShape> {
+    // A bounded view is a packed descriptor that may point into the region
+    // about to be reclaimed. Until a backend can rebase such descriptors,
+    // keep the whole returned graph bump-only whenever one is reachable.
+    fn contains_view(
+        spelling: &str,
+        program: &mncs_model::Program,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        if let Some(record) = program
+            .record_types
+            .iter()
+            .find(|record| record.name == spelling || record.identity.0 == spelling)
+        {
+            let key = record.identity.0.clone();
+            if !visiting.insert(key.clone()) {
+                return false;
+            }
+            let found = record.fields.iter().any(|field| {
+                contains_view(&field.field_type, program, visiting)
+            });
+            visiting.remove(&key);
+            return found;
+        }
+        if let Some(finite) = program
+            .finite_types
+            .iter()
+            .find(|finite| finite.name == spelling || finite.identity.0 == spelling)
+        {
+            let key = finite.identity.0.clone();
+            if !visiting.insert(key.clone()) {
+                return false;
+            }
+            let found = finite.variants.iter().any(|variant| {
+                variant.payload.iter().any(|field| {
+                    contains_view(&field.field_type, program, visiting)
+                })
+            });
+            visiting.remove(&key);
+            return found;
+        }
+        match BodyType::from_semantic_name(spelling) {
+            BodyType::Sequence {
+                bound: mncs_model::SequenceBound::UpTo(_),
+                ..
+            } => true,
+            BodyType::Sequence {
+                element,
+                bound: mncs_model::SequenceBound::Exact(_),
+            } => contains_view(&element.semantic_name(), program, visiting),
+            _ => false,
+        }
+    }
+
+    if contains_view(&ty.semantic_name(), program, &mut BTreeSet::new()) {
+        return None;
+    }
+    let composites = CompositeInfo::from_program(program);
+    let refmap = NominalRefMap::from_program(program, &composites);
+    match copy_class_of_ty(ty, program, &refmap, &composites).ok()? {
+        CopyClass::Cell(shape) => Some(shape),
+        CopyClass::Word => None,
+    }
+}
+
 /// Scratch words to flatten one shape aside (one I64 temp per word slot,
 /// including one per nested reference hop).
-fn flatten_words(shape: &CopyShape) -> u32 {
+pub(crate) fn flatten_words(shape: &CopyShape) -> u32 {
     match shape {
         CopyShape::Word(_) => 1,
         CopyShape::Record(fields) => fields
@@ -461,7 +534,7 @@ fn flatten_words(shape: &CopyShape) -> u32 {
 }
 
 /// Canonical cell bytes for one shape (what unflatten allocates).
-fn cell_bytes(shape: &CopyShape) -> u32 {
+pub(crate) fn cell_bytes(shape: &CopyShape) -> u32 {
     match shape {
         CopyShape::Word(_) => 0,
         CopyShape::Record(fields) => fields.len() as u32 * 8,
