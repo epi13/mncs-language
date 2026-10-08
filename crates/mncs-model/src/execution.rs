@@ -8,6 +8,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
+    time::Instant,
 };
 
 use serde::{Deserialize, Serialize};
@@ -93,6 +94,106 @@ const MAX_TRACE_ENTRIES: usize = 256;
 pub const MAX_OBSERVATION_EVENTS: usize = 4096;
 pub const MAX_OBSERVATION_VALUES: usize = 2048;
 pub const MAX_OBSERVATION_VALUE_BYTES: usize = 64 * 1024;
+
+#[derive(Debug, Default, Serialize)]
+struct BodyFunctionProfile {
+    calls: u64,
+    steps: u64,
+    inclusive_ns: u128,
+    exclusive_ns: u128,
+    max_inclusive_ns: u128,
+}
+
+struct ActiveBodyProfileFrame {
+    function: String,
+    started: Instant,
+    child_elapsed_ns: u128,
+    child_steps: u64,
+}
+
+/// Opt-in timing for the reference body executor. The normal execution path
+/// keeps no frame samples; when enabled, each call boundary records one timer
+/// and derives local step counts from the already accumulated result.
+struct BodyExecutionProfile {
+    enabled: bool,
+    started: Option<Instant>,
+    frames: Vec<ActiveBodyProfileFrame>,
+    functions: BTreeMap<String, BodyFunctionProfile>,
+}
+
+impl BodyExecutionProfile {
+    fn new() -> Self {
+        let enabled = std::env::var_os("MNCS_RUNTIME_PROFILE").is_some();
+        Self {
+            enabled,
+            started: enabled.then(Instant::now),
+            frames: Vec::new(),
+            functions: BTreeMap::new(),
+        }
+    }
+
+    fn enter(&mut self, target: &ExecutionTarget) {
+        if !self.enabled {
+            return;
+        }
+        self.frames.push(ActiveBodyProfileFrame {
+            function: function_id(&target.module, &target.function).0,
+            started: Instant::now(),
+            child_elapsed_ns: 0,
+            child_steps: 0,
+        });
+    }
+
+    fn leave(&mut self, subtree_steps: u64) {
+        if !self.enabled {
+            return;
+        }
+        let Some(frame) = self.frames.pop() else {
+            return;
+        };
+        let inclusive_ns = frame.started.elapsed().as_nanos();
+        let exclusive_ns = inclusive_ns.saturating_sub(frame.child_elapsed_ns);
+        let local_steps = subtree_steps.saturating_sub(frame.child_steps);
+        let profile = self.functions.entry(frame.function).or_default();
+        profile.calls = profile.calls.saturating_add(1);
+        profile.steps = profile.steps.saturating_add(local_steps);
+        profile.inclusive_ns = profile.inclusive_ns.saturating_add(inclusive_ns);
+        profile.exclusive_ns = profile.exclusive_ns.saturating_add(exclusive_ns);
+        profile.max_inclusive_ns = profile.max_inclusive_ns.max(inclusive_ns);
+        if let Some(parent) = self.frames.last_mut() {
+            parent.child_elapsed_ns = parent.child_elapsed_ns.saturating_add(inclusive_ns);
+            parent.child_steps = parent.child_steps.saturating_add(subtree_steps);
+        }
+    }
+
+    fn emit(&self, request: &ExecutionRequest, result: &ExecutionResult) {
+        if !self.enabled {
+            return;
+        }
+        let profiled_steps = self
+            .functions
+            .values()
+            .fold(0u64, |total, profile| total.saturating_add(profile.steps));
+        eprintln!(
+            "mncs-body-runtime-profile {}",
+            serde_json::json!({
+                "schema_version": "mncs.language.body-runtime-profile/1",
+                "pid": std::process::id(),
+                "program_identity": result.program_identity,
+                "program_fingerprint": result.program_fingerprint,
+                "target": request.target,
+                "status": result.status,
+                "steps": result.steps,
+                "profiled_steps": profiled_steps,
+                "step_count_matches_result": profiled_steps == result.steps,
+                "elapsed_ns": self
+                    .started
+                    .map_or(0, |started| started.elapsed().as_nanos()),
+                "functions": self.functions,
+            })
+        );
+    }
+}
 
 pub fn execution_corpus_schema_supported(schema_version: &str) -> bool {
     matches!(
@@ -3926,7 +4027,8 @@ impl<'a> BodyExecutionSession<'a> {
     /// share this session's memoized program facts; step budgets, targets,
     /// and argument checks remain per-call.
     pub fn execute(&self, request: &ExecutionRequest) -> ExecutionResult {
-        execute_inner(
+        let mut profile = BodyExecutionProfile::new();
+        let result = execute_inner(
             self,
             request,
             matches!(request.policy.effects, EffectExecutionPolicy::Record),
@@ -3936,7 +4038,10 @@ impl<'a> BodyExecutionSession<'a> {
             None,
             Vec::new(),
             None,
-        )
+            &mut profile,
+        );
+        profile.emit(request, &result);
+        result
     }
 
     /// Execute with a host-supplied generic provider registry. Provider
@@ -3947,7 +4052,8 @@ impl<'a> BodyExecutionSession<'a> {
         request: &ExecutionRequest,
         provider_runtime: &dyn ProviderRuntime,
     ) -> ExecutionResult {
-        execute_inner(
+        let mut profile = BodyExecutionProfile::new();
+        let result = execute_inner(
             self,
             request,
             matches!(request.policy.effects, EffectExecutionPolicy::Record),
@@ -3957,7 +4063,10 @@ impl<'a> BodyExecutionSession<'a> {
             None,
             Vec::new(),
             Some(provider_runtime),
-        )
+            &mut profile,
+        );
+        profile.emit(request, &result);
+        result
     }
 }
 
@@ -3984,6 +4093,7 @@ pub fn execute_observed(
         request,
         policy.clone(),
     );
+    let mut profile = BodyExecutionProfile::new();
     let result = execute_inner(
         &session,
         request,
@@ -3994,6 +4104,7 @@ pub fn execute_observed(
         None,
         Vec::new(),
         None,
+        &mut profile,
     );
     if recorder.enabled() {
         let root_frame = recorder.root_frame.clone();
@@ -4003,6 +4114,7 @@ pub fn execute_observed(
         }
     }
     let observation = recorder.finish(&result);
+    profile.emit(request, &result);
     ObservedExecutionResult {
         schema_version: EXECUTION_OBSERVED_SCHEMA_VERSION.to_owned(),
         execution: result,
@@ -4015,11 +4127,42 @@ fn execute_inner(
     request: &ExecutionRequest,
     record_effects: bool,
     call_depth: u64,
+    observer: Option<&mut ObservationRecorder>,
+    parent_frame: Option<SemanticId>,
+    call_operation: Option<SemanticId>,
+    argument_sources: Vec<Option<SemanticId>>,
+    provider_runtime: Option<&dyn ProviderRuntime>,
+    profile: &mut BodyExecutionProfile,
+) -> ExecutionResult {
+    profile.enter(&request.target);
+    let result = execute_inner_body(
+        session,
+        request,
+        record_effects,
+        call_depth,
+        observer,
+        parent_frame,
+        call_operation,
+        argument_sources,
+        provider_runtime,
+        profile,
+    );
+    profile.leave(result.steps);
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_inner_body(
+    session: &BodyExecutionSession,
+    request: &ExecutionRequest,
+    record_effects: bool,
+    call_depth: u64,
     mut observer: Option<&mut ObservationRecorder>,
     parent_frame: Option<SemanticId>,
     call_operation: Option<SemanticId>,
     argument_sources: Vec<Option<SemanticId>>,
     provider_runtime: Option<&dyn ProviderRuntime>,
+    profile: &mut BodyExecutionProfile,
 ) -> ExecutionResult {
     let program = session.program;
     if request.schema_version != EXECUTION_REQUEST_SCHEMA_VERSION {
@@ -4242,6 +4385,7 @@ fn execute_inner(
                 observer.as_deref_mut(),
                 &input_sources,
                 provider_runtime,
+                profile,
             ) {
                 if let (Some(recorder), Some(frame)) = (observer.as_deref_mut(), frame_id.as_ref())
                 {
@@ -4444,6 +4588,7 @@ fn execute_operation(
     mut observer: Option<&mut ObservationRecorder>,
     input_sources: &[Option<SemanticId>],
     provider_runtime: Option<&dyn ProviderRuntime>,
+    profile: &mut BodyExecutionProfile,
 ) -> Option<ExecutionResult> {
     let program = session.program;
     match &operation.kind {
@@ -5852,6 +5997,7 @@ fn execute_operation(
                 Some(identity.clone()),
                 input_sources.to_vec(),
                 provider_runtime,
+                profile,
             );
             if let (Some(recorder), Some(parent)) = (observer.as_deref_mut(), frame) {
                 if let Some(child) = recorder.child_frame(parent, identity) {
@@ -8470,6 +8616,59 @@ fn subject(program: &Program, target: &Option<ExecutionTarget>) -> ExecutionSubj
 mod tests {
     use super::*;
     use crate::RecordType;
+
+    #[test]
+    fn body_runtime_profile_attributes_nested_steps_to_the_callee() {
+        let mut profile = BodyExecutionProfile {
+            enabled: true,
+            started: Some(Instant::now()),
+            frames: Vec::new(),
+            functions: BTreeMap::new(),
+        };
+        let parent = ExecutionTarget {
+            module: "test.profile".to_owned(),
+            function: "parent".to_owned(),
+        };
+        let child = ExecutionTarget {
+            module: "test.profile".to_owned(),
+            function: "child".to_owned(),
+        };
+
+        profile.enter(&parent);
+        profile.enter(&child);
+        profile.leave(3);
+        profile.leave(7);
+
+        let parent_profile = &profile.functions[&function_id("test.profile", "parent").0];
+        let child_profile = &profile.functions[&function_id("test.profile", "child").0];
+        assert_eq!(parent_profile.calls, 1);
+        assert_eq!(parent_profile.steps, 4);
+        assert_eq!(child_profile.calls, 1);
+        assert_eq!(child_profile.steps, 3);
+        assert!(parent_profile.exclusive_ns <= parent_profile.inclusive_ns);
+        assert!(child_profile.exclusive_ns <= child_profile.inclusive_ns);
+        assert!(profile.frames.is_empty());
+    }
+
+    #[test]
+    fn disabled_body_runtime_profile_keeps_no_frame_or_function_samples() {
+        let mut profile = BodyExecutionProfile {
+            enabled: false,
+            started: None,
+            frames: Vec::new(),
+            functions: BTreeMap::new(),
+        };
+        let target = ExecutionTarget {
+            module: "test.profile".to_owned(),
+            function: "parent".to_owned(),
+        };
+
+        profile.enter(&target);
+        profile.leave(7);
+
+        assert!(profile.frames.is_empty());
+        assert!(profile.functions.is_empty());
+    }
 
     #[test]
     fn abi_validation_resolves_nominal_records_inside_bounded_sequences() {
