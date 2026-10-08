@@ -211,9 +211,47 @@ impl SourceSpan {
             column,
         }
     }
+}
 
-    fn covering(source: &str, left: Self, right: Self) -> Self {
-        Self::at(source, left.start, right.end)
+/// Per-source index for the line and column data attached to spans.
+///
+/// `SourceSpan::at` remains the standalone compatibility helper, but calling
+/// it for every token rescans the complete source prefix. The lexer and parser
+/// share this index so those hot paths scan line starts once, find the current
+/// line logarithmically, and count Unicode columns only within that line.
+struct SourceMap {
+    line_starts: Vec<usize>,
+}
+
+impl SourceMap {
+    fn new(source: &str) -> Self {
+        let mut line_starts = vec![0];
+        line_starts.extend(
+            source
+                .bytes()
+                .enumerate()
+                .filter_map(|(index, byte)| (byte == b'\n').then_some(index + 1)),
+        );
+        Self { line_starts }
+    }
+
+    fn span_at(&self, source: &str, start: usize, end: usize) -> SourceSpan {
+        let offset = start.min(source.len());
+        let line_index = match self.line_starts.binary_search(&offset) {
+            Ok(index) => index,
+            Err(next) => next.saturating_sub(1),
+        };
+        let line_start = self.line_starts[line_index];
+        SourceSpan {
+            start,
+            end,
+            line: line_index + 1,
+            column: source[line_start..offset].chars().count() + 1,
+        }
+    }
+
+    fn covering(&self, source: &str, left: SourceSpan, right: SourceSpan) -> SourceSpan {
+        self.span_at(source, left.start, right.end)
     }
 }
 
@@ -1187,6 +1225,11 @@ impl ParseOutput {
 }
 
 pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
+    let source_map = SourceMap::new(&envelope.text);
+    lex_with_source_map(envelope, &source_map)
+}
+
+fn lex_with_source_map(envelope: &SourceEnvelope, source_map: &SourceMap) -> LexedDocument {
     let source = envelope.text.as_str();
     let mut tokens = Vec::new();
     let mut diagnostics = Vec::new();
@@ -1246,7 +1289,7 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                     stage: DiagnosticStage::Lexical,
                     severity: DiagnosticSeverity::Error,
                     message: "unterminated block comment".to_owned(),
-                    span: SourceSpan::at(source, start, offset),
+                    span: source_map.span_at(source, start, offset),
                     expected: Vec::new(),
                     found: None,
                     related: Vec::new(),
@@ -1461,7 +1504,7 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                             stage: DiagnosticStage::Lexical,
                             severity: DiagnosticSeverity::Error,
                             message: format!("unsupported source character {current:?}"),
-                            span: SourceSpan::at(source, start, offset),
+                            span: source_map.span_at(source, start, offset),
                             expected: Vec::new(),
                             found: Some(TokenKind::Unknown),
                             related: Vec::new(),
@@ -1478,7 +1521,7 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                         stage: DiagnosticStage::Lexical,
                         severity: DiagnosticSeverity::Error,
                         message: format!("unsupported source character {current:?}"),
-                        span: SourceSpan::at(source, start, offset),
+                        span: source_map.span_at(source, start, offset),
                         expected: Vec::new(),
                         found: Some(TokenKind::Unknown),
                         related: Vec::new(),
@@ -1490,7 +1533,7 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
         tokens.push(SourceToken {
             kind,
             text: source[start..offset].to_owned(),
-            span: SourceSpan::at(source, start, offset),
+            span: source_map.span_at(source, start, offset),
         });
     }
     LexedDocument {
@@ -1502,8 +1545,9 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
 }
 
 pub fn parse(envelope: &SourceEnvelope) -> ParseOutput {
-    let lexical = lex(envelope);
-    let mut parser = Parser::new(envelope, &lexical.tokens);
+    let source_map = SourceMap::new(&envelope.text);
+    let lexical = lex_with_source_map(envelope, &source_map);
+    let mut parser = Parser::new(envelope, &lexical.tokens, &source_map);
     let (cst, ast) = parser.document();
     let mut diagnostics = lexical.diagnostics.clone();
     diagnostics.append(&mut parser.diagnostics);
@@ -1513,7 +1557,7 @@ pub fn parse(envelope: &SourceEnvelope) -> ParseOutput {
             stage: DiagnosticStage::Envelope,
             severity: DiagnosticSeverity::Error,
             message: "source envelope identity or schema is invalid".to_owned(),
-            span: SourceSpan::at(&envelope.text, 0, 0),
+            span: source_map.span_at(&envelope.text, 0, 0),
             expected: Vec::new(),
             found: None,
             related: Vec::new(),
@@ -1590,6 +1634,7 @@ pub const MAX_PARSE_NESTING: usize = 256;
 struct Parser<'a> {
     envelope: &'a SourceEnvelope,
     tokens: &'a [SourceToken],
+    source_map: &'a SourceMap,
     significant: Vec<usize>,
     cursor: usize,
     diagnostics: Vec<SourceDiagnostic>,
@@ -1603,10 +1648,15 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn new(envelope: &'a SourceEnvelope, tokens: &'a [SourceToken]) -> Self {
+    fn new(
+        envelope: &'a SourceEnvelope,
+        tokens: &'a [SourceToken],
+        source_map: &'a SourceMap,
+    ) -> Self {
         Self {
             envelope,
             tokens,
+            source_map,
             significant: tokens
                 .iter()
                 .enumerate()
@@ -1618,6 +1668,14 @@ impl<'a> Parser<'a> {
             pending_generic_closers: 0,
             nesting: 0,
         }
+    }
+
+    fn span_at(&self, start: usize, end: usize) -> SourceSpan {
+        self.source_map.span_at(&self.envelope.text, start, end)
+    }
+
+    fn covering(&self, left: SourceSpan, right: SourceSpan) -> SourceSpan {
+        self.source_map.covering(&self.envelope.text, left, right)
     }
 
     /// Enter one recursive-nesting level. Returns false (after recording
@@ -1787,7 +1845,7 @@ impl<'a> Parser<'a> {
             );
         }
 
-        let source_span = SourceSpan::at(&self.envelope.text, 0, self.envelope.text.len());
+        let source_span = self.span_at(0, self.envelope.text.len());
         let mut children = vec![header, module_node];
         children.extend(use_nodes);
         children.extend(declaration_nodes);
@@ -1865,13 +1923,11 @@ impl<'a> Parser<'a> {
         let end = self.previous_token_index(start);
         let node = self.node(CstKind::UseDeclaration, start, end, Vec::new());
         let span = match &module {
-            Some(module) => SourceSpan::covering(&self.envelope.text, module.span, module.span),
+            Some(module) => self.covering(module.span, module.span),
             None => self
                 .tokens
                 .get(*self.significant.get(start).unwrap_or(&0))
-                .map_or(SourceSpan::at(&self.envelope.text, 0, 0), |token| {
-                    token.span
-                }),
+                .map_or(self.span_at(0, 0), |token| token.span),
         };
         let decl = module.map(|module| AstUseDecl {
             module,
@@ -1932,11 +1988,7 @@ impl<'a> Parser<'a> {
                         else {
                             break;
                         };
-                        let field_span = SourceSpan::covering(
-                            &self.envelope.text,
-                            field_name.span,
-                            field_type.span,
-                        );
+                        let field_span = self.covering(field_name.span, field_type.span);
                         variant_fields.push(AstRecordField {
                             name: field_name,
                             value_type: field_type,
@@ -2035,8 +2087,7 @@ impl<'a> Parser<'a> {
             let field_type = self.type_annotation("MNP126", "expected field type");
             let field_end = self.previous_token_index(field_start);
             if let (Some(field_name), Some(field_type)) = (field_name.clone(), field_type.clone()) {
-                let field_span =
-                    SourceSpan::covering(&self.envelope.text, field_name.span, field_type.span);
+                let field_span = self.covering(field_name.span, field_type.span);
                 fields.push(AstRecordField {
                     name: field_name,
                     value_type: field_type,
@@ -2195,7 +2246,7 @@ impl<'a> Parser<'a> {
                     let name =
                         self.spanned(TokenKind::Identifier, "MNP041", "expected clause name");
                     if let (Some(kind), Some(name)) = (kind, name) {
-                        let span = SourceSpan::covering(&self.envelope.text, kind.span, name.span);
+                        let span = self.covering(kind.span, name.span);
                         contracts.push(AstClause { kind, name, span });
                     }
                     let _ = start;
@@ -2225,11 +2276,7 @@ impl<'a> Parser<'a> {
                     );
                     if let (Some(kind), Some(capability)) = (kind, capability) {
                         effects.push(AstEffect {
-                            span: SourceSpan::covering(
-                                &self.envelope.text,
-                                kind.span,
-                                capability.span,
-                            ),
+                            span: self.covering(kind.span, capability.span),
                             kind,
                             capability,
                         });
@@ -2322,7 +2369,7 @@ impl<'a> Parser<'a> {
                 let node = self.node(CstKind::Block, start, end, Vec::new());
                 let stmt = match (name, value_type, value) {
                     (Some(name), Some(value_type), Some(value)) => Some(AstStmt::Let {
-                        span: SourceSpan::covering(&self.envelope.text, name.span, value.span()),
+                        span: self.covering(name.span, value.span()),
                         name,
                         value_type,
                         value,
@@ -2471,8 +2518,7 @@ impl<'a> Parser<'a> {
             over_source = source.map(Box::new);
             bound = Some(SpannedText {
                 text: String::new(),
-                span: SourceSpan::at(
-                    &self.envelope.text,
+                span: self.span_at(
                     source_span.map_or(0, |span| span.start),
                     source_span.map_or(0, |span| span.start),
                 ),
@@ -2509,7 +2555,7 @@ impl<'a> Parser<'a> {
             if bound.is_none() {
                 bound = Some(SpannedText {
                     text: "0".to_owned(),
-                    span: SourceSpan::at(&self.envelope.text, 0, 0),
+                    span: self.span_at(0, 0),
                 });
                 bound_value = None;
             }
@@ -2655,7 +2701,7 @@ impl<'a> Parser<'a> {
             }
             self.cursor += 1;
             let right = self.binary_expression(precedence + 1)?;
-            let span = SourceSpan::covering(&self.envelope.text, left.span(), right.span());
+            let span = self.covering(left.span(), right.span());
             left = AstExpr::Binary {
                 op,
                 left: Box::new(left),
@@ -2695,7 +2741,7 @@ impl<'a> Parser<'a> {
             }
             let bang = self.spanned(TokenKind::Not, "MNP064", "expected expression")?;
             let operand = self.primary()?;
-            let span = SourceSpan::covering(&self.envelope.text, bang.span, operand.span());
+            let span = self.covering(bang.span, operand.span());
             AstExpr::Not {
                 value: Box::new(operand),
                 span,
@@ -2718,7 +2764,7 @@ impl<'a> Parser<'a> {
         }
         self.cursor += 1;
         let target_type = self.type_annotation("MNP151", "expected target type after 'as'")?;
-        let span = SourceSpan::covering(&self.envelope.text, atom.span(), target_type.span);
+        let span = self.covering(atom.span(), target_type.span);
         Some(AstExpr::Cast {
             value: Box::new(atom),
             target_type,
@@ -2751,7 +2797,7 @@ impl<'a> Parser<'a> {
                     )?;
                     let magnitude: i128 = lit.text.parse().unwrap_or(0);
                     let value = -magnitude;
-                    let span = SourceSpan::covering(&self.envelope.text, minus.span, lit.span);
+                    let span = self.covering(minus.span, lit.span);
                     let text = SpannedText {
                         text: format!("-{}", lit.text),
                         span,
@@ -2787,7 +2833,7 @@ impl<'a> Parser<'a> {
                         );
                         return None;
                     }
-                    let span = SourceSpan::covering(&self.envelope.text, minus.span, lit.span);
+                    let span = self.covering(minus.span, lit.span);
                     let text = SpannedText {
                         text: format!("-{}", lit.text),
                         span,
@@ -2831,7 +2877,7 @@ impl<'a> Parser<'a> {
                     self.cursor += 1;
                     let variant =
                         self.field_name("MNP065", "expected finite variant or field after '.'")?;
-                    let span = SourceSpan::covering(&self.envelope.text, name.span, variant.span);
+                    let span = self.covering(name.span, variant.span);
                     // Qualified payload construction: `Type.Variant { ... }`
                     // (Profile 0.6). The lookahead distinguishes it from a
                     // projection chain by checking for a literal-opening '{'.
@@ -2872,7 +2918,7 @@ impl<'a> Parser<'a> {
                             type_name: name,
                             variant,
                             fields,
-                            span: SourceSpan::covering(&self.envelope.text, span, end),
+                            span: self.covering(span, end),
                         });
                     }
                     let base = AstExpr::FiniteVariant {
@@ -2916,7 +2962,7 @@ impl<'a> Parser<'a> {
                             function: name.clone(),
                             generic_args,
                             arguments,
-                            span: SourceSpan::covering(&self.envelope.text, name.span, end),
+                            span: self.covering(name.span, end),
                         };
                         self.project_chain(call)
                     } else if !generic_args.is_empty() {
@@ -3037,11 +3083,7 @@ impl<'a> Parser<'a> {
         if segments.len() < 2 {
             return Some(AstExpr::Name(first));
         }
-        let path_span = SourceSpan::covering(
-            &self.envelope.text,
-            segments.first()?.span,
-            segments.last()?.span,
-        );
+        let path_span = self.covering(segments.first()?.span, segments.last()?.span);
         let path_text = segments
             .iter()
             .map(|segment| segment.text.as_str())
@@ -3087,7 +3129,7 @@ impl<'a> Parser<'a> {
                 type_name: segments[0].clone(),
                 variant: segments[1].clone(),
                 fields,
-                span: SourceSpan::covering(&self.envelope.text, path_span, end),
+                span: self.covering(path_span, end),
             });
         }
         // Qualified payload construction: `alias.Type.Variant { ... }`
@@ -3137,17 +3179,13 @@ impl<'a> Parser<'a> {
                     .map(|segment| segment.text.as_str())
                     .collect::<Vec<_>>()
                     .join("."),
-                span: SourceSpan::covering(
-                    &self.envelope.text,
-                    segments.first()?.span,
-                    segments[segments.len() - 2].span,
-                ),
+                span: self.covering(segments.first()?.span, segments[segments.len() - 2].span),
             };
             return Some(AstExpr::FiniteVariant {
                 type_name: qualifier,
                 variant: segments.last()?.clone(),
                 fields,
-                span: SourceSpan::covering(&self.envelope.text, path_span, end),
+                span: self.covering(path_span, end),
             });
         }
         if self.current_kind() == Some(TokenKind::LeftBrace) && self.at_record_literal() {
@@ -3185,7 +3223,7 @@ impl<'a> Parser<'a> {
                 function: path_name,
                 generic_args: qualified_generic_args,
                 arguments,
-                span: SourceSpan::covering(&self.envelope.text, path_span, end),
+                span: self.covering(path_span, end),
             };
             return Some(self.project_chain(call));
         } else if !qualified_generic_args.is_empty() {
@@ -3227,11 +3265,7 @@ impl<'a> Parser<'a> {
                 .map(|segment| segment.text.as_str())
                 .collect::<Vec<_>>()
                 .join("."),
-            span: SourceSpan::covering(
-                &self.envelope.text,
-                segments.first()?.span,
-                segments[segments.len() - 2].span,
-            ),
+            span: self.covering(segments.first()?.span, segments[segments.len() - 2].span),
         };
         if self.at_payload_construct() {
             self.cursor += 1;
@@ -3263,7 +3297,7 @@ impl<'a> Parser<'a> {
                 type_name,
                 variant,
                 fields,
-                span: SourceSpan::covering(&self.envelope.text, path_span, end),
+                span: self.covering(path_span, end),
             });
         }
         Some(AstExpr::FiniteVariant {
@@ -3303,7 +3337,7 @@ impl<'a> Parser<'a> {
             )
             .and_then(|index| self.tokens.get(index))
             .map_or(name.span, |token| token.span);
-        let span = SourceSpan::covering(&self.envelope.text, name.span, end);
+        let span = self.covering(name.span, end);
         match (name.text.as_str(), arguments.len()) {
             ("select", 3) => {
                 let mut iter = arguments.into_iter();
@@ -4036,7 +4070,7 @@ impl<'a> Parser<'a> {
                     else {
                         break;
                     };
-                    let span = SourceSpan::covering(&self.envelope.text, base.span(), field.span);
+                    let span = self.covering(base.span(), field.span);
                     base = AstExpr::FieldProject {
                         base: Box::new(base),
                         field,
@@ -4069,8 +4103,7 @@ impl<'a> Parser<'a> {
                             "MNP154",
                             "expected ']' after view range",
                         );
-                        let span = SourceSpan::covering(
-                            &self.envelope.text,
+                        let span = self.covering(
                             base.span(),
                             end_index
                                 .and_then(|index| self.tokens.get(index))
@@ -4088,8 +4121,7 @@ impl<'a> Parser<'a> {
                             "MNP155",
                             "expected ']' after sequence index",
                         );
-                        let span = SourceSpan::covering(
-                            &self.envelope.text,
+                        let span = self.covering(
                             base.span(),
                             end_index
                                 .and_then(|index| self.tokens.get(index))
@@ -4121,7 +4153,7 @@ impl<'a> Parser<'a> {
             .tokens
             .get(open)
             .map(|token| token.span)
-            .unwrap_or(SourceSpan::at(&self.envelope.text, 0, 0));
+            .unwrap_or(self.span_at(0, 0));
         let mut elements = Vec::new();
         while self.current_kind() != Some(TokenKind::RightBracket)
             && self.cursor < self.significant.len()
@@ -4158,8 +4190,7 @@ impl<'a> Parser<'a> {
             "MNP157",
             "expected ']' after sequence elements",
         );
-        let span = SourceSpan::at(
-            &self.envelope.text,
+        let span = self.span_at(
             self.tokens.get(open).map_or(0, |token| token.span.start),
             close
                 .and_then(|index| self.tokens.get(index))
@@ -4202,8 +4233,7 @@ impl<'a> Parser<'a> {
             "MNP157",
             "expected ']' after repeat count",
         );
-        let span = SourceSpan::at(
-            &self.envelope.text,
+        let span = self.span_at(
             open_span.start,
             close
                 .and_then(|index| self.tokens.get(index))
@@ -4299,8 +4329,7 @@ impl<'a> Parser<'a> {
                     "MNP131",
                     "expected '}' after record literal",
                 );
-                let span =
-                    SourceSpan::covering(&self.envelope.text, type_name.span, type_name.span);
+                let span = self.covering(type_name.span, type_name.span);
                 return Some(AstExpr::RecordLiteral {
                     type_name,
                     base,
@@ -4331,9 +4360,9 @@ impl<'a> Parser<'a> {
             "expected '}' after record literal",
         );
         let last_span = fields.last().map_or(type_name.span, |(name, value)| {
-            SourceSpan::covering(&self.envelope.text, name.span, value.span())
+            self.covering(name.span, value.span())
         });
-        let span = SourceSpan::covering(&self.envelope.text, type_name.span, last_span);
+        let span = self.covering(type_name.span, last_span);
         Some(AstExpr::RecordLiteral {
             type_name,
             base,
@@ -4390,8 +4419,7 @@ impl<'a> Parser<'a> {
                             "MNP082",
                             "expected integer literal after '-' in match pattern",
                         )?;
-                        let span =
-                            SourceSpan::covering(&self.envelope.text, minus.span, literal.span);
+                        let span = self.covering(minus.span, literal.span);
                         (
                             true,
                             SpannedText {
@@ -4416,7 +4444,7 @@ impl<'a> Parser<'a> {
                     "expected '=>' after match pattern",
                 );
                 let arm_value = self.expression()?;
-                let span = SourceSpan::covering(&self.envelope.text, head.span, arm_value.span());
+                let span = self.covering(head.span, arm_value.span());
                 arms.push(AstMatchArm {
                     pattern: AstMatchPattern::Scalar { negative, text },
                     type_name: None,
@@ -4490,7 +4518,7 @@ impl<'a> Parser<'a> {
                             .map(|segment| segment.text.as_str())
                             .collect::<Vec<_>>()
                             .join("."),
-                        span: SourceSpan::covering(&self.envelope.text, start, end),
+                        span: self.covering(start, end),
                     };
                 }
                 type_name = Some(qualified_type);
@@ -4540,7 +4568,7 @@ impl<'a> Parser<'a> {
                 "expected '=>' after match variant",
             );
             let arm_value = self.expression()?;
-            let span = SourceSpan::covering(&self.envelope.text, variant.span, arm_value.span());
+            let span = self.covering(variant.span, arm_value.span());
             arms.push(AstMatchArm {
                 pattern: AstMatchPattern::Variant,
                 type_name,
@@ -4574,8 +4602,7 @@ impl<'a> Parser<'a> {
             "expected '}' after match arms",
         );
         let end = self.previous_token_index(start);
-        let span = SourceSpan::covering(
-            &self.envelope.text,
+        let span = self.covering(
             self.tokens
                 .get(start)
                 .map_or(value.span(), |token| token.span),
@@ -4617,7 +4644,7 @@ impl<'a> Parser<'a> {
             ));
             if let (Some(name), Some(value_type)) = (name, value_type) {
                 parameters.push(AstParameter {
-                    span: SourceSpan::covering(&self.envelope.text, name.span, value_type.span),
+                    span: self.covering(name.span, value_type.span),
                     name,
                     value_type,
                 });
@@ -4694,7 +4721,7 @@ impl<'a> Parser<'a> {
                     };
                     Some(SpannedText {
                         text: format!("{} -> {}", first.text, second.text),
-                        span: SourceSpan::covering(&self.envelope.text, first.span, second.span),
+                        span: self.covering(first.span, second.span),
                     })
                 } else {
                     if first.text != "Type" && first.text != "Nat" {
@@ -4710,7 +4737,7 @@ impl<'a> Parser<'a> {
                 None
             };
             let span = if let Some(c) = &constraint {
-                SourceSpan::covering(&self.envelope.text, name.span, c.span)
+                self.covering(name.span, c.span)
             } else {
                 name.span
             };
@@ -4929,7 +4956,7 @@ impl<'a> Parser<'a> {
         }
         Some(SpannedText {
             text,
-            span: SourceSpan::covering(&self.envelope.text, first.span, end),
+            span: self.covering(first.span, end),
         })
     }
 
@@ -5103,7 +5130,7 @@ impl<'a> Parser<'a> {
                 }
                 name = SpannedText {
                     text,
-                    span: SourceSpan::covering(&self.envelope.text, start, end),
+                    span: self.covering(start, end),
                 };
             }
             if self.current_kind() != Some(TokenKind::Lt)
@@ -5171,7 +5198,7 @@ impl<'a> Parser<'a> {
                     "expected '>' after vector or mask type",
                 )?
             };
-            let span = SourceSpan::covering(&self.envelope.text, name.span, self.tokens[end].span);
+            let span = self.covering(name.span, self.tokens[end].span);
             return Some(SpannedText { text, span });
         }
         if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_7) {
@@ -5232,8 +5259,7 @@ impl<'a> Parser<'a> {
         )?;
         let end_span = self.tokens.get(end_index).map(|token| token.span);
         let text = format!("[{}; {}]", element.text, bound_text);
-        let span = SourceSpan::at(
-            &self.envelope.text,
+        let span = self.span_at(
             start_span.map_or(0, |span| span.start),
             end_span.map_or(0, |span| span.end),
         );
@@ -5254,11 +5280,7 @@ impl<'a> Parser<'a> {
         let (span, found) = self.current_token().map_or_else(
             || {
                 (
-                    SourceSpan::at(
-                        &self.envelope.text,
-                        self.envelope.text.len(),
-                        self.envelope.text.len(),
-                    ),
+                    self.span_at(self.envelope.text.len(), self.envelope.text.len()),
                     None,
                 )
             },
@@ -5365,7 +5387,7 @@ impl<'a> Parser<'a> {
             .map_or(start, |token| token.span.end);
         CstNode {
             kind,
-            span: SourceSpan::at(&self.envelope.text, start, end),
+            span: self.span_at(start, end),
             token_start,
             token_end,
             children,
@@ -5653,6 +5675,27 @@ mod tests {
         assert_eq!(ast.functions[0].inputs[0].value_type.text, "i64");
         let span = ast.functions[0].body.returned_value.span();
         assert_eq!(&fixture().text[span.start..span.end], "value");
+    }
+
+    #[test]
+    fn indexed_spans_match_standalone_spans_at_every_utf8_boundary() {
+        let source = "αβ\n\nvalue\r\n😀tail\n";
+        let index = SourceMap::new(source);
+        let boundaries: Vec<usize> = source
+            .char_indices()
+            .map(|(offset, _)| offset)
+            .chain(std::iter::once(source.len()))
+            .collect();
+
+        for &start in &boundaries {
+            for &end in boundaries.iter().filter(|&&end| end >= start) {
+                assert_eq!(
+                    index.span_at(source, start, end),
+                    SourceSpan::at(source, start, end),
+                    "span at byte range {start}..{end}"
+                );
+            }
+        }
     }
 
     #[test]
