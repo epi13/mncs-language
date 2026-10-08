@@ -1,0 +1,180 @@
+{
+  "schema": "mncs.language.syntax-source-map-profile/1",
+  "runId": "mncs-language-syntax-source-map-2026-10-08",
+  "measuredAt": "2026-10-08T23:16:25Z",
+  "scope": {
+    "operation": "mncs-syntax lexer/parser source-span construction",
+    "baseline": {
+      "repository": "mncs-language",
+      "revision": "b05dfa2b91541e4bd4a75aecff6abdedd708608e"
+    },
+    "candidate": {
+      "repository": "mncs-language",
+      "revision": "5e94384f16e18800135c0385d4d93b138b8d6eb8",
+      "sourcePath": "crates/mncs-syntax/src/source.rs",
+      "sourceSha256": "6d3b1df5b4e32d3bf8bf85bb534ae97b1c2f45ee19cdc51df77ed9d7c1298cd6",
+      "profileHarnessPath": "crates/mncs-syntax/examples/frontend_profile.rs",
+      "profileHarnessSha256": "183c158af3c9a6dd5382b3d90d7fed8b6f61050e010e84a8ef6c8d526ab55979"
+    },
+    "input": {
+      "repository": "mncs-compiler",
+      "path": "src/compiler/decl.mncs",
+      "bytes": 820881,
+      "sha256": "f2dd1f842e8747c408f9918d7611afeba0b45c2ae15f1467acb13b72fee9691f",
+      "gitBlob": "22e1c4c8ad9da3547b9b7595ccd8c7b095c5b16c",
+      "sourceArtifactIdentity": "mncs:source:artifact:ea7000fd54f71ee7c35cbd06f395c5cc08de4b96300bcc48c79ed85aadb381ba",
+      "lines": 10013,
+      "maxLineBytes": 807,
+      "medianLineBytes": 73
+    }
+  },
+  "finding": {
+    "rootCause": "SourceSpan::at counted and searched the complete source prefix for each token span. Parser covering operations repeated the same work for AST/CST spans.",
+    "change": "Build one per-source LF line-start index and share it between lexing and parsing. Span lookup binary-searches line starts and counts Unicode scalars only from the current line start. The public standalone SourceSpan::at helper remains unchanged.",
+    "pressureId": "MNCS-LANG-0A3D2543ED81"
+  },
+  "measurements": {
+    "baseline": {
+      "exactInputLex": {
+        "status": "TIMEOUT",
+        "timeoutSeconds": 30,
+        "wallSeconds": 30.02,
+        "cpuUserSeconds": 29.896,
+        "cpuSystemSeconds": 0.007,
+        "sampledRssHighWaterKiB": 7764,
+        "partialRusageMaxRssKiB": 13544,
+        "maxFileDescriptors": 3,
+        "threads": 1,
+        "sampledReadCharacters": 823463,
+        "physicalIo": "UNKNOWN; no physical reads or writes were sampled",
+        "terminationCause": "UNKNOWN; this run was stopped by the 30-second harness timeout",
+        "cgroupMemoryMax": "max",
+        "cgroupCpuMax": "max 100000",
+        "oomKillDelta": 0
+      },
+      "tokenDenseFixtures": [
+        {"bytes": 8192, "lines": 4096, "tokens": 8192, "phaseUs": 346904, "status": "SUCCESS"},
+        {"bytes": 16384, "lines": 8192, "tokens": 16384, "phaseUs": 1375950, "status": "SUCCESS"},
+        {"bytes": 32768, "lines": 16384, "tokens": 32768, "phaseUs": 5591023, "status": "SUCCESS"},
+        {"bytes": 65536, "lines": 32768, "tokens": null, "phaseUs": null, "wallSeconds": 12.0142, "cpuUserSeconds": 11.9789, "status": "TIMEOUT"}
+      ],
+      "exactInputParse": {"status": "UNKNOWN", "reason": "The baseline harness timed out during lexing; parsing did not start."}
+    },
+    "candidate": {
+      "exactInputLex": {
+        "status": "SUCCESS",
+        "phaseUs": 204981,
+        "readUs": 356,
+        "envelopeSealUs": 60998,
+        "tokens": 317970,
+        "diagnostics": 0,
+        "outerWallSeconds": 0.502,
+        "cpuUserSeconds": 0.259,
+        "cpuSystemSeconds": 0.007,
+        "rusageMaxRssKiB": 33480,
+        "maxFileDescriptors": 3,
+        "threads": 1,
+        "sampledReadCharacters": 2582,
+        "ioClassification": "UNKNOWN; the sub-second process completed before useful /proc/io sampling",
+        "oomKillDelta": 0
+      },
+      "exactInputParse": {
+        "status": "SUCCESS",
+        "phaseUs": 960429,
+        "readUs": 352,
+        "envelopeSealUs": 62668,
+        "astPresent": true,
+        "diagnostics": 0,
+        "outerWallSeconds": 1.502,
+        "cpuUserSeconds": 0.987,
+        "cpuSystemSeconds": 0.031,
+        "procRssHighWaterKiB": 88148,
+        "rusageMaxRssKiB": 87944,
+        "maxFileDescriptors": 3,
+        "threads": 1,
+        "readCharacters": 823463,
+        "oomKillDelta": 0
+      },
+      "tokenDenseFixtures": [
+        {"bytes": 8192, "tokens": 8192, "phaseUs": 4187, "outerWallSeconds": 0.01076, "cpuUserSeconds": 0.00506, "status": "SUCCESS"},
+        {"bytes": 16384, "tokens": 16384, "phaseUs": 8357, "outerWallSeconds": 0.0208, "cpuUserSeconds": 0.01125, "status": "SUCCESS"},
+        {"bytes": 32768, "tokens": 32768, "phaseUs": 17008, "outerWallSeconds": 0.03097, "cpuUserSeconds": 0.02198, "status": "SUCCESS"},
+        {"bytes": 65536, "tokens": 65536, "phaseUs": 34249, "outerWallSeconds": 0.05136, "cpuUserSeconds": 0.04059, "status": "SUCCESS"}
+      ],
+      "stage0CliSyntaxOnly": {
+        "status": "SUCCESS",
+        "command": "mncs declaration-inventory <decl.mncs> --syntax-only",
+        "wallSeconds": 3.01,
+        "cpuUserSeconds": 2.887,
+        "cpuSystemSeconds": 0.047,
+        "procRssHighWaterKiB": 119996,
+        "rusageMaxRssKiB": 119888,
+        "maxFileDescriptors": 3,
+        "threads": 2,
+        "outputBytes": 2351065,
+        "valid": true,
+        "declarations": 1549,
+        "callables": 1200,
+        "diagnostics": 0,
+        "outputCollection": "file-backed; stdout was drained without a pipe blockage",
+        "oomKillDelta": 0
+      },
+      "stage0CliSyntaxOnlyRelease": {
+        "status": "SUCCESS",
+        "command": "target/release/mncs declaration-inventory <decl.mncs> --syntax-only",
+        "binarySha256": "5c60e052beecca17b975192f632d7a6a183fcaab26bb94e44c20edf559dac556",
+        "binaryBytes": 26478624,
+        "wallSeconds": 0.36,
+        "cpuUserSeconds": 0.32,
+        "cpuSystemSeconds": 0.03,
+        "maxRssKiB": 110516,
+        "majorPageFaults": 0,
+        "minorPageFaults": 29403,
+        "maxFileDescriptors": "UNKNOWN",
+        "threads": "UNKNOWN",
+        "outputBytes": 2351065,
+        "valid": true,
+        "declarations": 1549,
+        "callables": 1200,
+        "diagnostics": 0,
+        "sourceArtifactIdentity": "mncs:source:artifact:bebd6db2debd6862830fc9a79f20e25bf1459bea27227346cf377c15f47dcc9b",
+        "outputCollection": "file-backed; /usr/bin/time -v collected process usage",
+        "termination": "exit status 0"
+      }
+    }
+  },
+  "validation": [
+    {
+      "command": "cargo test --locked -p mncs-syntax",
+      "status": "PASS",
+      "passed": 29,
+      "failed": 0,
+      "note": "Includes indexed_spans_match_standalone_spans_at_every_utf8_boundary over UTF-8 and CRLF input."
+    },
+    {
+      "command": "cargo test --locked -p mncs-cli --test profile_compat --test tranche1_corrections --test pressure_frontend --test conformance",
+      "status": "PASS",
+      "passed": 45,
+      "failed": 0,
+      "note": "Four focused frontend and conformance suites run against the same SourceMap implementation."
+    },
+    {
+      "command": "cargo build --locked -p mncs-cli --bin mncs",
+      "status": "PASS",
+      "note": "Debug Stage-0 CLI built for the syntax-only declaration inventory measurement."
+    },
+    {
+      "command": "cargo build --locked --release -p mncs-cli --bin mncs",
+      "status": "PASS",
+      "artifactSha256": "5c60e052beecca17b975192f632d7a6a183fcaab26bb94e44c20edf559dac556",
+      "artifactBytes": 26478624,
+      "note": "Release Stage-0 CLI also completed syntax-only declaration inventory on the exact input."
+    }
+  ],
+  "limitations": [
+    "The baseline exact-input run did not complete, so baseline memory and full-parse cost are not comparable or established.",
+    "The direct CLI result is syntax-only declaration inventory, not whole-module checking, proof, CFG, verified SSA, executable generation, or Stage-1 evidence.",
+    "An earlier CLI measurement used a stdout pipe that was not drained until completion; that run blocked at the pipe capacity and is discarded as an invalid measurement.",
+    "No cgroup OOM event was observed in the measured candidate runs. The historical flow.mncs exit -9 remains causally unknown and is not attributed to this pressure."
+  ]
+}
