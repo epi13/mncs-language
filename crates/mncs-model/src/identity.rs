@@ -105,12 +105,20 @@ pub struct SemanticDiff {
 
 impl Program {
     pub fn semantic_identities(&self) -> SemanticIdentities {
+        let canonical = self.canonical_form().expect("canonical form");
+        self.semantic_identities_with_program_fingerprint(&canonical.fingerprint)
+    }
+
+    pub(crate) fn semantic_identities_with_program_fingerprint(
+        &self,
+        program_fingerprint: &str,
+    ) -> SemanticIdentities {
         let mut objects = Vec::new();
         let program_id = program_id(&self.module);
         objects.push(IdentityRecord {
             identity: program_id,
             kind: IdentityKind::Program,
-            fingerprint: fingerprint_json(&self.canonical_form().expect("canonical form").json),
+            fingerprint: program_fingerprint.to_owned(),
         });
 
         for finite_type in &self.finite_types {

@@ -178,10 +178,12 @@ pub enum GraphError {
 
 impl Program {
     pub fn semantic_graph(&self) -> Result<SemanticGraph, GraphError> {
-        if !self.validate().valid {
-            return Err(GraphError::InvalidProgram(self.validate()));
+        let report = self.validate();
+        if !report.valid {
+            return Err(GraphError::InvalidProgram(report));
         }
-        Ok(build_graph(self, &self.semantic_identities()))
+        let identities = self.semantic_identities();
+        Ok(semantic_graph_with_identities(self, &identities))
     }
 
     pub fn invalidation_from(&self, after: &Program) -> Result<InvalidationReport, GraphError> {
@@ -190,6 +192,13 @@ impl Program {
         let diff = diff_identities(&self.semantic_identities(), &after.semantic_identities());
         Ok(invalidate(&before_graph, &after_graph, &diff))
     }
+}
+
+pub(crate) fn semantic_graph_with_identities(
+    program: &Program,
+    identities: &SemanticIdentities,
+) -> SemanticGraph {
+    build_graph(program, identities)
 }
 
 fn classify_impact_roots(
@@ -544,6 +553,16 @@ impl SemanticGraph {
 }
 
 fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGraph {
+    let functions_by_identity: BTreeMap<_, _> = program
+        .functions
+        .iter()
+        .map(|function| {
+            (
+                function_id(function.identity_namespace(&program.module), &function.name),
+                function,
+            )
+        })
+        .collect();
     let nodes = identities
         .objects
         .iter()
@@ -798,14 +817,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                                     kind: EdgeKind::UsesCapability,
                                 });
                             }
-                            if let Some(callee_function) =
-                                program.functions.iter().find(|candidate| {
-                                    function_id(
-                                        candidate.identity_namespace(&program.module),
-                                        &candidate.name,
-                                    ) == *callee
-                                })
-                            {
+                            if let Some(callee_function) = functions_by_identity.get(callee) {
                                 for effect in effects {
                                     let canonical = serde_json::to_string(
                                         &crate::canonical::canonical_effect(effect),
@@ -1208,6 +1220,61 @@ mod tests {
             .edges
             .iter()
             .any(|edge| edge.kind == EdgeKind::SupportsProperty));
+    }
+
+    #[test]
+    fn local_callee_effect_edges_use_the_exact_function_identity() {
+        let mut program = valid_program();
+        let callee = program.functions[0].clone();
+        let callee_identity = crate::function_id(&program.module, &callee.name);
+        let effect = callee.effects[0].clone();
+        program.functions[0].body = Some(crate::FunctionBody {
+            schema_version: crate::EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
+            entry: "entry".to_owned(),
+            parameters: Vec::new(),
+            generic_params: Vec::new(),
+            cycle_policy: crate::BodyCyclePolicy::Legacy,
+            bounded_iterations: Vec::new(),
+            blocks: vec![crate::BodyBlock {
+                id: "entry".to_owned(),
+                parameters: Vec::new(),
+                operations: vec![crate::BodyOperation {
+                    id: "call".to_owned(),
+                    kind: crate::BodyOperationKind::Call {
+                        function: callee_identity,
+                        function_name: callee.name.clone(),
+                        required_capabilities: callee.capabilities.clone(),
+                        effects: vec![effect.clone()],
+                        generic_args: Vec::new(),
+                        instantiation: None,
+                        specialization: None,
+                    },
+                    operands: Vec::new(),
+                    results: Vec::new(),
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                }],
+                terminator: crate::BodyTerminator::Return { values: Vec::new() },
+            }],
+        });
+
+        let identities = program.semantic_identities();
+        let graph = super::build_graph(&program, &identities);
+        let namespace = callee.identity_namespace(&program.module);
+        let effect_key = serde_json::to_string(&crate::canonical::canonical_effect(&effect))
+            .expect("canonical effect");
+        let expected_effect = crate::identity::effect_id(
+            namespace,
+            &callee.name,
+            &effect_key,
+            0,
+        );
+        assert!(graph.edges.iter().any(|edge| {
+            edge.kind == EdgeKind::PerformsEffect && edge.to == expected_effect
+        }));
     }
 
     #[test]

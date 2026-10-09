@@ -163,10 +163,10 @@ pub use identity::{
     IdentityChange, IdentityKind, IdentityRecord, SemanticDiff, SemanticId, SemanticIdentities,
 };
 pub use ir::{
-    CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrBoundedIteration, IrError, IrFunction,
-    IrOperation, IrOperationKind, IrStateRegion, IrTransition, IrValue, MachineIntentLinks,
-    PathKind, StateRegionKind, TraceEntry, TraceMap, HIGH_LEVEL_IR_SCHEMA_VERSION,
-    HIGH_LEVEL_IR_SCHEMA_VERSION_PRE_TYPED,
+    CanonicalizedProgram, CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrBoundedIteration,
+    IrError, IrFunction, IrOperation, IrOperationKind, IrStateRegion, IrTransition, IrValue,
+    MachineIntentLinks, PathKind, StateRegionKind, TraceEntry, TraceMap, ValidatedProgram,
+    HIGH_LEVEL_IR_SCHEMA_VERSION, HIGH_LEVEL_IR_SCHEMA_VERSION_PRE_TYPED,
 };
 pub use machine_intent::{
     arithmetic_result_type, minimum_widening_bits, AlignmentCapability, ArithmeticIntent,

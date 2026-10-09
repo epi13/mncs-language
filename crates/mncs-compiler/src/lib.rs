@@ -257,8 +257,8 @@ impl ReferenceCompiler {
             return failed_result(&request, diagnostics);
         }
 
-        let semantic = match program.canonical_form() {
-            Ok(semantic) => semantic,
+        let canonicalized = match program.canonicalize_for_hir() {
+            Ok(canonicalized) => canonicalized,
             Err(error) => {
                 diagnostics.push(CompilerDiagnostic::new(
                     "CMP202",
@@ -268,10 +268,11 @@ impl ReferenceCompiler {
                 return failed_result(&request, diagnostics);
             }
         };
+        let canonical = canonicalized.canonical_form();
         let semantic_ref = CompilerArtifactRef::new(
             ArtifactRepresentation::Semantic,
-            semantic.schema_version.clone(),
-            semantic.fingerprint.clone(),
+            canonical.schema_version.clone(),
+            canonical.fingerprint.clone(),
         );
         trace_timing("compiler-semantic", started);
         if request.input != semantic_ref {
@@ -286,23 +287,23 @@ impl ReferenceCompiler {
             return failed_result(&request, diagnostics);
         }
 
-        let validation = program.validate();
-        if !validation.valid {
-            diagnostics.extend(
-                validation
-                    .errors
-                    .into_iter()
-                    .map(|error| CompilerDiagnostic {
-                        code: error.code,
-                        kind: CompilerDiagnosticKind::SemanticInvalidity,
-                        path: Some(error.path),
-                        message: error.message,
-                        related_artifacts: vec![request.input.identity.clone()],
-                        obligations: Vec::new(),
-                    }),
-            );
-            return failed_result(&request, diagnostics);
-        }
+        let validated_program =
+            match canonicalized.validate() {
+                Ok(validated) => validated,
+                Err(validation) => {
+                    diagnostics.extend(validation.errors.into_iter().map(|error| {
+                        CompilerDiagnostic {
+                            code: error.code,
+                            kind: CompilerDiagnosticKind::SemanticInvalidity,
+                            path: Some(error.path),
+                            message: error.message,
+                            related_artifacts: vec![request.input.identity.clone()],
+                            obligations: Vec::new(),
+                        }
+                    }));
+                    return failed_result(&request, diagnostics);
+                }
+            };
         trace_timing("compiler-validation", started);
 
         // With proof inputs, HIR and SSA lower through the admission path:
@@ -310,7 +311,7 @@ impl ReferenceCompiler {
         // authorization, and proof-bearing evidence recording. Without
         // inputs this block reduces exactly to the historical lowering.
         let (hir, prelowered_ssa) = if proof_inputs.is_empty() {
-            let hir = match program.lower_to_ir() {
+            let hir = match validated_program.lower_to_ir() {
                 Ok(hir) => hir,
                 Err(error) => {
                     diagnostics.push(CompilerDiagnostic::new(
@@ -323,7 +324,11 @@ impl ReferenceCompiler {
             };
             (hir, None)
         } else {
-            match proof_admission::lower_with_proofs(program, proof_inputs, library_roots) {
+            match proof_admission::lower_with_proofs(
+                validated_program.program(),
+                proof_inputs,
+                library_roots,
+            ) {
                 Ok(lowering) => {
                     diagnostics.extend(lowering.diagnostics);
                     (lowering.hir, Some(lowering.ssa))
@@ -622,6 +627,7 @@ impl ReferenceCompiler {
         );
         artifacts.push(evidence_ref);
 
+        let semantic = validated_program.into_canonical_form();
         let emissions = CompilationEmissions {
             semantic: request
                 .emit
