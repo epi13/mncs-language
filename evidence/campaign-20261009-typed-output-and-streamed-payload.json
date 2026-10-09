@@ -1,6 +1,6 @@
 {
   "schema_version": "mncs.language.execution-frontier-measurement/1",
-  "observed_at": "2026-10-09T17:32:41Z",
+  "observed_at": "2026-10-09T17:35:32.887406Z",
   "candidate": {
     "repository": "mncs-language",
     "base_revision": "92462d55733bf2be46407663c89f36f6a157c11c",
@@ -21,7 +21,14 @@
   "real_flow_target": {
     "operation": "mncs.compiler.project.v1::compile_project_target<1024,1024>",
     "target_module": "flow",
-    "selected_compiler_modules": ["source", "lexer", "parser", "segment", "decl", "flow"],
+    "selected_compiler_modules": [
+      "source",
+      "lexer",
+      "parser",
+      "segment",
+      "decl",
+      "flow"
+    ],
     "reported_pages_at_stride_1024": 893,
     "compiler_source_bundle_sha256": "eb24218ed9aae5a43c0e2bf5d664c1c07d316efcc1fc2373ebd91f3216c3af85",
     "stage0_oracle": "NOT_RUN",
@@ -76,7 +83,7 @@
       "steps": 8000000,
       "frames": 329600,
       "instructions": 5782159,
-      "ssa_profile_seconds": 2.388825660,
+      "ssa_profile_seconds": 2.38882566,
       "frame_setup_seconds": 0.246249817,
       "input_arguments": 1532559,
       "reused_validated_arguments": 1532556,
@@ -85,9 +92,15 @@
     "matched_change": {
       "ssa_profile_reduction_percent": 64.76,
       "frame_setup_reduction_percent": 94.56,
-      "input_validation_reduction_percent": 99.90,
-      "runner_wall_seconds_baseline_to_candidate": [37.603, 33.342],
-      "child_cpu_seconds_baseline_to_candidate": [35.56, 31.16],
+      "input_validation_reduction_percent": 99.9,
+      "runner_wall_seconds_baseline_to_candidate": [
+        37.603,
+        33.342
+      ],
+      "child_cpu_seconds_baseline_to_candidate": [
+        35.56,
+        31.16
+      ],
       "same_step_count_and_instruction_count": true,
       "same_incomplete_report_sha256": true,
       "interpretation": "Validation work per internal frame dropped because successful typed outputs now retain verified provenance. The compiler still reaches the unchanged step cap before returning a native result."
@@ -106,26 +119,38 @@
     "artifact_status": "PASS",
     "result_sha256": "501dad3439ac94cd4090286cfff0f54a633054a002eb9d4552f4a7eaa5e1050e",
     "result_status": "completed_with_unresolved_obligations",
-    "diagnostics": ["CMP301 integer-overflow obligation", "CMP301 contract-evidence-bound requirement"],
+    "diagnostics": [
+      "CMP301 integer-overflow obligation",
+      "CMP301 contract-evidence-bound requirement"
+    ],
     "execution": "NOT_RUN; this validates artifact construction and serialization, not artifact execution."
   },
   "validation": {
-    "cargo_test_mncs_model": {"passed": 222, "failed": 0},
+    "cargo_test_mncs_model": {
+      "passed": 222,
+      "failed": 0
+    },
     "cargo_test_mncs_codegen_and_mncs_compiler": {
       "mncs_codegen_passed": 73,
       "mncs_compiler_unit_passed": 44,
       "mncs_compiler_integration_passed": 77,
       "failed": 0
     },
-    "cargo_test_mncs_cli_backend_family_and_abi_boundary": {"passed": 31, "failed": 0},
-    "python_probe_measurement_tests": {"passed": 19, "failed": 0},
+    "cargo_test_mncs_cli_backend_family_and_abi_boundary": {
+      "passed": 31,
+      "failed": 0
+    },
+    "python_probe_measurement_tests": {
+      "passed": 19,
+      "failed": 0
+    },
     "stage0_probe_counting_writer_unit_test": "PASS",
     "python_compile_and_git_diff_check": "PASS",
     "focused_rustfmt_ssa_execution_check": "PASS",
     "semantic_claim": "No complete flow.mncs compiler result, native check/proof/CFG/verified SSA evidence, executable compiler, Stage-1 or Stage-2 result was produced."
   },
   "delivery": {
-    "implementation_commit": null,
+    "implementation_commit": "823b26fb17876756e9c7c9f675e7dd5222ccb246",
     "evidence_role": "Records candidate source, toolchain, measurement identity and tested scope; it does not change compiler stage claims."
   }
 }
