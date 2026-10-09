@@ -374,6 +374,14 @@ impl ReferenceCompiler {
         );
         trace_timing("compiler-ssa", started);
 
+        // Validation computed the canonical form for semantic identity. Keep
+        // its large JSON only when the caller requested a semantic emission;
+        // otherwise release it before proof, bundle, and backend work.
+        let semantic = request
+            .emit
+            .contains(&ArtifactRepresentation::Semantic)
+            .then(|| validated_program.into_canonical_form());
+
         let unresolved_obligations = ssa
             .obligations
             .iter()
@@ -627,12 +635,8 @@ impl ReferenceCompiler {
         );
         artifacts.push(evidence_ref);
 
-        let semantic = validated_program.into_canonical_form();
         let emissions = CompilationEmissions {
-            semantic: request
-                .emit
-                .contains(&ArtifactRepresentation::Semantic)
-                .then_some(semantic),
+            semantic,
             hir: request
                 .emit
                 .contains(&ArtifactRepresentation::Hir)
@@ -1751,6 +1755,17 @@ mod tests {
             .front_end
             .artifact(ArtifactRepresentation::Hir)
             .is_none());
+    }
+
+    #[test]
+    fn compilation_without_semantic_emission_keeps_the_semantic_output_absent() {
+        let compiler = ReferenceCompiler::default();
+        let program = program("compiler-no-semantic-emission");
+        let request = compiler.request_for_program(&program, BTreeSet::new(), None);
+        let result = compiler.compile(request, &program);
+
+        assert!(result.emissions.semantic.is_none());
+        assert!(result.identity_is_valid());
     }
 
     #[test]

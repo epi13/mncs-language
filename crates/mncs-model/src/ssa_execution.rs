@@ -12,15 +12,15 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::execution::{
-    ExecutionEffectEvent, compare_floats, compare_integers, evaluate_float, evaluate_integer,
-    execution_value_summary, integer_operator_supported,
+    compare_floats, compare_integers, evaluate_float, evaluate_integer, execution_value_summary,
+    integer_operator_supported, ExecutionEffectEvent,
 };
 use crate::identity::{function_id, program_id};
 use crate::{
-    BodyType, EvidenceReceipt, EvidenceReceiptOutcome, ExecutionCorpus, ExecutionFailure,
-    ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionValue, HostGrant, IntegerType,
-    MAX_EXECUTION_BUDGET, Program, SemanticId, SsaBlock, SsaFunction, SsaInstruction,
-    SsaInstructionKind, SsaModule, SsaTerminator, execute_with_policy,
+    execute_with_policy, BodyType, EvidenceReceipt, EvidenceReceiptOutcome, ExecutionCorpus,
+    ExecutionFailure, ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionValue,
+    HostGrant, IntegerType, Program, SemanticId, SsaBlock, SsaFunction, SsaInstruction,
+    SsaInstructionKind, SsaModule, SsaTerminator, MAX_EXECUTION_BUDGET,
 };
 
 pub const SSA_EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
@@ -36,6 +36,8 @@ type BlockIndex = HashMap<SemanticId, usize>;
 struct ValueMap<'a> {
     slots: &'a HashMap<SemanticId, usize>,
     values: Vec<Option<ExecutionValue>>,
+    /// True when an input passed dynamic normalization or an output came
+    /// from a successfully executed instruction in the validated SSA module.
     validated_values: Vec<bool>,
     overflow: HashMap<SemanticId, ExecutionValue>,
     current_output: Option<(*const SemanticId, usize)>,
@@ -81,6 +83,17 @@ impl<'a> ValueMap<'a> {
         self.slots
             .get(key)
             .is_some_and(|slot| self.validated_slot(*slot))
+    }
+
+    /// Carry the validated SSA type contract through successful instructions.
+    fn mark_outputs_validated(&mut self, output_slots: &[usize]) {
+        for slot in output_slots {
+            if self.values.get(*slot).is_some_and(Option::is_some) {
+                if let Some(validated) = self.validated_values.get_mut(*slot) {
+                    *validated = true;
+                }
+            }
+        }
     }
 
     fn insert_ref(&mut self, key: &SemanticId, value: ExecutionValue) {
@@ -153,6 +166,8 @@ fn runtime_profile_stage(stage: &str, started: Instant) {
     }
 }
 
+const SSA_RUNTIME_PROFILE_PROGRESS_INTERVAL_STEPS: u64 = 250_000;
+
 /// Optional bounded telemetry for one top-level SSA request. It is disabled
 /// unless `MNCS_RUNTIME_PROFILE` is present, so normal execution does not
 /// pay for timers or logging. The counters are generic executor evidence,
@@ -167,6 +182,8 @@ struct RuntimeProfile {
     reuse_validated_inputs: bool,
     #[serde(skip)]
     started: Instant,
+    #[serde(skip)]
+    last_progress_steps: u64,
     execution_frames: u64,
     instructions: u64,
     scalar_arithmetic_instructions: u64,
@@ -222,6 +239,7 @@ impl RuntimeProfile {
             reuse_validated_inputs: std::env::var("MNCS_SSA_REUSE_VALIDATED_INPUTS")
                 .map_or(true, |value| value != "0"),
             started: Instant::now(),
+            last_progress_steps: 0,
             execution_frames: 0,
             instructions: 0,
             scalar_arithmetic_instructions: 0,
@@ -293,6 +311,51 @@ impl RuntimeProfile {
         ) {
             self.scalar_arithmetic_instructions += 1;
         }
+    }
+
+    #[inline]
+    fn progress_due(&mut self, request_steps: u64) -> bool {
+        if request_steps.saturating_sub(self.last_progress_steps)
+            < SSA_RUNTIME_PROFILE_PROGRESS_INTERVAL_STEPS
+        {
+            return false;
+        }
+        self.last_progress_steps = request_steps;
+        true
+    }
+
+    #[inline]
+    fn progress(
+        &mut self,
+        frame_target: FrameTarget<'_>,
+        function: &SsaFunction,
+        block: &SsaBlock,
+        call_depth: u64,
+        request_steps: u64,
+        step_budget: u64,
+    ) {
+        if !self.enabled || !self.progress_due(request_steps) {
+            return;
+        }
+        eprintln!(
+            "mncs-ssa-runtime-progress {}",
+            serde_json::json!({
+                "schema_version": "mncs.language.ssa-runtime-progress/1",
+                "pid": std::process::id(),
+                "step_scope": "top_level_request",
+                "steps": request_steps,
+                "step_budget": step_budget,
+                "progress_interval_steps": SSA_RUNTIME_PROFILE_PROGRESS_INTERVAL_STEPS,
+                "elapsed_ns": self.started.elapsed().as_nanos(),
+                "execution_frames": self.execution_frames,
+                "instructions": self.instructions,
+                "module": frame_target.module,
+                "function": frame_target.function,
+                "function_identity": function.identity.0.as_str(),
+                "block_identity": block.identity.0.as_str(),
+                "call_depth": call_depth,
+            })
+        );
     }
 
     fn record_dispatch(&mut self, kind: &SsaInstructionKind, started: Option<Instant>) {
@@ -1371,6 +1434,14 @@ fn execute_prepared_function(
                 );
                 return None;
             }
+            profile.progress(
+                frame_target,
+                function,
+                block,
+                call_depth,
+                result.steps,
+                request.step_budget,
+            );
             profile.record_instruction(&instruction.kind);
             let arithmetic_started = if matches!(
                 &instruction.kind,
@@ -1436,6 +1507,10 @@ fn execute_prepared_function(
                 RuntimeProfile::add_elapsed(&mut profile.arithmetic_ns, arithmetic_started);
                 return None;
             }
+            // The SSA module and its value/type map were validated before
+            // execution. Successful typed operations therefore establish
+            // their output types transitively from normalized entry inputs.
+            values.mark_outputs_validated(&prepared_instruction.output_slots);
             profile.record_dispatch(&instruction.kind, instruction_started);
             RuntimeProfile::add_elapsed(&mut profile.instruction_dispatch_ns, instruction_started);
             if !is_call {
@@ -1454,6 +1529,14 @@ fn execute_prepared_function(
             );
             return None;
         }
+        profile.progress(
+            frame_target,
+            function,
+            block,
+            call_depth,
+            result.steps,
+            request.step_budget,
+        );
         let trace_started = profile.mark();
         let trace_before = result.trace.len();
         trace_block(result, block, "terminator", trace_limit);
@@ -5631,6 +5714,16 @@ mod tests {
         BodyTerminator, BodyValue, ExecutionTraceEntry, FunctionBody, SequenceBound, Value,
     };
 
+    #[test]
+    fn ssa_runtime_profile_progress_due_is_bounded_by_request_steps() {
+        let mut profile = RuntimeProfile::new();
+
+        assert!(!profile.progress_due(249_999));
+        assert!(profile.progress_due(250_000));
+        assert!(!profile.progress_due(400_000));
+        assert!(profile.progress_due(500_000));
+    }
+
     fn request_for(program: &Program, amount: i128) -> crate::ExecutionRequest {
         crate::ExecutionRequest {
             schema_version: crate::EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
@@ -5663,7 +5756,8 @@ mod tests {
             bits: 64,
             signed: false,
         });
-        let function_id = crate::identity::function_id(&program.module, "helper");
+        let identity_function_id = crate::identity::function_id(&program.module, "identity");
+        let helper_function_id = crate::identity::function_id(&program.module, "helper");
 
         let caller = &mut program.functions[0];
         caller.name = "caller".to_owned();
@@ -5689,28 +5783,52 @@ mod tests {
             blocks: vec![BodyBlock {
                 id: "entry".to_owned(),
                 parameters: Vec::new(),
-                operations: vec![BodyOperation {
-                    id: "call_helper".to_owned(),
-                    kind: BodyOperationKind::Call {
-                        function: function_id,
-                        function_name: "helper".to_owned(),
-                        required_capabilities: Vec::new(),
-                        effects: Vec::new(),
-                        generic_args: Vec::new(),
-                        instantiation: None,
-                        specialization: None,
+                operations: vec![
+                    BodyOperation {
+                        id: "call_identity".to_owned(),
+                        kind: BodyOperationKind::Call {
+                            function: identity_function_id,
+                            function_name: "identity".to_owned(),
+                            required_capabilities: Vec::new(),
+                            effects: Vec::new(),
+                            generic_args: Vec::new(),
+                            instantiation: None,
+                            specialization: None,
+                        },
+                        operands: vec!["items".to_owned()],
+                        results: vec![BodyValue {
+                            id: "items_after_identity".to_owned(),
+                            ty: sequence_type.clone(),
+                        }],
+                        contracts: Vec::new(),
+                        assumptions: Vec::new(),
+                        machine_intent: None,
+                        lowering: None,
+                        portability: None,
                     },
-                    operands: vec!["items".to_owned()],
-                    results: vec![BodyValue {
-                        id: "length".to_owned(),
-                        ty: length_type.clone(),
-                    }],
-                    contracts: Vec::new(),
-                    assumptions: Vec::new(),
-                    machine_intent: None,
-                    lowering: None,
-                    portability: None,
-                }],
+                    BodyOperation {
+                        id: "call_helper".to_owned(),
+                        kind: BodyOperationKind::Call {
+                            function: helper_function_id,
+                            function_name: "helper".to_owned(),
+                            required_capabilities: Vec::new(),
+                            effects: Vec::new(),
+                            generic_args: Vec::new(),
+                            instantiation: None,
+                            specialization: None,
+                        },
+                        operands: vec!["items_after_identity".to_owned()],
+                        results: vec![BodyValue {
+                            id: "length".to_owned(),
+                            ty: length_type.clone(),
+                        }],
+                        contracts: Vec::new(),
+                        assumptions: Vec::new(),
+                        machine_intent: None,
+                        lowering: None,
+                        portability: None,
+                    },
+                ],
                 terminator: BodyTerminator::Return {
                     values: vec!["length".to_owned()],
                 },
@@ -5762,6 +5880,37 @@ mod tests {
             name: "length".to_owned(),
             value_type: length_type.semantic_name(),
         }];
+        let mut identity = program.functions[0].clone();
+        identity.name = "identity".to_owned();
+        identity.body = Some(FunctionBody {
+            schema_version: crate::body::EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
+            entry: "entry".to_owned(),
+            parameters: vec![BodyParameter {
+                id: "items".to_owned(),
+                name: "items".to_owned(),
+                ty: sequence_type.clone(),
+            }],
+            generic_params: Vec::new(),
+            cycle_policy: BodyCyclePolicy::Legacy,
+            bounded_iterations: Vec::new(),
+            blocks: vec![BodyBlock {
+                id: "entry".to_owned(),
+                parameters: Vec::new(),
+                operations: Vec::new(),
+                terminator: BodyTerminator::Return {
+                    values: vec!["items".to_owned()],
+                },
+            }],
+        });
+        identity.inputs = vec![Value {
+            name: "items".to_owned(),
+            value_type: sequence_type.semantic_name(),
+        }];
+        identity.outputs = vec![Value {
+            name: "items".to_owned(),
+            value_type: sequence_type.semantic_name(),
+        }];
+        program.functions.push(identity);
         program.functions.push(helper);
 
         let module = program.lower_to_ssa().expect("aggregate call SSA");
@@ -5864,7 +6013,7 @@ mod tests {
     }
 
     #[test]
-    fn ssa_instruction_outputs_do_not_inherit_input_validation() {
+    fn raw_value_map_insert_does_not_claim_validation() {
         let identity = SemanticId("output".to_owned());
         let slots = HashMap::from([(identity.clone(), 0)]);
         let mut values = ValueMap::new(&slots);
@@ -5975,11 +6124,9 @@ mod tests {
 
         let receipt = session.validation_receipt();
         assert!(receipt.identity_is_valid());
-        assert!(
-            receipt
-                .dependencies
-                .contains_key(&program_id(&program_a.module))
-        );
+        assert!(receipt
+            .dependencies
+            .contains_key(&program_id(&program_a.module)));
         let mut tampered_receipt = receipt.clone();
         tampered_receipt
             .scope

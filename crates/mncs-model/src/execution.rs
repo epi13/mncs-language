@@ -94,6 +94,7 @@ const MAX_TRACE_ENTRIES: usize = 256;
 pub const MAX_OBSERVATION_EVENTS: usize = 4096;
 pub const MAX_OBSERVATION_VALUES: usize = 2048;
 pub const MAX_OBSERVATION_VALUE_BYTES: usize = 64 * 1024;
+const BODY_RUNTIME_PROFILE_PROGRESS_INTERVAL_STEPS: u64 = 250_000;
 
 #[derive(Debug, Default, Serialize)]
 struct BodyFunctionProfile {
@@ -109,6 +110,19 @@ struct ActiveBodyProfileFrame {
     started: Instant,
     child_elapsed_ns: u128,
     child_steps: u64,
+    last_progress_steps: u64,
+}
+
+impl ActiveBodyProfileFrame {
+    fn progress_due(&mut self, frame_steps: u64) -> bool {
+        if frame_steps.saturating_sub(self.last_progress_steps)
+            < BODY_RUNTIME_PROFILE_PROGRESS_INTERVAL_STEPS
+        {
+            return false;
+        }
+        self.last_progress_steps = frame_steps;
+        true
+    }
 }
 
 /// Opt-in timing for the reference body executor. The normal execution path
@@ -141,6 +155,7 @@ impl BodyExecutionProfile {
             started: Instant::now(),
             child_elapsed_ns: 0,
             child_steps: 0,
+            last_progress_steps: 0,
         });
     }
 
@@ -164,6 +179,48 @@ impl BodyExecutionProfile {
             parent.child_elapsed_ns = parent.child_elapsed_ns.saturating_add(inclusive_ns);
             parent.child_steps = parent.child_steps.saturating_add(subtree_steps);
         }
+    }
+
+    #[inline]
+    fn progress(
+        &mut self,
+        module: &str,
+        function: &str,
+        block: &str,
+        call_depth: u64,
+        frame_steps: u64,
+        step_budget: u64,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        let Some(frame) = self.frames.last_mut() else {
+            return;
+        };
+        if !frame.progress_due(frame_steps) {
+            return;
+        }
+        let function_identity = frame.function.clone();
+        let elapsed_ns = self
+            .started
+            .map_or(0, |started| started.elapsed().as_nanos());
+        eprintln!(
+            "mncs-body-runtime-progress {}",
+            serde_json::json!({
+                "schema_version": "mncs.language.body-runtime-progress/1",
+                "pid": std::process::id(),
+                "step_scope": "current_function_frame",
+                "function_identity": function_identity,
+                "module": module,
+                "function": function,
+                "block": block,
+                "call_depth": call_depth,
+                "frame_steps": frame_steps,
+                "step_budget": step_budget,
+                "progress_interval_steps": BODY_RUNTIME_PROFILE_PROGRESS_INTERVAL_STEPS,
+                "elapsed_ns": elapsed_ns,
+            })
+        );
     }
 
     fn emit(&self, request: &ExecutionRequest, result: &ExecutionResult) {
@@ -4343,6 +4400,14 @@ fn execute_inner_body(
                 );
                 return result;
             }
+            profile.progress(
+                namespace,
+                &function.name,
+                &block.id,
+                call_depth,
+                result.steps,
+                request.step_budget,
+            );
             let identity = operation.identity(namespace, &function.name, &block.id);
             record_trace(
                 &mut result,
@@ -4431,6 +4496,14 @@ fn execute_inner_body(
             );
             return result;
         }
+        profile.progress(
+            namespace,
+            &function.name,
+            &block.id,
+            call_depth,
+            result.steps,
+            request.step_budget,
+        );
         record_trace(
             &mut result,
             program,
@@ -8651,6 +8724,22 @@ mod tests {
     }
 
     #[test]
+    fn body_runtime_progress_is_bounded_by_frame_step_interval() {
+        let mut frame = ActiveBodyProfileFrame {
+            function: function_id("test.profile", "loop").0,
+            started: Instant::now(),
+            child_elapsed_ns: 0,
+            child_steps: 0,
+            last_progress_steps: 0,
+        };
+
+        assert!(!frame.progress_due(249_999));
+        assert!(frame.progress_due(250_000));
+        assert!(!frame.progress_due(400_000));
+        assert!(frame.progress_due(500_000));
+    }
+
+    #[test]
     fn disabled_body_runtime_profile_keeps_no_frame_or_function_samples() {
         let mut profile = BodyExecutionProfile {
             enabled: false,
@@ -8664,6 +8753,7 @@ mod tests {
         };
 
         profile.enter(&target);
+        profile.progress("test.profile", "parent", "entry", 0, 250_000, 500_000);
         profile.leave(7);
 
         assert!(profile.frames.is_empty());

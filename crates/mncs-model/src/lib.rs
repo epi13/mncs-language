@@ -73,15 +73,14 @@ pub use capability_gap::{
 };
 pub use cfg::{Cfg, CfgBlock, CFG_SCHEMA_VERSION};
 pub use compiler::{
-    AbiTypeRef, ArtifactRepresentation, BackendArtifact, BackendCallableBinding,
-    BackendCapabilityManifest,
-    BackendConfiguration, BackendEvidence, BackendFunctionValueContract, BackendIdentity,
-    BackendResult, BackendValueContract, BuildHostIdentity, CompilationEmissions,
-    CompilationEvidenceBundle, CompilationRequest, CompilationResult, CompilationStatus,
-    CompilationStudyRequest, CompilationStudyResult, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, CompilerHostIdentity, CompilerImplementationIdentity,
-    CompilerNodeProfile, CompilerPassExecutionObservation, CompilerPassIdentity,
-    CrossHostInvariants, FamilyArtifactReference, FamilyCompilerObservation,
+    AbiTypeRef, ArtifactRepresentation, BackendArtifact, BackendArtifactCompilerMetadata,
+    BackendCallableBinding, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
+    BackendFunctionValueContract, BackendIdentity, BackendResult, BackendValueContract,
+    BuildHostIdentity, CompilationEmissions, CompilationEvidenceBundle, CompilationRequest,
+    CompilationResult, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
+    CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind, CompilerHostIdentity,
+    CompilerImplementationIdentity, CompilerNodeProfile, CompilerPassExecutionObservation,
+    CompilerPassIdentity, CrossHostInvariants, FamilyArtifactReference, FamilyCompilerObservation,
     FamilyCompilerReference, GenericEntrypointRecord, NominalResolution, ObservationModelRef,
     PassPipelineIdentity, RealizationRequest, RelationClaim, RunEnvironmentRef, TargetContractRef,
     TargetLoweringPlan, TransformationEdge, TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,

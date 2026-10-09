@@ -9,9 +9,26 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-use crate::canonical::{canonical_json_value, sha256_hex};
+use crate::canonical::{canonical_json_sha256, canonical_json_value, sha256_hex};
 use crate::{CanonicalForm, HighLevelIr, ObligationRecord, SemanticId, SsaModule};
+
+fn trace_backend_artifact_phase_begin(stage: &str) {
+    if std::env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!("mncs-phase-begin phase={stage}");
+    }
+}
+
+fn trace_backend_artifact_timing(stage: &str, started: Instant) {
+    if std::env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!(
+            "mncs-timing stage={} elapsed_ms={}",
+            stage,
+            started.elapsed().as_millis()
+        );
+    }
+}
 
 pub const PORTABLE_WASM_MVP_TARGET: &str = "mncs:target:portable-wasm-mvp-0.1";
 pub const PORTABLE_WASM_MVP_BACKEND_NAME: &str = "mncs-portable-wasm-mvp";
@@ -1540,6 +1557,86 @@ pub struct GenericEntrypointRecord {
     pub entry_function: String,
 }
 
+/// Compiler-owned interface metadata that is sealed into an artifact along
+/// with its bytes. Supplying these facts before identity sealing lets large
+/// artifacts compute their content identity once after all metadata is set.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BackendArtifactCompilerMetadata {
+    pub function_value_contracts: BTreeMap<String, BackendFunctionValueContract>,
+    pub callable_bindings: Vec<BackendCallableBinding>,
+    pub composite_value_contracts: BTreeMap<String, BackendValueContract>,
+    pub interface_identity: Option<String>,
+    pub generic_entrypoints: Vec<GenericEntrypointRecord>,
+}
+
+#[derive(Default)]
+struct ByteCountingWriter {
+    byte_count: usize,
+}
+
+impl std::io::Write for ByteCountingWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.byte_count = self.byte_count.checked_add(bytes.len()).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "serialized backend payload length overflowed",
+            )
+        })?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+struct HexDigestWriter {
+    digest: Sha256,
+    hex: String,
+    byte_count: usize,
+    expected_byte_count: usize,
+}
+
+impl HexDigestWriter {
+    fn new(expected_byte_count: usize, expected_hex_len: usize) -> Self {
+        Self {
+            digest: Sha256::new(),
+            hex: String::with_capacity(expected_hex_len),
+            byte_count: 0,
+            expected_byte_count,
+        }
+    }
+}
+
+impl std::io::Write for HexDigestWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let next_count = self.byte_count.checked_add(bytes.len()).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "serialized backend payload length overflowed during encoding",
+            )
+        })?;
+        if next_count > self.expected_byte_count {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "serialized backend payload grew between count and encoding passes",
+            ));
+        }
+        self.digest.update(bytes);
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        for byte in bytes {
+            self.hex.push(HEX[usize::from(byte >> 4)] as char);
+            self.hex.push(HEX[usize::from(byte & 0x0f)] as char);
+        }
+        self.byte_count = next_count;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackendArtifact {
     pub schema_version: String,
@@ -1640,6 +1737,201 @@ impl BackendArtifact {
         artifact_kind: impl Into<String>,
         format: impl Into<String>,
         bytes: &[u8],
+        exports: Vec<String>,
+        assumptions: Vec<String>,
+        obligations_generated: Vec<SemanticId>,
+        proof_bindings: Vec<crate::ProofBindingRef>,
+        execution_applicability: Vec<String>,
+        evidence_dependencies: Vec<SemanticId>,
+        unsupported: Vec<String>,
+        status: TransformationStatus,
+    ) -> Self {
+        let mut artifact = Self::new_with_kind_unsealed(
+            backend,
+            input,
+            target,
+            artifact_kind,
+            format,
+            bytes,
+            exports,
+            assumptions,
+            obligations_generated,
+            proof_bindings,
+            execution_applicability,
+            evidence_dependencies,
+            unsupported,
+            status,
+        );
+        artifact.seal_identity();
+        artifact
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_kind_and_compiler_metadata(
+        backend: BackendIdentity,
+        input: CompilerArtifactRef,
+        target: TargetContractRef,
+        artifact_kind: impl Into<String>,
+        format: impl Into<String>,
+        bytes: Vec<u8>,
+        exports: Vec<String>,
+        assumptions: Vec<String>,
+        obligations_generated: Vec<SemanticId>,
+        proof_bindings: Vec<crate::ProofBindingRef>,
+        execution_applicability: Vec<String>,
+        evidence_dependencies: Vec<SemanticId>,
+        unsupported: Vec<String>,
+        status: TransformationStatus,
+        compiler_metadata: BackendArtifactCompilerMetadata,
+    ) -> Self {
+        let mut artifact = Self::new_with_kind_unsealed(
+            backend,
+            input,
+            target,
+            artifact_kind,
+            format,
+            &bytes,
+            exports,
+            assumptions,
+            obligations_generated,
+            proof_bindings,
+            execution_applicability,
+            evidence_dependencies,
+            unsupported,
+            status,
+        );
+        drop(bytes);
+        artifact.apply_compiler_metadata(compiler_metadata);
+        artifact.seal_identity();
+        artifact
+    }
+
+    /// Serialize a payload directly into the artifact's hexadecimal storage
+    /// while hashing the original JSON bytes. A counting pass makes the final
+    /// allocation exact and avoids holding both a payload-sized byte vector
+    /// and its hexadecimal representation at once.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_serialized_payload_and_compiler_metadata<T: Serialize>(
+        backend: BackendIdentity,
+        input: CompilerArtifactRef,
+        target: TargetContractRef,
+        artifact_kind: impl Into<String>,
+        format: impl Into<String>,
+        payload: &T,
+        exports: Vec<String>,
+        assumptions: Vec<String>,
+        obligations_generated: Vec<SemanticId>,
+        proof_bindings: Vec<crate::ProofBindingRef>,
+        execution_applicability: Vec<String>,
+        evidence_dependencies: Vec<SemanticId>,
+        unsupported: Vec<String>,
+        status: TransformationStatus,
+        compiler_metadata: BackendArtifactCompilerMetadata,
+    ) -> Result<Self, serde_json::Error> {
+        trace_backend_artifact_phase_begin("backend-artifact-payload-size-count");
+        let started = Instant::now();
+        crate::record_counter("serialization");
+        let mut counter = ByteCountingWriter::default();
+        serde_json::to_writer(&mut counter, payload)?;
+        trace_backend_artifact_timing("backend-artifact-payload-size-count", started);
+
+        let expected_hex_len = counter.byte_count.checked_mul(2).ok_or_else(|| {
+            serde_json::Error::io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "serialized backend payload hex length overflowed",
+            ))
+        })?;
+        trace_backend_artifact_phase_begin("backend-artifact-payload-stream-encoding");
+        let started = Instant::now();
+        crate::record_counter("serialization");
+        let mut encoder = HexDigestWriter::new(counter.byte_count, expected_hex_len);
+        serde_json::to_writer(&mut encoder, payload)?;
+        if encoder.byte_count != counter.byte_count || encoder.hex.len() != expected_hex_len {
+            return Err(serde_json::Error::io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "serialized backend payload changed between count and encoding passes",
+            )));
+        }
+        trace_backend_artifact_timing("backend-artifact-payload-stream-encoding", started);
+        crate::record_counter("canonical_hash");
+        let bytes_sha256 = hex_encode(&encoder.digest.finalize());
+        let bytes_hex = encoder.hex;
+
+        let mut artifact = Self::new_with_encoded_payload_unsealed(
+            backend,
+            input,
+            target,
+            artifact_kind,
+            format,
+            bytes_sha256,
+            bytes_hex,
+            exports,
+            assumptions,
+            obligations_generated,
+            proof_bindings,
+            execution_applicability,
+            evidence_dependencies,
+            unsupported,
+            status,
+        );
+        artifact.apply_compiler_metadata(compiler_metadata);
+        artifact.seal_identity();
+        Ok(artifact)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_kind_unsealed(
+        backend: BackendIdentity,
+        input: CompilerArtifactRef,
+        target: TargetContractRef,
+        artifact_kind: impl Into<String>,
+        format: impl Into<String>,
+        bytes: &[u8],
+        exports: Vec<String>,
+        assumptions: Vec<String>,
+        obligations_generated: Vec<SemanticId>,
+        proof_bindings: Vec<crate::ProofBindingRef>,
+        execution_applicability: Vec<String>,
+        evidence_dependencies: Vec<SemanticId>,
+        unsupported: Vec<String>,
+        status: TransformationStatus,
+    ) -> Self {
+        trace_backend_artifact_phase_begin("backend-artifact-bytes-digest");
+        let started = Instant::now();
+        let bytes_sha256 = sha256_hex(bytes);
+        trace_backend_artifact_timing("backend-artifact-bytes-digest", started);
+        trace_backend_artifact_phase_begin("backend-artifact-bytes-hex");
+        let started = Instant::now();
+        let bytes_hex = hex_encode(bytes);
+        trace_backend_artifact_timing("backend-artifact-bytes-hex", started);
+        Self::new_with_encoded_payload_unsealed(
+            backend,
+            input,
+            target,
+            artifact_kind,
+            format,
+            bytes_sha256,
+            bytes_hex,
+            exports,
+            assumptions,
+            obligations_generated,
+            proof_bindings,
+            execution_applicability,
+            evidence_dependencies,
+            unsupported,
+            status,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_encoded_payload_unsealed(
+        backend: BackendIdentity,
+        input: CompilerArtifactRef,
+        target: TargetContractRef,
+        artifact_kind: impl Into<String>,
+        format: impl Into<String>,
+        bytes_sha256: String,
+        bytes_hex: String,
         mut exports: Vec<String>,
         mut assumptions: Vec<String>,
         mut obligations_generated: Vec<SemanticId>,
@@ -1675,9 +1967,7 @@ impl BackendArtifact {
         evidence_dependencies.sort();
         evidence_dependencies.dedup();
         sort_dedup(&mut unsupported);
-        let bytes_sha256 = sha256_hex(bytes);
-        let bytes_hex = hex_encode(bytes);
-        let mut artifact = Self {
+        Self {
             schema_version: BACKEND_ARTIFACT_SCHEMA_VERSION.to_owned(),
             identity: SemanticId(String::new()),
             backend,
@@ -1701,9 +1991,44 @@ impl BackendArtifact {
             generic_entrypoints: Vec::new(),
             unsupported,
             status,
-        };
-        artifact.identity = identified("backend-artifact", &artifact.without_identity());
-        artifact
+        }
+    }
+
+    fn apply_compiler_metadata(&mut self, mut metadata: BackendArtifactCompilerMetadata) {
+        metadata
+            .callable_bindings
+            .sort_by(|left, right| left.callable_identity.cmp(&right.callable_identity));
+        metadata.generic_entrypoints.sort_by(|left, right| {
+            (
+                &left.generic_module,
+                &left.generic_function,
+                &left.args_spellings,
+                &left.canonical_args,
+                &left.entry_module,
+                &left.entry_function,
+            )
+                .cmp(&(
+                    &right.generic_module,
+                    &right.generic_function,
+                    &right.args_spellings,
+                    &right.canonical_args,
+                    &right.entry_module,
+                    &right.entry_function,
+                ))
+        });
+        metadata.generic_entrypoints.dedup();
+        self.function_value_contracts = metadata.function_value_contracts;
+        self.callable_bindings = metadata.callable_bindings;
+        self.composite_value_contracts = metadata.composite_value_contracts;
+        self.interface_identity = metadata.interface_identity;
+        self.generic_entrypoints = metadata.generic_entrypoints;
+    }
+
+    fn seal_identity(&mut self) {
+        trace_backend_artifact_phase_begin("backend-artifact-identity-seal");
+        let started = Instant::now();
+        self.identity = identified("backend-artifact", &self.without_identity());
+        trace_backend_artifact_timing("backend-artifact-identity-seal", started);
     }
 
     pub fn bytes(&self) -> Result<Vec<u8>, String> {
@@ -1767,9 +2092,9 @@ impl BackendArtifact {
     /// validation so the admission boundary can report ambiguity precisely.
     pub fn ambiguous_callable_identity(&self) -> Option<&SemanticId> {
         let mut seen = BTreeSet::new();
-        self.callable_bindings
-            .iter()
-            .find_map(|binding| (!seen.insert(&binding.callable_identity)).then_some(&binding.callable_identity))
+        self.callable_bindings.iter().find_map(|binding| {
+            (!seen.insert(&binding.callable_identity)).then_some(&binding.callable_identity)
+        })
     }
 
     /// Bind this artifact to the language-owned callable interface that
@@ -1849,6 +2174,8 @@ impl BackendArtifact {
     }
 
     pub fn identity_is_valid(&self) -> bool {
+        trace_backend_artifact_phase_begin("backend-artifact-identity-validation");
+        let validation_started = Instant::now();
         crate::record_counter("artifact_hash");
         let profile = std::env::var_os("MNCS_RUNTIME_PROFILE").is_some();
         let structural_started = Instant::now();
@@ -1864,7 +2191,10 @@ impl BackendArtifact {
             );
         }
         let bytes_started = Instant::now();
-        let bytes_valid = self.bytes_sha256 == sha256_hex(&self.bytes().unwrap_or_default());
+        trace_backend_artifact_phase_begin("backend-artifact-bytes-digest-validation");
+        let bytes_valid = sha256_hex_encoded_payload(&self.bytes_hex)
+            .is_some_and(|digest| digest == self.bytes_sha256);
+        trace_backend_artifact_timing("backend-artifact-bytes-digest-validation", bytes_started);
         if profile {
             eprintln!(
                 "mncs-artifact-profile phase=bytes_digest elapsed_ns={}",
@@ -1879,7 +2209,9 @@ impl BackendArtifact {
                 identity_started.elapsed().as_nanos()
             );
         }
-        structural_valid && bytes_valid && identity_valid
+        let valid = structural_valid && bytes_valid && identity_valid;
+        trace_backend_artifact_timing("backend-artifact-identity-validation", validation_started);
+        valid
     }
 
     fn recomputed_identity(&self) -> SemanticId {
@@ -2031,6 +2363,36 @@ fn hex_encode(bytes: &[u8]) -> String {
         write!(&mut hex, "{byte:02x}").expect("writing to a String cannot fail");
     }
     hex
+}
+
+fn sha256_hex_encoded_payload(encoded: &str) -> Option<String> {
+    let encoded = encoded.as_bytes();
+    if encoded.len() % 2 != 0 {
+        return None;
+    }
+    let mut digest = Sha256::new();
+    let mut decoded = [0u8; 4096];
+    for chunk in encoded.chunks(8192) {
+        if chunk.len() % 2 != 0 {
+            return None;
+        }
+        for (index, pair) in chunk.chunks_exact(2).enumerate() {
+            let high = decode_hex_nibble(pair[0])?;
+            let low = decode_hex_nibble(pair[1])?;
+            decoded[index] = (high << 4) | low;
+        }
+        digest.update(&decoded[..chunk.len() / 2]);
+    }
+    Some(hex_encode(&digest.finalize()))
+}
+
+fn decode_hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn hex_decode(hex: &str) -> Result<Vec<u8>, String> {
@@ -2680,10 +3042,9 @@ fn artifact_identity(
 }
 
 fn identified<T: Serialize>(kind: &str, value: &T) -> SemanticId {
-    let material = canonical_json_value(value).expect("compiler identity material is serializable");
     SemanticId(format!(
         "mncs:compiler:{kind}:{}",
-        sha256_hex(material.as_bytes())
+        canonical_json_sha256(value).expect("compiler identity material is serializable")
     ))
 }
 
@@ -2884,10 +3245,9 @@ mod tests {
             Some(backend),
             vec!["ABI evidence".to_owned()],
         );
-        assert!(
-            plan.assumptions_introduced
-                .contains(&"backend trap mapping is unverified".to_owned())
-        );
+        assert!(plan
+            .assumptions_introduced
+            .contains(&"backend trap mapping is unverified".to_owned()));
         assert!(plan.identity_is_valid());
         let mut laundered = plan;
         laundered.assumptions_introduced.clear();
@@ -2939,6 +3299,144 @@ mod tests {
         let decoded: BackendArtifact = serde_json::from_str(&json).expect("roundtrip");
         assert_eq!(decoded, bearing);
         assert!(decoded.identity_is_valid());
+    }
+
+    #[test]
+    fn one_shot_compiler_metadata_matches_chained_artifact_builders() {
+        let base = test_artifact(Vec::new());
+        let metadata = BackendArtifactCompilerMetadata {
+            function_value_contracts: BTreeMap::from([(
+                "entry".to_owned(),
+                BackendFunctionValueContract {
+                    inputs: Vec::new(),
+                    outputs: Vec::new(),
+                    input_names: Vec::new(),
+                    output_names: Vec::new(),
+                },
+            )]),
+            callable_bindings: Vec::new(),
+            composite_value_contracts: BTreeMap::new(),
+            interface_identity: Some("mncs:test:interface:1".to_owned()),
+            generic_entrypoints: vec![
+                GenericEntrypointRecord {
+                    generic_module: "z.module".to_owned(),
+                    generic_function: "entry".to_owned(),
+                    args_spellings: vec!["z".to_owned()],
+                    canonical_args: "z".to_owned(),
+                    entry_module: "z.module".to_owned(),
+                    entry_function: "entry$z".to_owned(),
+                },
+                GenericEntrypointRecord {
+                    generic_module: "a.module".to_owned(),
+                    generic_function: "entry".to_owned(),
+                    args_spellings: vec!["a".to_owned()],
+                    canonical_args: "a".to_owned(),
+                    entry_module: "a.module".to_owned(),
+                    entry_function: "entry$a".to_owned(),
+                },
+            ],
+        };
+        let chained = base
+            .clone()
+            .with_function_value_contracts(metadata.function_value_contracts.clone())
+            .with_callable_bindings(metadata.callable_bindings.clone())
+            .with_composite_value_contracts(metadata.composite_value_contracts.clone())
+            .with_interface_identity(
+                metadata
+                    .interface_identity
+                    .clone()
+                    .expect("test metadata has an interface identity"),
+            )
+            .with_generic_entrypoints(metadata.generic_entrypoints.clone());
+        let one_shot = BackendArtifact::new_with_kind_and_compiler_metadata(
+            base.backend.clone(),
+            base.input.clone(),
+            base.target.clone(),
+            base.artifact_kind.clone(),
+            base.format.clone(),
+            b"bytes".to_vec(),
+            base.exports.clone(),
+            base.assumptions.clone(),
+            base.obligations_generated.clone(),
+            base.proof_bindings.clone(),
+            base.execution_applicability.clone(),
+            base.evidence_dependencies.clone(),
+            base.unsupported.clone(),
+            base.status,
+            metadata,
+        );
+
+        assert_eq!(one_shot, chained);
+        assert_eq!(
+            serde_json::to_vec(&one_shot).expect("one-shot artifact serializes"),
+            serde_json::to_vec(&chained).expect("chained artifact serializes")
+        );
+        assert!(one_shot.identity_is_valid());
+    }
+
+    #[test]
+    fn streamed_serialized_payload_matches_byte_vector_artifact() {
+        let base = test_artifact(Vec::new());
+        let payload = ("schema-0.1", vec!["alpha", "beta", "gamma"]);
+        let bytes = serde_json::to_vec(&payload).expect("test payload serializes");
+        let expected = BackendArtifact::new_with_kind_and_compiler_metadata(
+            base.backend.clone(),
+            base.input.clone(),
+            base.target.clone(),
+            base.artifact_kind.clone(),
+            base.format.clone(),
+            bytes.clone(),
+            base.exports.clone(),
+            base.assumptions.clone(),
+            base.obligations_generated.clone(),
+            base.proof_bindings.clone(),
+            base.execution_applicability.clone(),
+            base.evidence_dependencies.clone(),
+            base.unsupported.clone(),
+            base.status,
+            BackendArtifactCompilerMetadata::default(),
+        );
+        let streamed = BackendArtifact::new_with_serialized_payload_and_compiler_metadata(
+            base.backend.clone(),
+            base.input.clone(),
+            base.target.clone(),
+            base.artifact_kind.clone(),
+            base.format.clone(),
+            &payload,
+            base.exports.clone(),
+            base.assumptions.clone(),
+            base.obligations_generated.clone(),
+            base.proof_bindings.clone(),
+            base.execution_applicability.clone(),
+            base.evidence_dependencies.clone(),
+            base.unsupported.clone(),
+            base.status,
+            BackendArtifactCompilerMetadata::default(),
+        )
+        .expect("streamed payload serializes");
+
+        assert_eq!(streamed, expected);
+        assert_eq!(streamed.bytes_sha256, sha256_hex(&bytes));
+        assert_eq!(streamed.bytes().expect("streamed bytes decode"), bytes);
+        assert!(streamed.identity_is_valid());
+    }
+
+    #[test]
+    fn hex_encoded_payload_digest_matches_decoded_bytes_without_accepting_malformed_hex() {
+        let fixtures = [
+            Vec::new(),
+            (0u8..=u8::MAX).collect::<Vec<_>>(),
+            (0..17_001).map(|value| (value % 251) as u8).collect(),
+        ];
+        for bytes in fixtures {
+            let encoded = hex_encode(&bytes);
+            assert_eq!(
+                sha256_hex_encoded_payload(&encoded),
+                Some(sha256_hex(&bytes))
+            );
+        }
+        assert_eq!(sha256_hex_encoded_payload("0"), None);
+        assert_eq!(sha256_hex_encoded_payload("0g"), None);
     }
 
     #[test]

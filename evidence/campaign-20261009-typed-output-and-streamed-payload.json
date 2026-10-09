@@ -1,0 +1,131 @@
+{
+  "schema_version": "mncs.language.execution-frontier-measurement/1",
+  "observed_at": "2026-10-09T17:32:41Z",
+  "candidate": {
+    "repository": "mncs-language",
+    "base_revision": "92462d55733bf2be46407663c89f36f6a157c11c",
+    "branch": "campaign/borrowed-research-bytecode-payload-20261009",
+    "worktree": "/home/epi13/Documents/Projects/.worktrees/borrowed-research-bytecode-payload-20261009",
+    "working_tree_dirty_at_measurement": true,
+    "changed_source_patch_sha256": "ad145c5bad6b487d0c7fa3342fea0a8d73e1ce618e0c33aaca92448589af570c",
+    "candidate_compiler_probe_binary_sha256": "06e7e89a79f7014de69f6b157b651d407c70231258ff367fe6dcd0d3ee685251",
+    "matched_baseline_compiler_probe_binary_sha256": "44ba7151aca117dbe757a7ff9e1d070a91441253d53292b2c53184032c97063d",
+    "stage0_revision": "b05dfa2b91541e4bd4a75aecff6abdedd708608e+hir-prelude-sha256-500c5220d15488044e69396e42a6b58466580f44e4d00d083c4d066746c43820"
+  },
+  "implementation": {
+    "research_bytecode_payload": "BackendArtifact can serialize a borrowed payload directly into its hex envelope with bounded intermediate storage. Payload decoding streams JSON from the hex representation without first constructing a second payload-sized byte vector. The artifact bytes and digest remain covered by equivalence tests.",
+    "canonical_identity": "Canonical JSON SHA-256 uses a streaming writer while preserving the prior serialized identity boundary.",
+    "ssa_value_validation": "After module validation and normalized entry inputs, outputs of successfully executed typed SSA instructions inherit validated provenance. Failed instructions do not mark outputs; untrusted raw inserts remain unvalidated. This lets internal calls reuse type validation for values produced by prior typed instructions.",
+    "long_run_progress": "Opt-in body and SSA runtime progress events identify process, step scope, count, time and current function/block at 250,000-step intervals. Profiling remains disabled by default."
+  },
+  "real_flow_target": {
+    "operation": "mncs.compiler.project.v1::compile_project_target<1024,1024>",
+    "target_module": "flow",
+    "selected_compiler_modules": ["source", "lexer", "parser", "segment", "decl", "flow"],
+    "reported_pages_at_stride_1024": 893,
+    "compiler_source_bundle_sha256": "eb24218ed9aae5a43c0e2bf5d664c1c07d316efcc1fc2373ebd91f3216c3af85",
+    "stage0_oracle": "NOT_RUN",
+    "step_budget": 8000000,
+    "semantic_result": "UNKNOWN_NO_RETURNED_PROJECT_RESULT",
+    "operation_classification": "RESOURCE_EXHAUSTED",
+    "same_incomplete_report_sha256": "6bf903e12e2255093d3c7039e642bc6c1e448f9d6a28d1942f3798ae8f787e6a",
+    "baseline_measurement": {
+      "path": "/home/epi13/Documents/Projects/.worktrees/flow-hir-prelude-compiler-run-20261009/.build/campaign-artifacts/compiler-facts/compiler-probe-flow-inline-lexer-language-reuse-on-default-8m-profile-source-lexer-parser-segment-decl-flow-measurement.json",
+      "file_sha256": "249d21a1888cb8e20240d26d766f67035388b12d8db21091b7a39deeb436bf99",
+      "language_binary_sha256": "44ba7151aca117dbe757a7ff9e1d070a91441253d53292b2c53184032c97063d",
+      "runner_wall_seconds": 37.603,
+      "child_cpu_seconds": 35.56,
+      "child_peak_rss_kib": 3130932,
+      "child_max_fds": 5,
+      "cgroup_oom_kill_delta": 0,
+      "steps": 8000000,
+      "frames": 329600,
+      "instructions": 5782159,
+      "ssa_profile_seconds": 6.778766856,
+      "frame_setup_seconds": 4.526885719,
+      "input_arguments": 1532559,
+      "reused_validated_arguments": 997396,
+      "input_validation_seconds": 4.212456586
+    },
+    "candidate_cold_measurement": {
+      "path": "/home/epi13/Documents/Projects/.worktrees/flow-hir-prelude-compiler-run-20261009/.build/campaign-artifacts/compiler-facts/compiler-probe-typed-output-provenance-default-8m-profile-source-lexer-parser-segment-decl-flow-measurement.json",
+      "file_sha256": "f30e2706b0a324406fc188ff9589543ef97e91efa0280aa16f5e05b176ac5dae",
+      "runner_wall_seconds": 284.765,
+      "child_cpu_seconds": 271.29,
+      "child_peak_rss_kib": 3098164,
+      "child_max_fds": 5,
+      "cgroup_oom_kill_delta": 0,
+      "steps": 8000000,
+      "frames": 329600,
+      "instructions": 5782159,
+      "ssa_profile_seconds": 2.432025714,
+      "frame_setup_seconds": 0.250989205,
+      "input_arguments": 1532559,
+      "reused_validated_arguments": 1532556,
+      "input_validation_seconds": 0.004291446,
+      "comparability": "Cold source elaboration/backend admission overlapped the full Store scrub; wall time is excluded from matched runtime comparison."
+    },
+    "candidate_warm_recheck": {
+      "path": "/home/epi13/Documents/Projects/.worktrees/flow-hir-prelude-compiler-run-20261009/.build/campaign-artifacts/compiler-facts/compiler-probe-typed-output-provenance-default-8m-cache-hit-recheck-source-lexer-parser-segment-decl-flow-measurement.json",
+      "file_sha256": "4c8d14804c49b96d66df073e074bcc4d62de79597d3c92110e5618c3f506a714",
+      "runner_wall_seconds": 33.342,
+      "child_cpu_seconds": 31.16,
+      "child_peak_rss_kib": 3130788,
+      "child_max_fds": 5,
+      "cgroup_oom_kill_delta": 0,
+      "steps": 8000000,
+      "frames": 329600,
+      "instructions": 5782159,
+      "ssa_profile_seconds": 2.388825660,
+      "frame_setup_seconds": 0.246249817,
+      "input_arguments": 1532559,
+      "reused_validated_arguments": 1532556,
+      "input_validation_seconds": 0.004148956
+    },
+    "matched_change": {
+      "ssa_profile_reduction_percent": 64.76,
+      "frame_setup_reduction_percent": 94.56,
+      "input_validation_reduction_percent": 99.90,
+      "runner_wall_seconds_baseline_to_candidate": [37.603, 33.342],
+      "child_cpu_seconds_baseline_to_candidate": [35.56, 31.16],
+      "same_step_count_and_instruction_count": true,
+      "same_incomplete_report_sha256": true,
+      "interpretation": "Validation work per internal frame dropped because successful typed outputs now retain verified provenance. The compiler still reaches the unchanged step cap before returning a native result."
+    },
+    "resource_envelope": {
+      "sampled_rss_stop_limit_mib": 3584,
+      "limit_triggered": false,
+      "cgroup_oom_kill_delta": 0,
+      "rss_reduction_claimed": false
+    }
+  },
+  "source_backend_conformance": {
+    "command": "mncs compile examples/source/backend-conformance/linked-root.mncs --emit backend --target research-bytecode",
+    "artifact_sha256": "d9f0962e57984305f23136fd0af18a49145d2be85a62800984684483426d28ce",
+    "artifact_bytes": 572627,
+    "artifact_status": "PASS",
+    "result_sha256": "501dad3439ac94cd4090286cfff0f54a633054a002eb9d4552f4a7eaa5e1050e",
+    "result_status": "completed_with_unresolved_obligations",
+    "diagnostics": ["CMP301 integer-overflow obligation", "CMP301 contract-evidence-bound requirement"],
+    "execution": "NOT_RUN; this validates artifact construction and serialization, not artifact execution."
+  },
+  "validation": {
+    "cargo_test_mncs_model": {"passed": 222, "failed": 0},
+    "cargo_test_mncs_codegen_and_mncs_compiler": {
+      "mncs_codegen_passed": 73,
+      "mncs_compiler_unit_passed": 44,
+      "mncs_compiler_integration_passed": 77,
+      "failed": 0
+    },
+    "cargo_test_mncs_cli_backend_family_and_abi_boundary": {"passed": 31, "failed": 0},
+    "python_probe_measurement_tests": {"passed": 19, "failed": 0},
+    "stage0_probe_counting_writer_unit_test": "PASS",
+    "python_compile_and_git_diff_check": "PASS",
+    "focused_rustfmt_ssa_execution_check": "PASS",
+    "semantic_claim": "No complete flow.mncs compiler result, native check/proof/CFG/verified SSA evidence, executable compiler, Stage-1 or Stage-2 result was produced."
+  },
+  "delivery": {
+    "implementation_commit": null,
+    "evidence_role": "Records candidate source, toolchain, measurement identity and tested scope; it does not change compiler stage claims."
+  }
+}

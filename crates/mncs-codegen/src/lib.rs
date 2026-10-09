@@ -18,29 +18,29 @@ mod support;
 mod wasm;
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
 use mncs_model::{
-    ArtifactRepresentation, BACKEND_ARTIFACT_SCHEMA_VERSION, BackendArtifact,
-    BackendCapabilityManifest, BackendConfiguration, BackendEvidence, BackendFunctionValueContract,
-    BackendIdentity, BackendResult, BackendValueContract, BodyExecutionSession, BodyType,
-    COMPILER_ARTIFACT_SCHEMA_VERSION, CompilerArtifactRef, CompilerDiagnostic,
+    execute_ssa_module, execute_ssa_module_prevalidated,
+    execute_stateful_case_with_checkpoint_scoped, stateful_prefix_identity, ArtifactRepresentation,
+    BackendArtifact, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
+    BackendFunctionValueContract, BackendIdentity, BackendResult, BackendValueContract,
+    BodyExecutionSession, BodyType, CompilerArtifactRef, CompilerDiagnostic,
     CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult,
     ExecutionStatus, ExecutionTarget, ExecutionValue, HostExecutionValue, HostGrant, IntegerType,
-    LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
-    PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET, Program, SSA_SCHEMA_VERSION,
-    SemanticId, SsaExecutionSession, SsaModule, StatefulCallResult, StatefulExecutionCase,
+    Program, SemanticId, SsaExecutionSession, SsaModule, StatefulCallResult, StatefulExecutionCase,
     StatefulExecutionCheckpoint, StatefulExecutionResult, TargetContractRef, TargetLoweringPlan,
-    TransformationStatus, execute_ssa_module, execute_ssa_module_prevalidated,
-    execute_stateful_case_with_checkpoint_scoped, stateful_prefix_identity,
+    TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
+    LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
+    PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET, SSA_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::lower::lower_module;
 use crate::support::{function_value_contracts, validate_realizable_ssa};
-use crate::wasm::{WASM_MAGIC, WASM_VERSION, decode_module, encode_module, execute_function_typed};
+use crate::wasm::{decode_module, encode_module, execute_function_typed, WASM_MAGIC, WASM_VERSION};
 
 pub const PORTABLE_WASM_FORMAT: &str = "application/wasm; mncs-portable-wasm-mvp-0.1";
 pub const PORTABLE_WASM_ARTIFACT_KIND: &str = "wasm_module";
@@ -203,6 +203,19 @@ pub fn language_owned_interface_identity(program: &Program) -> String {
     )
 }
 
+fn language_test_case_identities(program: &Program) -> Vec<SemanticId> {
+    if !program.functions.iter().any(|function| function.is_test) {
+        return Vec::new();
+    }
+    program
+        .semantic_identities()
+        .objects
+        .into_iter()
+        .filter(|record| record.kind == mncs_model::IdentityKind::TestCase)
+        .map(|record| record.identity)
+        .collect()
+}
+
 /// Return language-owned ABI contracts with qualified declaration identity.
 ///
 /// This uses the same root-wrapper precedence as
@@ -217,13 +230,7 @@ pub fn language_owned_abi_contracts(
 ) {
     let (value_contracts, composites) = language_owned_value_contracts(program);
     let mut functions = BTreeMap::new();
-    let identities = program.semantic_identities();
-    let test_cases = identities
-        .objects
-        .iter()
-        .filter(|record| record.kind == mncs_model::IdentityKind::TestCase)
-        .map(|record| record.identity.clone())
-        .collect::<Vec<_>>();
+    let test_cases = language_test_case_identities(program);
 
     for function in &program.functions {
         let Some(contract) = value_contracts.get(&function.name) else {
@@ -365,13 +372,7 @@ pub fn language_owned_callable_bindings(
     program: &Program,
 ) -> Vec<mncs_model::BackendCallableBinding> {
     let contracts = function_value_contracts(program);
-    let identities = program.semantic_identities();
-    let test_cases = identities
-        .objects
-        .iter()
-        .filter(|record| record.kind == mncs_model::IdentityKind::TestCase)
-        .map(|record| record.identity.clone())
-        .collect::<Vec<_>>();
+    let test_cases = language_test_case_identities(program);
     let specialization_ids = program
         .generic_specializations
         .iter()
@@ -573,6 +574,20 @@ fn trace_timing(stage: &str, started: Instant) {
     }
 }
 
+fn trace_phase_begin(stage: &str) {
+    if std::env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!("mncs-phase-begin phase={stage}");
+    }
+}
+
+fn trace_stage<T>(stage: &str, build: impl FnOnce() -> T) -> T {
+    trace_phase_begin(stage);
+    let started = Instant::now();
+    let value = build();
+    trace_timing(stage, started);
+    value
+}
+
 pub trait BackendAdapter {
     fn capabilities(&self) -> BackendCapabilityManifest;
     fn target(&self) -> TargetContractRef;
@@ -604,16 +619,19 @@ pub trait BackendAdapter {
 pub struct PortableWasmAdapter;
 pub struct ResearchBytecodeAdapter;
 
-pub use c11::{C11_ARTIFACT_KIND, C11_BACKEND_NAME, C11Adapter, NativeSsaScalarModule, emit_verified_native_ssa_c11};
-pub use cranelift_backend::{CRANELIFT_ARTIFACT_KIND, CRANELIFT_BACKEND_NAME, CraneliftAdapter};
-pub use llvm::{LLVM_ARTIFACT_KIND, LLVM_BACKEND_NAME, LlvmAdapter};
+pub use c11::{
+    emit_verified_native_ssa_c11, C11Adapter, NativeSsaScalarModule, C11_ARTIFACT_KIND,
+    C11_BACKEND_NAME,
+};
+pub use cranelift_backend::{CraneliftAdapter, CRANELIFT_ARTIFACT_KIND, CRANELIFT_BACKEND_NAME};
+pub use llvm::{LlvmAdapter, LLVM_ARTIFACT_KIND, LLVM_BACKEND_NAME};
 pub use matrix::{
-    BackendFamilyMatrix, BackendMatrixRow, BackendProfileSupport, backend_family_matrix,
-    profile_support_for, with_experiment_status,
+    backend_family_matrix, profile_support_for, with_experiment_status, BackendFamilyMatrix,
+    BackendMatrixRow, BackendProfileSupport,
 };
 pub use promises::{
-    LoweringPromise, PROOF_RANGE_METHOD, integer_no_overflow_promise,
-    proof_backed_no_overflow_certificate,
+    integer_no_overflow_promise, proof_backed_no_overflow_certificate, LoweringPromise,
+    PROOF_RANGE_METHOD,
 };
 
 pub fn backend_names() -> Vec<&'static str> {
@@ -1203,6 +1221,114 @@ struct ResearchBytecodePayload {
     ssa: Arc<SsaModule>,
 }
 
+#[derive(Serialize)]
+struct ResearchBytecodePayloadRef<'a> {
+    schema_version: &'static str,
+    program: &'a Program,
+    ssa: &'a SsaModule,
+}
+
+struct ArtifactHexReader<'a> {
+    encoded: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> ArtifactHexReader<'a> {
+    fn new(encoded: &'a str) -> Self {
+        Self {
+            encoded: encoded.as_bytes(),
+            offset: 0,
+        }
+    }
+}
+
+impl std::io::Read for ArtifactHexReader<'_> {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        if output.is_empty() || self.offset == self.encoded.len() {
+            return Ok(0);
+        }
+        let start = self.offset;
+        let available = (self.encoded.len() - start) / 2;
+        let count = output.len().min(available);
+        for index in 0..count {
+            let position = start + index * 2;
+            let high = match decode_hex_nibble(self.encoded[position]) {
+                Some(value) => value,
+                None => {
+                    self.offset = position;
+                    return if index == 0 {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "backend artifact contains non-hexadecimal bytes",
+                        ))
+                    } else {
+                        Ok(index)
+                    };
+                }
+            };
+            let low = match decode_hex_nibble(self.encoded[position + 1]) {
+                Some(value) => value,
+                None => {
+                    self.offset = position;
+                    return if index == 0 {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "backend artifact contains non-hexadecimal bytes",
+                        ))
+                    } else {
+                        Ok(index)
+                    };
+                }
+            };
+            output[index] = (high << 4) | low;
+        }
+        self.offset = start + count * 2;
+        if count == 0 && self.offset < self.encoded.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "backend artifact hex encoding has an odd length",
+            ));
+        }
+        Ok(count)
+    }
+}
+
+fn decode_hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn decode_research_bytecode_payload(
+    artifact: &BackendArtifact,
+) -> Result<ResearchBytecodePayload, String> {
+    trace_phase_begin("research-bytecode-payload-stream-decode");
+    let started = Instant::now();
+    mncs_model::record_counter("artifact_decode");
+    let reader =
+        std::io::BufReader::with_capacity(64 * 1024, ArtifactHexReader::new(&artifact.bytes_hex));
+    let decoded = serde_json::from_reader::<_, ResearchBytecodePayload>(reader)
+        .map_err(|error| format!("invalid research bytecode payload: {error}"));
+    trace_timing("research-bytecode-payload-stream-decode", started);
+    decoded
+}
+
+fn build_research_bytecode_session(
+    payload: ResearchBytecodePayload,
+) -> Option<(ResearchBytecodePayload, SsaExecutionSession)> {
+    trace_phase_begin("research-bytecode-session-build");
+    let started = Instant::now();
+    let result =
+        SsaExecutionSession::from_shared(Arc::clone(&payload.program), Arc::clone(&payload.ssa))
+            .ok()
+            .map(|session| (payload, session));
+    trace_timing("research-bytecode-session-build", started);
+    result
+}
+
 pub fn lower_research_bytecode(
     program: &Program,
     ssa: &SsaModule,
@@ -1211,6 +1337,8 @@ pub fn lower_research_bytecode(
 ) -> BackendResult {
     mncs_model::record_counter("backend_lowering");
     let mut diagnostics = Vec::new();
+    trace_phase_begin("research-bytecode-ssa-fingerprint");
+    let started = Instant::now();
     if selected_ssa.representation != ArtifactRepresentation::SelectedSsa
         || !selected_ssa.identity_is_valid()
         || selected_ssa.fingerprint != ssa.fingerprint().unwrap_or_default()
@@ -1222,9 +1350,14 @@ pub fn lower_research_bytecode(
         ));
         return failed(diagnostics);
     }
+    trace_timing("research-bytecode-ssa-fingerprint", started);
+
+    trace_phase_begin("research-bytecode-ssa-validation");
+    let started = Instant::now();
     if let Err(result) = validate_realizable_ssa(program, ssa, "CGR102") {
         return *result;
     }
+    trace_timing("research-bytecode-ssa-validation", started);
     if !target_is_research_bytecode(&plan.target) {
         diagnostics.push(CompilerDiagnostic::new(
             "CGR201",
@@ -1253,13 +1386,69 @@ pub fn lower_research_bytecode(
             diagnostics,
         };
     }
-    let payload = ResearchBytecodePayload {
-        schema_version: "0.1".to_owned(),
-        program: Arc::new(program.clone()),
-        ssa: Arc::new(ssa.clone()),
+    let payload = ResearchBytecodePayloadRef {
+        schema_version: "0.1",
+        program,
+        ssa,
     };
-    let bytes = match serde_json::to_vec(&payload) {
-        Ok(bytes) => bytes,
+    let backend = research_bytecode_backend();
+    let assumptions = plan.assumptions_introduced.clone();
+    trace_phase_begin("research-bytecode-artifact-construction");
+    let started = Instant::now();
+    let exports = trace_stage("research-bytecode-export-names", || {
+        program
+            .functions
+            .iter()
+            .map(|function| function.name.clone())
+            .collect()
+    });
+    let proof_bindings = trace_stage("research-bytecode-proof-binding-refs", || {
+        ssa.proof_binding_refs()
+    });
+    let function_value_contracts =
+        trace_stage("research-bytecode-function-value-contracts", || {
+            function_value_contracts(program)
+        });
+    let callable_bindings = trace_stage("research-bytecode-callable-bindings", || {
+        language_owned_callable_bindings(program)
+    });
+    let composite_value_contracts =
+        trace_stage("research-bytecode-composite-value-contracts", || {
+            crate::support::composite_value_contracts(program)
+        });
+    let interface_identity = trace_stage("research-bytecode-interface-identity", || {
+        crate::language_owned_interface_identity(program)
+    });
+    let generic_entrypoints = trace_stage("research-bytecode-generic-entrypoints", || {
+        crate::support::generic_entrypoint_records(program)
+    });
+    let artifact = match BackendArtifact::new_with_serialized_payload_and_compiler_metadata(
+        backend.clone(),
+        selected_ssa.clone(),
+        plan.target.clone(),
+        RESEARCH_BYTECODE_ARTIFACT_KIND,
+        RESEARCH_BYTECODE_FORMAT,
+        &payload,
+        exports,
+        assumptions.clone(),
+        Vec::new(),
+        proof_bindings,
+        vec![
+            "bounded MNCS SSA interpreter".to_owned(),
+            "no host process execution".to_owned(),
+        ],
+        plan.target.evidence.clone(),
+        Vec::new(),
+        TransformationStatus::Pass,
+        mncs_model::BackendArtifactCompilerMetadata {
+            function_value_contracts,
+            callable_bindings,
+            composite_value_contracts,
+            interface_identity: Some(interface_identity),
+            generic_entrypoints,
+        },
+    ) {
+        Ok(artifact) => artifact,
         Err(error) => {
             diagnostics.push(CompilerDiagnostic::new(
                 "CGR301",
@@ -1269,36 +1458,7 @@ pub fn lower_research_bytecode(
             return failed(diagnostics);
         }
     };
-    let backend = research_bytecode_backend();
-    let assumptions = plan.assumptions_introduced.clone();
-    let artifact = BackendArtifact::new_with_kind(
-        backend.clone(),
-        selected_ssa.clone(),
-        plan.target.clone(),
-        RESEARCH_BYTECODE_ARTIFACT_KIND,
-        RESEARCH_BYTECODE_FORMAT,
-        &bytes,
-        program
-            .functions
-            .iter()
-            .map(|function| function.name.clone())
-            .collect(),
-        assumptions.clone(),
-        Vec::new(),
-        ssa.proof_binding_refs(),
-        vec![
-            "bounded MNCS SSA interpreter".to_owned(),
-            "no host process execution".to_owned(),
-        ],
-        plan.target.evidence.clone(),
-        Vec::new(),
-        TransformationStatus::Pass,
-    )
-    .with_function_value_contracts(function_value_contracts(program))
-    .with_callable_bindings(language_owned_callable_bindings(program))
-    .with_composite_value_contracts(crate::support::composite_value_contracts(program))
-    .with_interface_identity(crate::language_owned_interface_identity(program))
-    .with_generic_entrypoints(crate::support::generic_entrypoint_records(program));
+    trace_timing("research-bytecode-artifact-construction", started);
     let artifact_ref = CompilerArtifactRef::new(
         ArtifactRepresentation::BackendArtifact,
         BACKEND_ARTIFACT_SCHEMA_VERSION,
@@ -1955,22 +2115,12 @@ fn execute_research_bytecode(
         });
         return result;
     }
-    let bytes = match artifact.bytes() {
-        Ok(bytes) => bytes,
+    let payload = match decode_research_bytecode_payload(artifact) {
+        Ok(payload) => payload,
         Err(reason) => {
             result.failure = Some(ExecutionFailure {
                 identity: Some(artifact.identity.clone()),
                 reason,
-            });
-            return result;
-        }
-    };
-    let payload: ResearchBytecodePayload = match serde_json::from_slice(&bytes) {
-        Ok(payload) => payload,
-        Err(error) => {
-            result.failure = Some(ExecutionFailure {
-                identity: Some(artifact.identity.clone()),
-                reason: format!("invalid research bytecode payload: {error}"),
             });
             return result;
         }
@@ -2108,23 +2258,10 @@ impl<'a> BackendStatefulSession<'a> {
             && artifact.backend == research_bytecode_backend()
             && artifact.artifact_kind == RESEARCH_BYTECODE_ARTIFACT_KIND
         {
-            artifact
-                .bytes()
+            decode_research_bytecode_payload(&artifact)
                 .ok()
-                .and_then(|bytes| {
-                    mncs_model::record_counter("artifact_decode");
-                    serde_json::from_slice::<ResearchBytecodePayload>(&bytes)
-                        .ok()
-                        .filter(|payload| payload.schema_version == "0.1")
-                })
-                .and_then(|payload| {
-                    SsaExecutionSession::from_shared(
-                        Arc::clone(&payload.program),
-                        Arc::clone(&payload.ssa),
-                    )
-                    .ok()
-                    .map(|session| (payload, session))
-                })
+                .filter(|payload| payload.schema_version == "0.1")
+                .and_then(build_research_bytecode_session)
                 .map_or(PreparedStatefulBackend::OneShot, |(payload, session)| {
                     mncs_model::record_counter("backend_session");
                     mncs_model::record_counter("reused_stage");
@@ -2391,23 +2528,10 @@ impl<'a> BackendExecutionSession<'a> {
             && artifact.backend == research_bytecode_backend()
             && artifact.artifact_kind == RESEARCH_BYTECODE_ARTIFACT_KIND
         {
-            artifact
-                .bytes()
+            decode_research_bytecode_payload(&artifact)
                 .ok()
-                .and_then(|bytes| {
-                    mncs_model::record_counter("artifact_decode");
-                    serde_json::from_slice::<ResearchBytecodePayload>(&bytes)
-                        .ok()
-                        .filter(|payload| payload.schema_version == "0.1")
-                })
-                .and_then(|payload| {
-                    SsaExecutionSession::from_shared(
-                        Arc::clone(&payload.program),
-                        Arc::clone(&payload.ssa),
-                    )
-                    .ok()
-                    .map(|session| (payload, session))
-                })
+                .filter(|payload| payload.schema_version == "0.1")
+                .and_then(build_research_bytecode_session)
                 .map_or(PreparedStatelessBackend::OneShot, |(payload, session)| {
                     mncs_model::record_counter("backend_session");
                     mncs_model::record_counter("reused_stage");
@@ -2606,23 +2730,10 @@ impl OwnedExecutionSession {
         let research = if artifact.backend == research_bytecode_backend()
             && artifact.artifact_kind == RESEARCH_BYTECODE_ARTIFACT_KIND
         {
-            artifact
-                .bytes()
+            decode_research_bytecode_payload(&artifact)
                 .ok()
-                .and_then(|bytes| {
-                    mncs_model::record_counter("artifact_decode");
-                    serde_json::from_slice::<ResearchBytecodePayload>(&bytes)
-                        .ok()
-                        .filter(|payload| payload.schema_version == "0.1")
-                })
-                .and_then(|payload| {
-                    SsaExecutionSession::from_shared(
-                        Arc::clone(&payload.program),
-                        Arc::clone(&payload.ssa),
-                    )
-                    .ok()
-                    .map(|session| (payload, session))
-                })
+                .filter(|payload| payload.schema_version == "0.1")
+                .and_then(build_research_bytecode_session)
                 .map(|(payload, session)| {
                     mncs_model::record_counter("backend_session");
                     mncs_model::record_counter("reused_stage");
@@ -3225,6 +3336,55 @@ mod tests {
     }
 
     #[test]
+    fn production_only_test_case_lookup_skips_program_identity_rebuild() {
+        let program = program();
+        assert!(program.functions.iter().all(|function| !function.is_test));
+
+        mncs_model::reset_cost_report();
+        assert!(language_test_case_identities(&program).is_empty());
+        assert_eq!(mncs_model::cost_report().canonical_hash_count, 0);
+    }
+
+    #[test]
+    fn artifact_hex_reader_streams_json_bytes_and_rejects_malformed_hex() {
+        let mut reader = ArtifactHexReader::new("7B2278223A226F6B227D");
+        let mut decoded = Vec::new();
+        std::io::Read::read_to_end(&mut reader, &mut decoded).unwrap();
+        assert_eq!(decoded, br#"{"x":"ok"}"#);
+        let value: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
+        assert_eq!(value["x"], "ok");
+
+        for malformed in ["6", "6Z"] {
+            let mut reader = ArtifactHexReader::new(malformed);
+            assert!(std::io::Read::read_to_end(&mut reader, &mut Vec::new()).is_err());
+        }
+    }
+
+    #[test]
+    fn borrowed_research_bytecode_payload_preserves_owned_wire_encoding() {
+        let program = program();
+        let ssa = program.lower_to_ssa().unwrap();
+        let owned = ResearchBytecodePayload {
+            schema_version: "0.1".to_owned(),
+            program: Arc::new(program.clone()),
+            ssa: Arc::new(ssa.clone()),
+        };
+        let borrowed = ResearchBytecodePayloadRef {
+            schema_version: "0.1",
+            program: &program,
+            ssa: &ssa,
+        };
+
+        let owned_bytes = serde_json::to_vec(&owned).unwrap();
+        let borrowed_bytes = serde_json::to_vec(&borrowed).unwrap();
+        assert_eq!(borrowed_bytes, owned_bytes);
+
+        let decoded: ResearchBytecodePayload = serde_json::from_slice(&borrowed_bytes).unwrap();
+        assert_eq!(decoded.program.as_ref(), &program);
+        assert_eq!(decoded.ssa.as_ref(), &ssa);
+    }
+
+    #[test]
     fn checked_add_lowers_to_wasm_and_agrees_with_body_and_ssa() {
         let program = program();
         let ssa = program.lower_to_ssa().unwrap();
@@ -3544,25 +3704,19 @@ mod tests {
         assert!(wasm.identity_is_valid());
         assert!(bytecode.identity_is_valid());
         assert_ne!(wasm.backend, bytecode.backend);
-        assert!(
-            bytecode
+        assert!(bytecode
             .artifact_kinds
-                .contains(RESEARCH_BYTECODE_ARTIFACT_KIND)
-        );
-        assert!(
-            !bytecode
+            .contains(RESEARCH_BYTECODE_ARTIFACT_KIND));
+        assert!(!bytecode
             .artifact_kinds
-                .contains(PORTABLE_WASM_ARTIFACT_KIND)
-        );
+            .contains(PORTABLE_WASM_ARTIFACT_KIND));
         let matrix = backend_family_matrix();
         // Five in-tree realizations plus three external-LLVM target families.
         assert_eq!(matrix.backends.len(), 8);
-        assert!(
-            matrix
+        assert!(matrix
             .planned_unimplemented
             .iter()
-                .any(|name| name.contains("spir-v"))
-        );
+            .any(|name| name.contains("spir-v")));
         assert!(backend_adapter("mncs-riscv32").is_some());
         assert!(backend_adapter("mncs-ebpf").is_some());
         assert!(backend_adapter("mncs-ptx64").is_some());
@@ -3638,12 +3792,10 @@ mod tests {
         let plan = portable_wasm_plan(selected.clone());
         let result = lower_selected_ssa(&program, &ssa, selected, &plan);
         assert_eq!(result.status, TransformationStatus::Fail);
-        assert!(
-            result
+        assert!(result
             .diagnostics
             .iter()
-                .any(|diagnostic| diagnostic.code == "CGN103")
-        );
+            .any(|diagnostic| diagnostic.code == "CGN103"));
     }
 
     #[test]
@@ -3652,12 +3804,10 @@ mod tests {
         let artifact = result.artifact.unwrap();
         let ir = String::from_utf8(artifact.bytes().unwrap()).unwrap();
         assert!(ir.contains("llvm.sadd.with.overflow") || ir.contains("with.overflow"));
-        assert!(
-            artifact
+        assert!(artifact
             .assumptions
             .iter()
-                .any(|assumption| assumption.contains("withheld"))
-        );
+            .any(|assumption| assumption.contains("withheld")));
         assert!(!ir.contains(" add nsw i32"));
     }
 
@@ -3717,12 +3867,10 @@ mod tests {
             mncs_model::BackendPromise::NonAliasing,
             mncs_model::BackendPromise::Relaxation,
         ] {
-            assert!(
-                artifact
+            assert!(artifact
                 .promise_decisions
                 .iter()
-                    .any(|decision| decision.promise == promise && !decision.permitted)
-            );
+                .any(|decision| decision.promise == promise && !decision.permitted));
         }
         let mut tampered = artifact.clone();
         tampered.promise_decisions[0]

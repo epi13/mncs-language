@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
+use serde::ser::{SerializeMap, SerializeSeq};
+use serde::{Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -47,7 +49,7 @@ impl Program {
     }
 
     pub fn content_fingerprint(&self) -> Result<String, CanonicalError> {
-        Ok(self.canonical_form()?.fingerprint)
+        canonical_json_sha256(&CanonicalProgramFingerprintView(self))
     }
 
     /// Fingerprint of the production subject represented by this program.
@@ -117,7 +119,7 @@ impl Program {
                 filtered_references,
             ));
         }
-        production.canonical_form().map(|form| form.fingerprint)
+        production.content_fingerprint()
     }
 }
 
@@ -129,6 +131,38 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         write!(&mut hex, "{byte:02x}").expect("writing to a String cannot fail");
     }
     hex
+}
+
+struct CanonicalDigestWriter(Sha256);
+
+impl std::io::Write for CanonicalDigestWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Hash the same compact JSON bytes as [`canonical_json_value`] without
+/// retaining an intermediate `String`. Large backend artifacts include
+/// their encoded payload in identity material, so streaming avoids a second
+/// payload-sized allocation while preserving the exact identity boundary.
+pub(crate) fn canonical_json_sha256<T: serde::Serialize>(
+    value: &T,
+) -> Result<String, CanonicalError> {
+    crate::record_counter("serialization");
+    let mut writer = CanonicalDigestWriter(Sha256::new());
+    serde_json::to_writer(&mut writer, value)?;
+    crate::record_counter("canonical_hash");
+    let digest = writer.0.finalize();
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(&mut hex, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    Ok(hex)
 }
 
 pub(crate) fn canonical_json_value<T: serde::Serialize>(
@@ -215,6 +249,119 @@ fn canonical_program(program: &Program) -> JsonValue {
         ));
     }
     object(fields)
+}
+
+/// Borrowed canonical view for fingerprint-only operations. The full
+/// `CanonicalForm` API retains its established JSON value, while fingerprints
+/// can serialize canonical functions one at a time instead of cloning every
+/// function and body into one aggregate JSON tree.
+struct CanonicalProgramFingerprintView<'a>(&'a Program);
+
+impl Serialize for CanonicalProgramFingerprintView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let program = self.0;
+        let binding_table = canonical_binding_table(program);
+        let optional_fields = usize::from(binding_table.is_some())
+            + usize::from(!program.dependencies.is_empty())
+            + usize::from(!program.finite_types.is_empty())
+            + usize::from(!program.generic_specializations.is_empty())
+            + usize::from(!program.record_types.is_empty());
+        let mut map = serializer.serialize_map(Some(4 + optional_fields))?;
+
+        map.serialize_entry(
+            "assumptions",
+            &JsonValue::Array(sorted_assumptions(&program.assumptions)),
+        )?;
+        if let Some(binding_table) = binding_table {
+            map.serialize_entry("binding_table", &binding_table)?;
+        }
+        if !program.dependencies.is_empty() {
+            map.serialize_entry(
+                "dependencies",
+                &JsonValue::Array(sorted_semantic_ids(&program.dependencies)),
+            )?;
+        }
+        if !program.finite_types.is_empty() {
+            map.serialize_entry(
+                "finite_types",
+                &JsonValue::Array(sorted_finite_types(&program.finite_types)),
+            )?;
+        }
+        map.serialize_entry("functions", &CanonicalFunctions(&program.functions))?;
+        if !program.generic_specializations.is_empty() {
+            let mut specializations = program.generic_specializations.clone();
+            specializations.sort_by(|left, right| {
+                (
+                    &left.generic_function,
+                    &left.specialization_function,
+                    &left.canonical_args,
+                )
+                    .cmp(&(
+                        &right.generic_function,
+                        &right.specialization_function,
+                        &right.canonical_args,
+                    ))
+            });
+            map.serialize_entry(
+                "generic_specializations",
+                &serde_json::to_value(specializations)
+                    .expect("generic specializations are serializable"),
+            )?;
+        }
+        map.serialize_entry("module", &program.module)?;
+        if !program.record_types.is_empty() {
+            map.serialize_entry(
+                "record_types",
+                &JsonValue::Array(sorted_record_types(&program.record_types)),
+            )?;
+        }
+        map.serialize_entry("schema_version", &program.schema_version)?;
+        map.end()
+    }
+}
+
+struct CanonicalFunctions<'a>(&'a [Function]);
+
+impl Serialize for CanonicalFunctions<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut name_counts = BTreeMap::<&str, usize>::new();
+        for function in self.0 {
+            *name_counts.entry(&function.name).or_default() += 1;
+        }
+        let duplicate_names = name_counts.values().any(|count| *count > 1);
+        let mut functions = self.0.iter().collect::<Vec<_>>();
+        if duplicate_names {
+            functions.sort_by_key(|function| {
+                (
+                    function.home_module.as_deref().unwrap_or(""),
+                    function.name.as_str(),
+                )
+            });
+        } else {
+            functions.sort_by_key(|function| function.name.as_str());
+        }
+        let mut sequence = serializer.serialize_seq(Some(functions.len()))?;
+        for function in functions {
+            let canonical = canonical_function(function);
+            sequence.serialize_element(&canonical)?;
+        }
+        sequence.end()
+    }
+}
+
+fn canonical_binding_table(program: &Program) -> Option<JsonValue> {
+    let binding_table = program.binding_table.as_ref()?;
+    if binding_table.is_empty() {
+        return None;
+    }
+    // Source locations are navigation evidence, not semantic identity.
+    // Erase occurrence coordinates while retaining the binding decisions.
+    let mut semantic_bindings = binding_table.clone();
+    for reference in &mut semantic_bindings.references {
+        reference.occurrence_start = 0;
+        reference.occurrence_end = 0;
+    }
+    Some(serde_json::to_value(semantic_bindings).expect("binding table is serializable"))
 }
 
 fn sorted_finite_types(types: &[crate::FiniteType]) -> Vec<JsonValue> {
@@ -584,12 +731,77 @@ mod tests {
     }
 
     #[test]
+    fn streaming_canonical_hash_matches_materialized_json_hash() {
+        let value = serde_json::json!({
+            "array": ["alpha", "βeta", 7],
+            "nested": {"first": true, "second": null},
+        });
+        let canonical = canonical_json_value(&value).expect("canonical value serializes");
+        assert_eq!(
+            canonical_json_sha256(&value).expect("canonical value hashes"),
+            sha256_hex(canonical.as_bytes())
+        );
+    }
+
+    #[test]
     fn canonical_form_is_compact_and_hashed_deterministically() {
         let form = program().canonical_form().expect("canonical form");
         assert_eq!(form.schema_version, "0.3");
         assert_eq!(form.json, program().canonical_json().unwrap());
+        assert_eq!(
+            form.fingerprint,
+            program()
+                .content_fingerprint()
+                .expect("content fingerprint")
+        );
         assert_eq!(form.fingerprint.len(), 64);
         assert!(form.json.starts_with('{'));
+    }
+
+    #[test]
+    fn streaming_fingerprint_matches_linked_canonical_form() {
+        let mut linked = program();
+        linked.dependencies = vec![crate::SemanticId("dep:z".to_owned())];
+        linked.finite_types = vec![crate::FiniteType {
+            identity: crate::SemanticId("type:finite".to_owned()),
+            name: "Flag".to_owned(),
+            variants: Vec::new(),
+        }];
+        linked.record_types = vec![crate::RecordType {
+            identity: crate::SemanticId("type:record".to_owned()),
+            name: "Cell".to_owned(),
+            fields: Vec::new(),
+        }];
+        linked.binding_table = Some(crate::SemanticBindingTable::new(
+            vec![crate::SemanticNamespace {
+                identity: crate::SemanticId("namespace:dep".to_owned()),
+                name: "dependency".to_owned(),
+            }],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ));
+        linked.generic_specializations = vec![crate::GenericSpecializationRecord {
+            generic_function: crate::SemanticId("fn:generic".to_owned()),
+            specialization_function: crate::SemanticId("fn:specialized".to_owned()),
+            instantiation: crate::SemanticId("instantiation:one".to_owned()),
+            args: Vec::new(),
+            canonical_args: "[]".to_owned(),
+            host_spellings: Vec::new(),
+        }];
+
+        let mut imported = linked.functions[0].clone();
+        linked.functions[0].name = "shared".to_owned();
+        linked.functions[0].home_module = Some("module:z".to_owned());
+        imported.name = "shared".to_owned();
+        imported.home_module = Some("module:a".to_owned());
+        linked.functions.push(imported);
+
+        let canonical = linked.canonical_form().expect("linked canonical form");
+        assert_eq!(
+            linked.content_fingerprint().expect("streamed fingerprint"),
+            canonical.fingerprint
+        );
     }
 
     #[test]
