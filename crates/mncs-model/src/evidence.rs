@@ -167,10 +167,16 @@ pub struct EvidenceStatusReport {
 
 impl Program {
     pub fn evidence_manifest(&self) -> Result<EvidenceManifest, GraphError> {
-        if !self.validate().valid {
-            return Err(GraphError::InvalidProgram(self.validate()));
+        let report = self.validate();
+        if !report.valid {
+            return Err(GraphError::InvalidProgram(report));
         }
-        Ok(manifest_for_program(self, EvidenceFreshness::Current))
+        let identities = self.semantic_identities();
+        Ok(evidence_manifest_with_identities(
+            self,
+            &identities,
+            EvidenceFreshness::Current,
+        ))
     }
 }
 
@@ -220,15 +226,18 @@ impl EvidenceManifest {
     }
 }
 
-fn manifest_for_program(program: &Program, freshness: EvidenceFreshness) -> EvidenceManifest {
-    let identities = program.semantic_identities();
+pub(crate) fn evidence_manifest_with_identities(
+    program: &Program,
+    identities: &SemanticIdentities,
+    freshness: EvidenceFreshness,
+) -> EvidenceManifest {
     let mut evidence = Vec::new();
     for function in &program.functions {
         for claim in &function.evidence {
             let occurrence = occurrence_for_claim(function, claim);
             evidence.push(record_for_claim(
                 program,
-                &identities,
+                identities,
                 function,
                 claim,
                 occurrence,

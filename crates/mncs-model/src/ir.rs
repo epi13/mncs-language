@@ -4,7 +4,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::canonical::sha256_hex;
+use crate::canonical::{sha256_hex, CanonicalError, CanonicalForm};
 use crate::identity::{
     assumption_id, capability_id, contract_id, effect_id, function_id, machine_intent_id,
     parameter_id, program_id,
@@ -22,6 +22,60 @@ pub const HIGH_LEVEL_IR_SCHEMA_VERSION: &str = "0.5";
 /// the `BodyType` tag aliases and must pass through
 /// [`HighLevelIr::normalize_legacy_types`] before validation or reuse.
 pub const HIGH_LEVEL_IR_SCHEMA_VERSION_PRE_TYPED: &str = "0.4";
+
+/// A canonical semantic form bound to the immutable Program that produced it.
+/// Validation consumes this token so the canonical input can be reused without
+/// accepting a fingerprint supplied for a different Program.
+pub struct CanonicalizedProgram<'a> {
+    program: &'a Program,
+    canonical: CanonicalForm,
+}
+
+/// A validated, immutable Program whose canonical semantic identity is ready
+/// for graph, evidence, obligation, and HIR construction.
+pub struct ValidatedProgram<'a> {
+    program: &'a Program,
+    canonical: CanonicalForm,
+}
+
+impl<'a> CanonicalizedProgram<'a> {
+    pub fn canonical_form(&self) -> &CanonicalForm {
+        &self.canonical
+    }
+
+    pub fn validate(self) -> Result<ValidatedProgram<'a>, ValidationReport> {
+        let validation_started = Instant::now();
+        let report = self.program.validate();
+        trace_timing("ir-prelude-validation", validation_started);
+        if !report.valid {
+            return Err(report);
+        }
+        Ok(ValidatedProgram {
+            program: self.program,
+            canonical: self.canonical,
+        })
+    }
+}
+
+impl ValidatedProgram<'_> {
+    pub fn program(&self) -> &Program {
+        self.program
+    }
+
+    pub fn canonical_form(&self) -> &CanonicalForm {
+        &self.canonical
+    }
+
+    pub fn into_canonical_form(self) -> CanonicalForm {
+        self.canonical
+    }
+
+    pub fn lower_to_ir(&self) -> Result<HighLevelIr, IrError> {
+        let prelude_started = Instant::now();
+        self.program
+            .lower_to_ir_validated(&self.canonical, prelude_started)
+    }
+}
 
 fn trace_timing(stage: &str, started: Instant) {
     crate::record_stage(stage, started.elapsed());
@@ -499,17 +553,61 @@ impl HighLevelIr {
 }
 
 impl Program {
-    pub fn lower_to_ir(&self) -> Result<HighLevelIr, IrError> {
-        crate::record_counter("hir_build");
+    /// Canonicalize this immutable Program and retain the source binding so a
+    /// later validation step can issue a token tied to this exact value.
+    pub fn canonicalize_for_hir(&self) -> Result<CanonicalizedProgram<'_>, CanonicalError> {
         let started = Instant::now();
+        let canonical = self.canonical_form()?;
+        trace_timing("hir-prelude-canonicalization", started);
+        Ok(CanonicalizedProgram {
+            program: self,
+            canonical,
+        })
+    }
+
+    pub fn lower_to_ir(&self) -> Result<HighLevelIr, IrError> {
+        let prelude_started = Instant::now();
+        let validation_started = Instant::now();
         let report = self.validate();
+        trace_timing("ir-prelude-validation", validation_started);
         if !report.valid {
             return Err(IrError::InvalidProgram(report));
         }
-        let graph = self.semantic_graph()?;
-        let evidence = self.evidence_manifest()?;
+        let canonical = self
+            .canonicalize_for_hir()
+            .expect("canonical form after successful validation")
+            .canonical;
+        self.lower_to_ir_validated(&canonical, prelude_started)
+    }
+
+    pub(crate) fn lower_to_ir_validated(
+        &self,
+        canonical: &CanonicalForm,
+        prelude_started: Instant,
+    ) -> Result<HighLevelIr, IrError> {
+        crate::record_counter("hir_build");
+        let started = prelude_started;
+        let phase_started = Instant::now();
+        let identities =
+            self.semantic_identities_with_program_fingerprint(&canonical.fingerprint);
+        trace_timing("ir-prelude-semantic-identities", phase_started);
+
+        let phase_started = Instant::now();
+        let graph = crate::graph::semantic_graph_with_identities(self, &identities);
+        trace_timing("ir-prelude-semantic-graph", phase_started);
+
+        let phase_started = Instant::now();
+        let evidence = crate::evidence::evidence_manifest_with_identities(
+            self,
+            &identities,
+            crate::EvidenceFreshness::Current,
+        );
+        trace_timing("ir-prelude-evidence-manifest", phase_started);
+
+        let phase_started = Instant::now();
         let obligations = self.generate_obligations().obligations;
-        trace_timing("ir-prelude", started);
+        trace_timing("ir-prelude-obligations", phase_started);
+        trace_timing("ir-prelude", prelude_started);
         let mut functions = Vec::new();
         let mut state_regions = Vec::new();
         let mut transformations = Vec::new();
@@ -524,6 +622,16 @@ impl Program {
             Vec::new(),
         );
 
+        let functions_by_identity: BTreeMap<_, _> = self
+            .functions
+            .iter()
+            .map(|function| {
+                (
+                    function_id(function.identity_namespace(&self.module), &function.name),
+                    function,
+                )
+            })
+            .collect();
         let mut semantic_functions = self.functions.iter().collect::<Vec<_>>();
         semantic_functions.sort_by(|left, right| left.name.cmp(&right.name));
         for function in semantic_functions {
@@ -536,6 +644,7 @@ impl Program {
             if let Some(body) = &function.body {
                 let (lowered, regions, body_transformations) = lower_executable_body(
                     self,
+                    &functions_by_identity,
                     function,
                     body,
                     &graph,
@@ -818,9 +927,7 @@ impl Program {
         let mut module = HighLevelIr {
             schema_version: HIGH_LEVEL_IR_SCHEMA_VERSION.to_owned(),
             semantic_identity: program_identity,
-            semantic_fingerprint: self
-                .content_fingerprint()
-                .expect("validated canonical form"),
+            semantic_fingerprint: canonical.fingerprint.clone(),
             content_fingerprint: String::new(),
             binding_table: self.binding_table.clone(),
             functions,
@@ -858,6 +965,7 @@ impl Program {
 
 fn lower_executable_body(
     program: &Program,
+    functions_by_identity: &BTreeMap<SemanticId, &Function>,
     function: &Function,
     body: &crate::FunctionBody,
     graph: &crate::SemanticGraph,
@@ -1478,17 +1586,11 @@ fn lower_executable_body(
                     effects,
                     ..
                 } => {
-                    let callee = program
-                        .functions
-                        .iter()
-                        .find(|candidate| {
-                            candidate.name
-                                == function_name.rsplit('.').next().unwrap_or(function_name)
-                                && crate::function_id(
-                                    candidate.identity_namespace(&program.module),
-                                    &candidate.name,
-                                ) == *callee_identity
-                        })
+                    let simple_name = function_name.rsplit('.').next().unwrap_or(function_name);
+                    let callee = functions_by_identity
+                        .get(callee_identity)
+                        .copied()
+                        .filter(|candidate| candidate.name == simple_name)
                         .expect("validated call target");
                     (
                         IrOperationKind::Call {
@@ -2074,6 +2176,58 @@ mod tests {
                 .any(|usage| usage.semantic_declaration.is_some())
         }));
         assert!(left.trace_for(&function.semantic_identity).is_some());
+    }
+
+    #[test]
+    fn validated_hir_prelude_reuses_canonical_identity_and_preserves_facts() {
+        let program = valid_program();
+        let canonical = program.canonical_form().expect("canonical form");
+        let public_identities = program.semantic_identities();
+        let reused_identities =
+            program.semantic_identities_with_program_fingerprint(&canonical.fingerprint);
+        assert_eq!(public_identities, reused_identities);
+
+        let public_graph = program.semantic_graph().expect("semantic graph");
+        let reused_graph =
+            crate::graph::semantic_graph_with_identities(&program, &reused_identities);
+        assert_eq!(public_graph, reused_graph);
+
+        let public_manifest = program.evidence_manifest().expect("evidence manifest");
+        let reused_manifest = crate::evidence::evidence_manifest_with_identities(
+            &program,
+            &reused_identities,
+            EvidenceFreshness::Current,
+        );
+        assert_eq!(public_manifest, reused_manifest);
+
+        let public_ir = program.lower_to_ir().expect("public HIR lowering");
+        let validated = program
+            .canonicalize_for_hir()
+            .expect("bound canonical form")
+            .validate()
+            .expect("valid Program");
+        let validated_ir = validated.lower_to_ir().expect("validated HIR lowering");
+        assert_eq!(public_ir, validated_ir);
+        assert_eq!(
+            public_ir.fingerprint().expect("HIR fingerprint"),
+            validated_ir.fingerprint().expect("HIR fingerprint")
+        );
+    }
+
+    #[test]
+    fn canonicalized_program_preserves_invalid_report() {
+        let mut invalid = valid_program();
+        invalid.schema_version = "unsupported".to_owned();
+        let expected = invalid.validate();
+        let actual = match invalid
+            .canonicalize_for_hir()
+            .expect("canonical form remains representable")
+            .validate()
+        {
+            Ok(_) => panic!("invalid Program was accepted"),
+            Err(report) => report,
+        };
+        assert_eq!(actual, expected);
     }
 
     #[test]
