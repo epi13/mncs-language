@@ -1,0 +1,228 @@
+{
+  "candidate": {
+    "base_revision": "4581d51035344d7718db78f27350ea90f091449e",
+    "branch": "campaign/ssa-input-validation-20261009",
+    "changed_path": "crates/mncs-model/src/ssa_execution.rs",
+    "changed_path_sha256": "1b9a2c09497988c79eb381614f48efaa0a7cda38c74710e0734bbc2b4ea0213f",
+    "default_enabled": true,
+    "diagnostic_control": "MNCS_SSA_REUSE_VALIDATED_INPUTS=0 disables the reuse fast path for matched A/B measurement.",
+    "implementation": "Retain validation provenance for externally validated SSA arguments and forward it across internal calls or CFG block arguments only when source and destination SSA types match exactly. Instruction outputs and execute_owned external inputs remain untrusted.",
+    "repository": "mncs-language",
+    "worktree": "/home/epi13/Documents/Projects/.worktrees/mncs-language-ssa-input-validation-20261009"
+  },
+  "candidate_full_target": {
+    "address_space_limit_bytes": 8589934592,
+    "cgroup_oom_kill_delta": "UNKNOWN_NOT_CAPTURED",
+    "execution_cpu_seconds": 8.70918900000001,
+    "execution_frames": 428080,
+    "execution_status": "BudgetExhausted",
+    "execution_wall_seconds": 8.752698607,
+    "failure": "execution step budget exhausted",
+    "frame_input_totals": {
+      "arguments": 1636126,
+      "frames": 428080,
+      "normalization_ns": 35731991,
+      "reused_validated_arguments": 1013953,
+      "validation_ns": 6134379970,
+      "value_map_init_ns": 51893361,
+      "value_slots": 22722861
+    },
+    "frame_setup_seconds": 6.491485596,
+    "harness_child_cpu_seconds": 189.9,
+    "harness_max_file_descriptors": 4,
+    "harness_max_sampled_rss_kib": 2329048,
+    "harness_wall_seconds": 191.02427698404063,
+    "instructions": 5738013,
+    "mode": "candidate-only complete target attempt after the matched prefix repeats in the same bounded harness process.",
+    "nested_call_execution_inclusive_seconds": 112.625527052,
+    "raw_measurement_sha256": "18ae27e5f785a29649fc2213a883d04af7009823d68c8eba27984ff7a6092ea3",
+    "returned_artifact_path": null,
+    "returned_artifact_sha256": null,
+    "returned_values": 0,
+    "semantic_result": "UNKNOWN_NO_COMPILER_RESULT",
+    "step_budget": 8000000,
+    "steps": 8000000,
+    "wall_timeout_seconds": 300
+  },
+  "input": {
+    "bootstrap_overlay_sha256": "1b9a2c09497988c79eb381614f48efaa0a7cda38c74710e0734bbc2b4ea0213f",
+    "compiler_module_source_identity_sha256": "ab9c93a32a7dad14fe4a0cb32995043f6b9322bb1b2ce2589b2d8bcdb567eb18",
+    "compiler_repository_revision": "422c84460b0af958fab1203ce1c89ba9ed8db89f",
+    "extracted_program_bytes": 150545179,
+    "extracted_program_sha256": "ba930faf0dbacbd95b6b5ab752c48d9105de21af7f427feb50478900edf14497",
+    "harness_source_sha256": {
+      "extract_program_py": "f45205404834746eaa098226750a370859cae84efd331b03bdbf8ad5c14c61c6",
+      "main_rs": "f1cf5a2cc1e6b45fa123f4d7f5d5d50ed9f36fd85e17a35e3d9a9c4a44c2b488",
+      "measure_py": "c3cd9f929774f380475c444e3444b88f72be75d4f8867fb4c8f506339aa53a7a"
+    },
+    "language_candidate_source_sha256": "1b9a2c09497988c79eb381614f48efaa0a7cda38c74710e0734bbc2b4ea0213f",
+    "modules": [
+      "decl.mncs",
+      "flow.mncs",
+      "lexer.mncs",
+      "parser.mncs",
+      "segment.mncs",
+      "source.mncs"
+    ],
+    "page_count": 891,
+    "page_width": 1024,
+    "source_bytes": 908630,
+    "source_target_module": "flow.mncs",
+    "stage0_program_cache_key": "152e0584e07104f94a68e98581bbc61d31b8fc9db5640694d82643e939f5f292",
+    "stage0_program_cache_sha256": "95d31c6bf155a774e68e1b6e964fb0ecabf1d85c611073ab8050cdd9df55d636",
+    "stage0_revision": "b05dfa2b91541e4bd4a75aecff6abdedd708608e",
+    "target": "mncs.compiler.project.v1::compile_project_target<1024,1024>"
+  },
+  "interpretation": {
+    "claim": "On this real Flow compiler-source prefix and exact retained execution state, forwarding type-checked validation provenance reduced median 50k-prefix runtime from about 24.84 s to about 0.052 s while preserving the same BudgetExhausted status and step count.",
+    "does_not_prove": [
+      "whole Flow compilation result",
+      "native parse/check/proof/CFG/verified SSA for flow.mncs",
+      "executable code",
+      "canonical VM conformance",
+      "Stage-1",
+      "Stage-2"
+    ],
+    "remaining_observation": "The candidate also exhausted the unchanged 8,000,000-step full-target cap after 428,080 frames and 5,738,013 instructions. The measured input validation path improved; the remaining compiler work and semantic result are UNKNOWN."
+  },
+  "kind": "mncs.compiler.ssa-runtime.validated-input-reuse",
+  "matched_prefix_ab": {
+    "address_space_limit_bytes": 8589934592,
+    "baseline_candidate": {
+      "baseline": {
+        "execution_cpu_median_seconds": 24.761924000000008,
+        "execution_cpu_seconds": [
+          24.752924000000007,
+          24.770924000000008
+        ],
+        "execution_statuses": [
+          "BudgetExhausted",
+          "BudgetExhausted"
+        ],
+        "execution_wall_median_seconds": 24.841148493,
+        "execution_wall_seconds": [
+          24.8315867,
+          24.850710286
+        ],
+        "frame_input_totals": [
+          {
+            "arguments": 8102,
+            "frames": 2190,
+            "normalization_ns": 14119430595,
+            "reused_validated_arguments": 0,
+            "validation_ns": 5657155541,
+            "value_map_init_ns": 3266099,
+            "value_slots": 91658
+          },
+          {
+            "arguments": 8102,
+            "frames": 2190,
+            "normalization_ns": 14152072823,
+            "reused_validated_arguments": 0,
+            "validation_ns": 5656216196,
+            "value_map_init_ns": 3284631,
+            "value_slots": 91658
+          }
+        ],
+        "frame_setup_seconds": [
+          19.787518766,
+          19.81918679
+        ],
+        "repeat_count": 2,
+        "runtime_profile_totals_seconds": [
+          24.829525962,
+          24.848868358
+        ],
+        "step_counts": [
+          50000,
+          50000
+        ]
+      },
+      "candidate": {
+        "execution_cpu_median_seconds": 0.051435999999995374,
+        "execution_cpu_seconds": [
+          0.051653000000015936,
+          0.05121899999997481
+        ],
+        "execution_statuses": [
+          "BudgetExhausted",
+          "BudgetExhausted"
+        ],
+        "execution_wall_median_seconds": 0.0515818005,
+        "execution_wall_seconds": [
+          0.051803533,
+          0.051360068
+        ],
+        "frame_input_totals": [
+          {
+            "arguments": 8102,
+            "frames": 2190,
+            "normalization_ns": 17187095,
+            "reused_validated_arguments": 4368,
+            "validation_ns": 9374157,
+            "value_map_init_ns": 262059,
+            "value_slots": 91658
+          },
+          {
+            "arguments": 8102,
+            "frames": 2190,
+            "normalization_ns": 17015668,
+            "reused_validated_arguments": 4368,
+            "validation_ns": 9496303,
+            "value_map_init_ns": 262810,
+            "value_slots": 91658
+          }
+        ],
+        "frame_setup_seconds": [
+          0.028111669,
+          0.028093937
+        ],
+        "repeat_count": 2,
+        "runtime_profile_totals_seconds": [
+          0.049851563,
+          0.049500228
+        ],
+        "step_counts": [
+          50000,
+          50000
+        ]
+      }
+    },
+    "baseline_to_candidate_execution_wall_median_ratio": 481.5874640320087,
+    "cgroup_oom_kill_delta": "UNKNOWN_NOT_CAPTURED",
+    "harness_child_cpu_seconds": 183.14,
+    "harness_exit_code": 0,
+    "harness_max_file_descriptors": 4,
+    "harness_max_sampled_rss_kib": 2329024,
+    "harness_wall_seconds": 184.5174578570295,
+    "mode": "same candidate executable, decoded Program, lowered SsaModule, ExecutionRequest, and retained SsaExecutionSession; paired order candidate, baseline, baseline, candidate.",
+    "raw_measurement_sha256": "ae4703b2f5cd63e3d3172b6456b499238f91127588f1174fafc445097f03ac0d",
+    "semantic_result": "UNKNOWN_NO_COMPILER_RESULT",
+    "setup_seconds": {
+      "program_decode": 30.476807796,
+      "program_to_ssa": 97.66823189,
+      "request_build": 0.007305334,
+      "retained_session_prepare": 6.14070977
+    },
+    "step_budget_per_run": 50000,
+    "wall_timeout_seconds": 300
+  },
+  "observed_at": "2026-10-09T11:06:58Z",
+  "schema_version": "mncs.language.ssa-runtime-measurement/1",
+  "status": "measured-incomplete",
+  "validation": {
+    "changed_file_clippy_diagnostics": 0,
+    "clippy_command": "cargo clippy -p mncs-model --all-targets -- -D warnings",
+    "clippy_status": "FAIL_PREEXISTING_WARNINGS",
+    "clippy_warning_count": 22,
+    "clippy_warning_owners": [
+      "crates/mncs-model/src/compiler.rs",
+      "crates/mncs-model/src/execution.rs",
+      "crates/mncs-model/src/process_runtime.rs"
+    ],
+    "command": "cargo test -p mncs-model",
+    "status": "PASS",
+    "unit_tests_failed": 0,
+    "unit_tests_passed": 212
+  }
+}

@@ -12,15 +12,15 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::execution::{
-    compare_floats, compare_integers, evaluate_float, evaluate_integer, execution_value_summary,
-    integer_operator_supported, ExecutionEffectEvent,
+    ExecutionEffectEvent, compare_floats, compare_integers, evaluate_float, evaluate_integer,
+    execution_value_summary, integer_operator_supported,
 };
 use crate::identity::{function_id, program_id};
 use crate::{
-    execute_with_policy, BodyType, EvidenceReceipt, EvidenceReceiptOutcome, ExecutionCorpus,
-    ExecutionFailure, ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionValue,
-    HostGrant, IntegerType, Program, SemanticId, SsaBlock, SsaFunction, SsaInstruction,
-    SsaInstructionKind, SsaModule, SsaTerminator, MAX_EXECUTION_BUDGET,
+    BodyType, EvidenceReceipt, EvidenceReceiptOutcome, ExecutionCorpus, ExecutionFailure,
+    ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionValue, HostGrant, IntegerType,
+    MAX_EXECUTION_BUDGET, Program, SemanticId, SsaBlock, SsaFunction, SsaInstruction,
+    SsaInstructionKind, SsaModule, SsaTerminator, execute_with_policy,
 };
 
 pub const SSA_EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
@@ -36,6 +36,7 @@ type BlockIndex = HashMap<SemanticId, usize>;
 struct ValueMap<'a> {
     slots: &'a HashMap<SemanticId, usize>,
     values: Vec<Option<ExecutionValue>>,
+    validated_values: Vec<bool>,
     overflow: HashMap<SemanticId, ExecutionValue>,
     current_output: Option<(*const SemanticId, usize)>,
 }
@@ -45,6 +46,7 @@ impl<'a> ValueMap<'a> {
         Self {
             slots,
             values: (0..slots.len()).map(|_| None).collect(),
+            validated_values: vec![false; slots.len()],
             overflow: HashMap::new(),
             current_output: None,
         }
@@ -71,12 +73,34 @@ impl<'a> ValueMap<'a> {
         self.values.get(slot).and_then(Option::as_ref)
     }
 
+    fn validated_slot(&self, slot: usize) -> bool {
+        self.validated_values.get(slot).copied().unwrap_or(false)
+    }
+
+    fn validated(&self, key: &SemanticId) -> bool {
+        self.slots
+            .get(key)
+            .is_some_and(|slot| self.validated_slot(*slot))
+    }
+
     fn insert_ref(&mut self, key: &SemanticId, value: ExecutionValue) {
+        self.insert_ref_with_validation(key, value, false);
+    }
+
+    fn insert_ref_with_validation(
+        &mut self,
+        key: &SemanticId,
+        value: ExecutionValue,
+        validated: bool,
+    ) {
         let key_pointer = key as *const SemanticId;
         if let Some((candidate, slot)) = self.current_output {
             if candidate == key_pointer {
                 if let Some(cell) = self.values.get_mut(slot) {
                     *cell = Some(value);
+                    if let Some(state) = self.validated_values.get_mut(slot) {
+                        *state = validated;
+                    }
                     return;
                 }
             }
@@ -84,6 +108,9 @@ impl<'a> ValueMap<'a> {
         if let Some(slot) = self.slots.get(key).copied() {
             if let Some(cell) = self.values.get_mut(slot) {
                 *cell = Some(value);
+                if let Some(state) = self.validated_values.get_mut(slot) {
+                    *state = validated;
+                }
                 return;
             }
         }
@@ -93,7 +120,11 @@ impl<'a> ValueMap<'a> {
     fn remove(&mut self, key: &SemanticId) -> Option<ExecutionValue> {
         if let Some(slot) = self.slots.get(key).copied() {
             if let Some(cell) = self.values.get_mut(slot) {
-                return cell.take();
+                let removed = cell.take();
+                if let Some(state) = self.validated_values.get_mut(slot) {
+                    *state = false;
+                }
+                return removed;
             }
         }
         self.overflow.remove(key)
@@ -130,6 +161,10 @@ fn runtime_profile_stage(stage: &str, started: Instant) {
 struct RuntimeProfile {
     #[serde(skip)]
     enabled: bool,
+    /// Diagnostic A/B switch; normal execution enables the validated-input
+    /// fast path, while `MNCS_SSA_REUSE_VALIDATED_INPUTS=0` retains the
+    /// previous per-call validation behavior for matched measurements.
+    reuse_validated_inputs: bool,
     #[serde(skip)]
     started: Instant,
     execution_frames: u64,
@@ -141,6 +176,7 @@ struct RuntimeProfile {
     instruction_kind_ns: BTreeMap<String, u128>,
     non_call_instruction_ns: u128,
     frame_setup_ns: u128,
+    frame_inputs: BTreeMap<String, FrameInputProfile>,
     nested_calls: u64,
     nested_call_setup_ns: u128,
     nested_call_execution_ns: u128,
@@ -158,10 +194,33 @@ struct RuntimeProfile {
     trace_ns: u128,
 }
 
+#[derive(Debug, Default, Serialize)]
+struct FrameInputProfile {
+    frames: u64,
+    arguments: u64,
+    reused_validated_arguments: u64,
+    value_slots: u64,
+    value_map_init_ns: u128,
+    validation_ns: u128,
+    normalization_ns: u128,
+}
+
+#[derive(Debug, Default)]
+struct FrameInputSample {
+    arguments: usize,
+    reused_validated_arguments: usize,
+    value_slots: usize,
+    value_map_init_ns: u128,
+    validation_ns: u128,
+    normalization_ns: u128,
+}
+
 impl RuntimeProfile {
     fn new() -> Self {
         Self {
             enabled: std::env::var_os("MNCS_RUNTIME_PROFILE").is_some(),
+            reuse_validated_inputs: std::env::var("MNCS_SSA_REUSE_VALIDATED_INPUTS")
+                .map_or(true, |value| value != "0"),
             started: Instant::now(),
             execution_frames: 0,
             instructions: 0,
@@ -172,6 +231,7 @@ impl RuntimeProfile {
             instruction_kind_ns: BTreeMap::new(),
             non_call_instruction_ns: 0,
             frame_setup_ns: 0,
+            frame_inputs: BTreeMap::new(),
             nested_calls: 0,
             nested_call_setup_ns: 0,
             nested_call_execution_ns: 0,
@@ -285,6 +345,21 @@ impl RuntimeProfile {
         Self::add_elapsed(&mut self.sequence_copy_ns, started);
     }
 
+    fn record_frame_inputs(&mut self, target: FrameTarget<'_>, sample: FrameInputSample) {
+        if !self.enabled {
+            return;
+        }
+        let key = format!("{}::{}", target.module, target.function);
+        let entry = self.frame_inputs.entry(key).or_default();
+        entry.frames += 1;
+        entry.arguments += sample.arguments as u64;
+        entry.reused_validated_arguments += sample.reused_validated_arguments as u64;
+        entry.value_slots += sample.value_slots as u64;
+        entry.value_map_init_ns += sample.value_map_init_ns;
+        entry.validation_ns += sample.validation_ns;
+        entry.normalization_ns += sample.normalization_ns;
+    }
+
     fn emit(&self, result: &SsaExecutionResult) {
         if !self.enabled {
             return;
@@ -384,6 +459,21 @@ struct PreparedSsaInstruction {
 struct PreparedCallTarget {
     prepared_index: usize,
     program_index: Option<usize>,
+    arguments_type_match: bool,
+}
+
+/// A value forwarded across an internal call. `validated` is set only after
+/// a public request value passed the full dynamic check, or when that proof
+/// is forwarded through a statically type-matched call/block parameter.
+struct ForwardedSsaArgument {
+    value: ExecutionValue,
+    validated: bool,
+}
+
+struct SsaInputSpec<'a> {
+    function: &'a SsaFunction,
+    input_types: &'a [BodyType],
+    value_slots: &'a HashMap<SemanticId, usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -478,9 +568,31 @@ impl PreparedSsaProgram {
                                         .position(|candidate| {
                                             candidate.semantic_identity == *function
                                         })
-                                        .map(|prepared_index| PreparedCallTarget {
-                                            prepared_index,
-                                            program_index: program_indices.get(function).copied(),
+                                        .map(|prepared_index| {
+                                            let callee = &module.functions[prepared_index];
+                                            let arguments_type_match = instruction.inputs.len()
+                                                == callee.inputs.len()
+                                                && instruction
+                                                    .inputs
+                                                    .iter()
+                                                    .zip(&callee.inputs)
+                                                    .all(|(argument, input)| {
+                                                        value_types.get(argument).is_some_and(
+                                                            |argument_type| {
+                                                                argument_type
+                                                                    == &ssa_input_type(
+                                                                        program, &input.ty,
+                                                                    )
+                                                            },
+                                                        )
+                                                    });
+                                            PreparedCallTarget {
+                                                prepared_index,
+                                                program_index: program_indices
+                                                    .get(function)
+                                                    .copied(),
+                                                arguments_type_match,
+                                            }
                                         }),
                                     _ => None,
                                 },
@@ -942,7 +1054,15 @@ impl SsaExecutionSession {
                 &self.program_fingerprint,
                 &self.module_fingerprint,
             )),
-            Some(arguments),
+            Some(
+                arguments
+                    .into_iter()
+                    .map(|value| ForwardedSsaArgument {
+                        value,
+                        validated: false,
+                    })
+                    .collect(),
+            ),
             0,
             None,
             Some(&self.process_runtime),
@@ -963,7 +1083,7 @@ fn execute_ssa_module_with_validation(
     prepared: Option<&PreparedSsaProgram>,
     direct_function: Option<&SemanticId>,
     cached_identity: Option<(&SemanticId, &String, &String)>,
-    owned_arguments: Option<Vec<ExecutionValue>>,
+    owned_arguments: Option<Vec<ForwardedSsaArgument>>,
     call_depth: u64,
     provider_runtime: Option<&dyn crate::ProviderRuntime>,
     process_runtime: Option<&crate::process_runtime::ProcessRuntime>,
@@ -1174,7 +1294,7 @@ fn execute_prepared_function(
     prepared_function: &PreparedSsaFunction,
     request: &crate::ExecutionRequest,
     frame_target: FrameTarget<'_>,
-    owned_arguments: Option<Vec<ExecutionValue>>,
+    owned_arguments: Option<Vec<ForwardedSsaArgument>>,
     result: &mut SsaExecutionResult,
     call_depth: u64,
     trace_limit: usize,
@@ -1199,13 +1319,16 @@ fn execute_prepared_function(
     let frame_setup_started = profile.mark();
     let mut values = initialize_inputs(
         program,
-        function,
-        &prepared_function.input_types,
-        &prepared_function.value_slots,
+        SsaInputSpec {
+            function,
+            input_types: &prepared_function.input_types,
+            value_slots: &prepared_function.value_slots,
+        },
         request,
         frame_target,
         result,
         owned_arguments,
+        profile,
     )?;
     let value_types = &prepared_function.value_types;
     let block_indices = &prepared_function.block_indices;
@@ -1287,7 +1410,7 @@ fn execute_prepared_function(
                 &mut values,
                 &prepared_instruction.input_slots,
                 &prepared_instruction.output_slots,
-                prepared_instruction.call_target,
+                prepared_instruction.call_target.as_ref(),
                 value_types,
                 result,
                 request,
@@ -1370,8 +1493,15 @@ fn execute_prepared_function(
                 return Some(returned_values);
             }
             SsaTerminator::Branch { target, arguments } => {
-                if !assign_block_arguments(function, block_indices, target, arguments, &mut values)
-                {
+                if !assign_block_arguments(
+                    function,
+                    block_indices,
+                    value_types,
+                    target,
+                    arguments,
+                    profile.reuse_validated_inputs,
+                    &mut values,
+                ) {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         block.semantic_identity.clone(),
@@ -1401,8 +1531,15 @@ fn execute_prepared_function(
                 } else {
                     (else_target, else_arguments)
                 };
-                if !assign_block_arguments(function, block_indices, target, arguments, &mut values)
-                {
+                if !assign_block_arguments(
+                    function,
+                    block_indices,
+                    value_types,
+                    target,
+                    arguments,
+                    profile.reuse_validated_inputs,
+                    &mut values,
+                ) {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         block.semantic_identity.clone(),
@@ -1529,7 +1666,7 @@ fn execute_instruction(
     values: &mut ValueMap,
     input_slots: &[usize],
     output_slots: &[usize],
-    call_target: Option<PreparedCallTarget>,
+    call_target: Option<&PreparedCallTarget>,
     value_types: &HashMap<SemanticId, BodyType>,
     result: &mut SsaExecutionResult,
     request: &crate::ExecutionRequest,
@@ -3149,7 +3286,17 @@ fn execute_instruction(
             let callee = &module.functions[prepared_callee.module_index];
             let Some(arguments) = input_slots
                 .iter()
-                .map(|input_slot| values.get_slot(*input_slot).cloned())
+                .map(|input_slot| {
+                    values
+                        .get_slot(*input_slot)
+                        .cloned()
+                        .map(|value| ForwardedSsaArgument {
+                            value,
+                            validated: profile.reuse_validated_inputs
+                                && call_target.arguments_type_match
+                                && values.validated_slot(*input_slot),
+                        })
+                })
                 .collect::<Option<Vec<_>>>()
             else {
                 result.fail(
@@ -4478,14 +4625,18 @@ fn aggregate_shape_note(
 
 fn initialize_inputs<'a>(
     program: &Program,
-    function: &SsaFunction,
-    input_types: &[BodyType],
-    value_slots: &'a HashMap<SemanticId, usize>,
+    input_spec: SsaInputSpec<'a>,
     request: &crate::ExecutionRequest,
     frame_target: FrameTarget<'_>,
     result: &mut SsaExecutionResult,
-    owned_arguments: Option<Vec<ExecutionValue>>,
+    owned_arguments: Option<Vec<ForwardedSsaArgument>>,
+    profile: &mut RuntimeProfile,
 ) -> Option<ValueMap<'a>> {
+    let SsaInputSpec {
+        function,
+        input_types,
+        value_slots,
+    } = input_spec;
     let argument_count = owned_arguments
         .as_ref()
         .map_or(request.arguments.len(), Vec::len);
@@ -4499,49 +4650,68 @@ fn initialize_inputs<'a>(
     }
     let mut owned_arguments =
         owned_arguments.map(|arguments| arguments.into_iter().map(Some).collect::<Vec<_>>());
+    let value_map_started = profile.mark();
     let mut values = ValueMap::new(value_slots);
+    let value_map_init_ns = value_map_started.map_or(0, |started| started.elapsed().as_nanos());
+    let mut validation_ns = 0;
+    let mut normalization_ns = 0;
+    let mut reused_validated_arguments = 0;
     for (index, input) in function.inputs.iter().enumerate() {
         let ty = input_types.get(index)?;
         if owned_arguments.is_some() {
             let argument = owned_arguments
                 .as_ref()
                 .and_then(|arguments| arguments.get(index).and_then(Option::as_ref))?;
-            if !value_matches_type(program, argument, &ty) {
-                let reason =
-                    abi_mismatch_reason(program, frame_target, function, index, &ty, argument);
-                result.fail(
-                    ExecutionStatus::InvalidRequest,
-                    Some(input.identity.clone()),
-                    reason,
-                );
-                return None;
-            }
-            if let ExecutionValue::Finite {
-                type_identity,
-                variant_identity,
-                discriminant,
-                ..
-            } = argument
-            {
-                if !crate::execution::valid_finite_value(
-                    program,
-                    type_identity,
-                    variant_identity,
-                    *discriminant,
-                ) {
+            if argument.validated {
+                reused_validated_arguments += 1;
+            } else {
+                let validation_started = profile.mark();
+                if !value_matches_type(program, &argument.value, ty) {
+                    let reason = abi_mismatch_reason(
+                        program,
+                        frame_target,
+                        function,
+                        index,
+                        ty,
+                        &argument.value,
+                    );
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         Some(input.identity.clone()),
-                        "finite argument has an invalid variant/discriminant",
+                        reason,
                     );
                     return None;
+                }
+                validation_ns +=
+                    validation_started.map_or(0, |started| started.elapsed().as_nanos());
+                if let ExecutionValue::Finite {
+                    type_identity,
+                    variant_identity,
+                    discriminant,
+                    ..
+                } = &argument.value
+                {
+                    if !crate::execution::valid_finite_value(
+                        program,
+                        type_identity,
+                        variant_identity,
+                        *discriminant,
+                    ) {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(input.identity.clone()),
+                            "finite argument has an invalid variant/discriminant",
+                        );
+                        return None;
+                    }
                 }
             }
         } else {
             let argument = request.arguments.get(index)?;
-            if !value_matches_type(program, argument, &ty) {
+            let validation_started = profile.mark();
+            if !value_matches_type(program, argument, ty) {
                 let reason =
-                    abi_mismatch_reason(program, frame_target, function, index, &ty, argument);
+                    abi_mismatch_reason(program, frame_target, function, index, ty, argument);
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     Some(input.identity.clone()),
@@ -4549,6 +4719,7 @@ fn initialize_inputs<'a>(
                 );
                 return None;
             }
+            validation_ns += validation_started.map_or(0, |started| started.elapsed().as_nanos());
             if let ExecutionValue::Finite {
                 type_identity,
                 variant_identity,
@@ -4572,17 +4743,37 @@ fn initialize_inputs<'a>(
             }
         }
         let normalized = if owned_arguments.is_some() {
-            normalize_value_owned(
-                program,
-                owned_arguments.as_mut()?.get_mut(index)?.take(),
-                &ty,
-            )?
+            let argument = owned_arguments.as_mut()?.get_mut(index)?.take()?;
+            if argument.validated {
+                argument.value
+            } else {
+                let normalization_started = profile.mark();
+                let normalized = normalize_value_owned(program, Some(argument.value), ty)?;
+                normalization_ns +=
+                    normalization_started.map_or(0, |started| started.elapsed().as_nanos());
+                normalized
+            }
         } else {
             let argument = request.arguments.get(index)?;
-            normalize_value(program, argument, &ty)?
+            let normalization_started = profile.mark();
+            let normalized = normalize_value(program, argument, ty)?;
+            normalization_ns +=
+                normalization_started.map_or(0, |started| started.elapsed().as_nanos());
+            normalized
         };
-        values.insert_ref(&input.identity, normalized);
+        values.insert_ref_with_validation(&input.identity, normalized, true);
     }
+    profile.record_frame_inputs(
+        frame_target,
+        FrameInputSample {
+            arguments: argument_count,
+            reused_validated_arguments,
+            value_slots: value_slots.len(),
+            value_map_init_ns,
+            validation_ns,
+            normalization_ns,
+        },
+    );
     Some(values)
 }
 
@@ -4613,8 +4804,10 @@ fn normalize_value_owned(
 fn assign_block_arguments(
     function: &SsaFunction,
     block_indices: &BlockIndex,
+    value_types: &HashMap<SemanticId, BodyType>,
     target: &SemanticId,
     arguments: &[SemanticId],
+    reuse_validated_inputs: bool,
     values: &mut ValueMap,
 ) -> bool {
     let Some(block_index) = block_indices.get(target).copied() else {
@@ -4628,13 +4821,24 @@ fn assign_block_arguments(
     }
     let Some(incoming) = arguments
         .iter()
-        .map(|argument| values.get(argument).cloned())
+        .zip(&block.parameters)
+        .map(|(argument, parameter)| {
+            let value = values.get(argument)?.clone();
+            let same_type = value_types
+                .get(argument)
+                .zip(value_types.get(&parameter.identity))
+                .is_some_and(|(source, target)| source == target);
+            Some((
+                value,
+                reuse_validated_inputs && same_type && values.validated(argument),
+            ))
+        })
         .collect::<Option<Vec<_>>>()
     else {
         return false;
     };
-    for (parameter, value) in block.parameters.iter().zip(incoming) {
-        values.insert_ref(&parameter.identity, value);
+    for (parameter, (value, validated)) in block.parameters.iter().zip(incoming) {
+        values.insert_ref_with_validation(&parameter.identity, value, validated);
     }
     true
 }
@@ -5422,7 +5626,10 @@ fn invalid_comparison(program: &Program, corpus: &ExecutionCorpus) -> LoweringEx
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BodyOperationKind, ExecutionTraceEntry};
+    use crate::{
+        BodyBlock, BodyCyclePolicy, BodyOperation, BodyOperationKind, BodyParameter,
+        BodyTerminator, BodyValue, ExecutionTraceEntry, FunctionBody, SequenceBound, Value,
+    };
 
     fn request_for(program: &Program, amount: i128) -> crate::ExecutionRequest {
         crate::ExecutionRequest {
@@ -5444,6 +5651,247 @@ mod tests {
             host_grants: Vec::new(),
             call_depth_budget: None,
         }
+    }
+
+    fn aggregate_call_program() -> (Program, SsaModule) {
+        let mut program = crate::body::tests::executable_program();
+        let sequence_type = BodyType::Sequence {
+            element: Box::new(BodyType::Byte),
+            bound: SequenceBound::Exact(4),
+        };
+        let length_type = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        let function_id = crate::identity::function_id(&program.module, "helper");
+
+        let caller = &mut program.functions[0];
+        caller.name = "caller".to_owned();
+        caller.inputs = vec![Value {
+            name: "items".to_owned(),
+            value_type: sequence_type.semantic_name(),
+        }];
+        caller.outputs = vec![Value {
+            name: "length".to_owned(),
+            value_type: length_type.semantic_name(),
+        }];
+        caller.body = Some(FunctionBody {
+            schema_version: crate::body::EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
+            entry: "entry".to_owned(),
+            parameters: vec![BodyParameter {
+                id: "items".to_owned(),
+                name: "items".to_owned(),
+                ty: sequence_type.clone(),
+            }],
+            generic_params: Vec::new(),
+            cycle_policy: BodyCyclePolicy::Legacy,
+            bounded_iterations: Vec::new(),
+            blocks: vec![BodyBlock {
+                id: "entry".to_owned(),
+                parameters: Vec::new(),
+                operations: vec![BodyOperation {
+                    id: "call_helper".to_owned(),
+                    kind: BodyOperationKind::Call {
+                        function: function_id,
+                        function_name: "helper".to_owned(),
+                        required_capabilities: Vec::new(),
+                        effects: Vec::new(),
+                        generic_args: Vec::new(),
+                        instantiation: None,
+                        specialization: None,
+                    },
+                    operands: vec!["items".to_owned()],
+                    results: vec![BodyValue {
+                        id: "length".to_owned(),
+                        ty: length_type.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                }],
+                terminator: BodyTerminator::Return {
+                    values: vec!["length".to_owned()],
+                },
+            }],
+        });
+
+        let mut helper = program.functions[0].clone();
+        helper.name = "helper".to_owned();
+        helper.body = Some(FunctionBody {
+            schema_version: crate::body::EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
+            entry: "entry".to_owned(),
+            parameters: vec![BodyParameter {
+                id: "items".to_owned(),
+                name: "items".to_owned(),
+                ty: sequence_type.clone(),
+            }],
+            generic_params: Vec::new(),
+            cycle_policy: BodyCyclePolicy::Legacy,
+            bounded_iterations: Vec::new(),
+            blocks: vec![BodyBlock {
+                id: "entry".to_owned(),
+                parameters: Vec::new(),
+                operations: vec![BodyOperation {
+                    id: "length".to_owned(),
+                    kind: BodyOperationKind::SequenceLength {
+                        bound: SequenceBound::Exact(4),
+                    },
+                    operands: vec!["items".to_owned()],
+                    results: vec![BodyValue {
+                        id: "length".to_owned(),
+                        ty: length_type.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                }],
+                terminator: BodyTerminator::Return {
+                    values: vec!["length".to_owned()],
+                },
+            }],
+        });
+        helper.inputs = vec![Value {
+            name: "items".to_owned(),
+            value_type: sequence_type.semantic_name(),
+        }];
+        helper.outputs = vec![Value {
+            name: "length".to_owned(),
+            value_type: length_type.semantic_name(),
+        }];
+        program.functions.push(helper);
+
+        let module = program.lower_to_ssa().expect("aggregate call SSA");
+        (program, module)
+    }
+
+    fn four_bytes_request(program: &Program) -> crate::ExecutionRequest {
+        crate::ExecutionRequest {
+            schema_version: crate::EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
+            target: crate::ExecutionTarget {
+                module: program.module.clone(),
+                function: "caller".to_owned(),
+            },
+            arguments: vec![ExecutionValue::Sequence {
+                values: Arc::new((0..4).map(|value| ExecutionValue::Byte { value }).collect()),
+            }],
+            step_budget: 16,
+            type_arguments: Vec::new(),
+            policy: crate::ExecutionPolicy::default(),
+            host_grants: Vec::new(),
+            call_depth_budget: None,
+        }
+    }
+
+    #[test]
+    fn ssa_internal_call_reuses_validated_aggregate_input() {
+        let (program, module) = aggregate_call_program();
+        let request = four_bytes_request(&program);
+        let mut profile = RuntimeProfile::new();
+        profile.enabled = true;
+        let result = execute_ssa_module_with_validation(
+            &program,
+            &module,
+            &request,
+            true,
+            None,
+            None,
+            None,
+            None,
+            0,
+            None,
+            None,
+            MAX_SSA_TRACE_ENTRIES,
+            &mut profile,
+        );
+
+        assert_eq!(result.status, ExecutionStatus::Returned, "{result:#?}");
+        assert_eq!(result.returned.len(), 1);
+        assert!(matches!(
+            result.returned[0],
+            ExecutionValue::Integer {
+                value: 4,
+                ty: IntegerType {
+                    bits: 64,
+                    signed: false,
+                }
+            }
+        ));
+        assert_eq!(
+            execute_with_policy(&program, &request).returned,
+            result.returned
+        );
+
+        let helper = &program.functions[1];
+        let helper_profile = profile
+            .frame_inputs
+            .get(&format!(
+                "{}::helper",
+                helper.identity_namespace(&program.module)
+            ))
+            .expect("helper input profile");
+        assert_eq!(helper_profile.frames, 1);
+        assert_eq!(helper_profile.arguments, 1);
+        assert_eq!(helper_profile.reused_validated_arguments, 1);
+        assert_eq!(helper_profile.validation_ns, 0);
+        assert_eq!(helper_profile.normalization_ns, 0);
+    }
+
+    #[test]
+    fn ssa_owned_external_arguments_remain_untrusted() {
+        let (program, module) = aggregate_call_program();
+        let mut request = four_bytes_request(&program);
+        request.arguments[0] = ExecutionValue::Sequence {
+            values: Arc::new(vec![ExecutionValue::Integer {
+                value: 4,
+                ty: IntegerType {
+                    bits: 32,
+                    signed: true,
+                },
+            }]),
+        };
+        let session = SsaExecutionSession::new(&program, &module).expect("session");
+        let result = session.execute_owned(request);
+        assert_eq!(result.status, ExecutionStatus::InvalidRequest);
+        assert!(result.failure.as_ref().is_some_and(|failure| {
+            failure
+                .reason
+                .contains("argument does not match SSA input type")
+        }));
+    }
+
+    #[test]
+    fn ssa_instruction_outputs_do_not_inherit_input_validation() {
+        let identity = SemanticId("output".to_owned());
+        let slots = HashMap::from([(identity.clone(), 0)]);
+        let mut values = ValueMap::new(&slots);
+        values.insert_ref_with_validation(
+            &identity,
+            ExecutionValue::Integer {
+                value: 1,
+                ty: IntegerType {
+                    bits: 32,
+                    signed: true,
+                },
+            },
+            true,
+        );
+        assert!(values.validated(&identity));
+
+        values.insert_ref(
+            &identity,
+            ExecutionValue::Integer {
+                value: 2,
+                ty: IntegerType {
+                    bits: 32,
+                    signed: true,
+                },
+            },
+        );
+        assert!(!values.validated(&identity));
     }
 
     #[test]
@@ -5527,9 +5975,11 @@ mod tests {
 
         let receipt = session.validation_receipt();
         assert!(receipt.identity_is_valid());
-        assert!(receipt
-            .dependencies
-            .contains_key(&program_id(&program_a.module)));
+        assert!(
+            receipt
+                .dependencies
+                .contains_key(&program_id(&program_a.module))
+        );
         let mut tampered_receipt = receipt.clone();
         tampered_receipt
             .scope
