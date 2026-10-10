@@ -11,7 +11,7 @@ pub const SOURCE_ENVELOPE_SCHEMA_VERSION: &str = "0.1";
 // existing `mncs_syntax::SOURCE_PROFILE_VERSION_0_4` paths keep working.
 pub use crate::profile::{
     profile_at_least, source_profile_supported, SOURCE_PROFILE_VERSION_0_13,
-    SOURCE_PROFILE_VERSION_0_17, SOURCE_PROFILE_VERSION_0_18,
+    SOURCE_PROFILE_VERSION_0_17, SOURCE_PROFILE_VERSION_0_18, SOURCE_PROFILE_VERSION_0_19,
 };
 use crate::profile::{
     SOURCE_PROFILE_VERSION, SOURCE_PROFILE_VERSION_0_10, SOURCE_PROFILE_VERSION_0_11,
@@ -5569,6 +5569,7 @@ fn infer_source_profile(text: &str) -> &'static str {
     });
     match header {
         Some(line) if line.trim_start().starts_with("mncs 1.0") => SOURCE_PROFILE_VERSION_1_0,
+        Some(line) if line.trim_start().starts_with("mncs 0.19") => SOURCE_PROFILE_VERSION_0_19,
         Some(line) if line.trim_start().starts_with("mncs 0.18") => SOURCE_PROFILE_VERSION_0_18,
         Some(line) if line.trim_start().starts_with("mncs 0.17") => SOURCE_PROFILE_VERSION_0_17,
         Some(line) if line.trim_start().starts_with("mncs 0.16") => SOURCE_PROFILE_VERSION_0_16,

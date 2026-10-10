@@ -18,7 +18,7 @@ def main() -> None:
     subprocess.run([sys.executable, str(ROOT / "scripts/generate_language_capabilities.py")], check=True)
     value = json.loads(INDEX.read_text(encoding="utf-8"))
     assert value["schema_version"] == "mncs.language-capabilities/1"
-    assert value["current_profile"] == "0.18"
+    assert value["current_profile"] == "0.19"
     assert value["library_modules"]
     assert value["examples"]
     assert any(module["imports"] for module in value["library_modules"])

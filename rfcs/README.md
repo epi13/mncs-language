@@ -63,3 +63,4 @@ RFC acceptance does not imply production stability. The repository remains pre-s
 - [RFC 0046: Machine-Native Cost, Reuse, and Evidence-Efficiency Tranche](0046-machine-native-cost-reuse-and-evidence-efficiency.md)
 - [RFC 0047: Provably Terminating Structural Recursion over Finite Values](0047-machine-native-structural-recursion-finite-values.md)
 - [RFC 0048: MNCS-native JIT / execution orchestration architecture](0048-mncs-native-jit-execution-architecture.md)
+- [RFC 0049: Source Profile 0.19 — bounded sequence capacity](0049-machine-native-source-profile-0-19-bounded-sequence-capacity.md)

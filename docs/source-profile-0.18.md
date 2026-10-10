@@ -1,7 +1,8 @@
 # Source Profile 0.18 — typed structured artifacts
 
-Status: **implemented, experimental (current)**. Profile 0.18 is additive
-over Profile 0.17. Profiles 0.1–0.17 remain sealed.
+Status: **implemented, experimental (sealed)**. Profile 0.18 is additive
+over Profile 0.17. Profiles 0.1–0.17 remain sealed. Profile 0.19 preserves
+these semantics and raises only the bounded sequence capacity.
 
 ## Purpose
 

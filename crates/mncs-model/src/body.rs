@@ -42,14 +42,13 @@ pub const MODEL_MAX_ITERATION_BOUND: u32 = 1024;
 pub const SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND: u32 = MODEL_MAX_ITERATION_BOUND;
 /// Absolute model ceiling for sequence lengths and view capacities.
 /// Admission policy lives in the `mncs-syntax` registry (64 through
-/// Profile 0.12, 1024 in Profile 0.13). Bounds are semantic facts carried
-/// by types, so they must stay small enough to remain machine-checkable
-/// everywhere: 1024 keeps one i64 axis to 8 KiB on the stack-backed native
-/// emitters, stays far inside the 16 MiB composite cell arena, and fits
-/// comfortably in WASM linear memory. Larger shapes compose from these
-/// (records of sequences, nested sequences); genuinely unbounded growth
-/// stays out of scope under deterministic allocation.
-pub const MODEL_MAX_SEQUENCE_BOUND: u32 = 1024;
+/// Profile 0.12, 1024 in Profiles 0.13–0.18, and 4096 in Profile 0.19).
+/// Bounds remain finite semantic facts. A 4096-element i64 axis is 32 KiB;
+/// the 16 MiB composite-cell arena and WASM linear-memory envelope remain
+/// unchanged. Iteration budgets and nesting are separately bounded.
+/// Genuinely unbounded growth stays out of scope under deterministic
+/// allocation.
+pub const MODEL_MAX_SEQUENCE_BOUND: u32 = 4096;
 /// Historical name for [`MODEL_MAX_SEQUENCE_BOUND`]. Kept so existing
 /// consumers keep compiling; new code should use the honest name and read
 /// admitted ceilings from the `mncs-syntax` registry.

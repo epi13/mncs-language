@@ -1,0 +1,37 @@
+{
+  "artifact_kind": "mncs.capability_gap",
+  "contract_revision": "0.1",
+  "gap_id": "MNCS-LANG-ENV-VALUE-1447",
+  "producer": "mncs-language-stage0",
+  "compiler_identity": "mncs-language e8f8a5f; Stage-0, Profile 0.18",
+  "source_revision": "e8f8a5f8659c71b33cd32c964d4982bec1a9668e",
+  "source_artifact": "mncs-forge:src/mncs_forge/process_effect.py",
+  "source_location": "<local-path>/process_effect.py",
+  "requested_semantics": "The typed process boundary accepts and preserves one 1447-byte environment value while keeping the aggregate key/value budget at 64 KiB.",
+  "obstruction": "typing",
+  "active_profile": "0.18",
+  "backends": [
+    "mncs-research-bytecode"
+  ],
+  "closest_supported_semantics": "Profile 0.18 EnvironmentEntry.value is bounded to 1024 bytes; the host process runtime separately permits at most 64 KiB of aggregate key/value bytes.",
+  "reproducer": "A Forge process-effect request carries PATH with 1447 bytes. MNCS typed argument validation reports: sequence exceeds capacity 1024, received 1447. The child is not started.",
+  "protected_properties": [
+    "environment value bytes are preserved exactly and never truncated",
+    "the total environment key/value payload remains bounded to 65536 bytes",
+    "older source profiles retain their declared sequence ceilings"
+  ],
+  "approximation_prohibited": true,
+  "evidence_requirements": [
+    "Profile 0.18 continues to reject sequence bounds above 1024",
+    "Profile 0.19 accepts a bounded byte view of 4096",
+    "a typed process request preserves the exact 1447-byte value",
+    "the child result remains distinct from admission and UNKNOWN is not a semantic pass",
+    "Forge receipt integration consumes the selected Profile 0.19 language artifacts"
+  ],
+  "status": "FAIL",
+  "unresolved_fields": [
+    "the child execution result for the 1447-byte request was not established in the restricted systemd/cgroup environment",
+    "backend-specific executable conformance for 4096-capacity sequences remains unestablished"
+  ],
+  "identity": "mncs:0.2:capability-gap:fe7ee6dc0cb77b8415b03c7a218277a1984da17a36b4db1f00ebabaf224e6dfa"
+}

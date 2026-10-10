@@ -362,6 +362,25 @@ mod tests {
     }
 
     #[test]
+    fn process_environment_value_fixture_round_trips() {
+        let raw = include_str!(
+            "../../../examples/capability-gaps/process-environment-value-1447.json"
+        );
+        let gap: CapabilityGap = serde_json::from_str(raw).expect("fixture parses");
+        assert!(gap.verify_identity().is_ok());
+        assert_eq!(gap.gap_id, "MNCS-LANG-ENV-VALUE-1447");
+        assert_eq!(gap.obstruction, GapObstruction::Typing);
+        assert_eq!(gap.active_profile, "0.18");
+        assert_eq!(gap.status, GapStatus::Fail);
+        assert!(gap.approximation_prohibited);
+        assert_eq!(
+            gap.identity.as_str(),
+            "mncs:0.2:capability-gap:fe7ee6dc0cb77b8415b03c7a218277a1984da17a36b4db1f00ebabaf224e6dfa"
+        );
+        assert!(!gap.source_location.contains("/home/"));
+    }
+
+    #[test]
     fn cranelift_far_relocation_gap_fixture_round_trips() {
         let raw = include_str!(
             "../../../examples/capability-gaps/cranelift-x86_64-jit-far-relocations.json"

@@ -4760,7 +4760,8 @@ impl<'a> BodyBuilder<'a> {
                 }
                 let ceiling = bound.ceiling();
                 // Admitted sequence ceiling comes from profile policy (RFC
-                // 0036): 64 through Profile 0.12, 1024 in 0.13. Generic
+                // 0036/0049): 64 through Profile 0.12, 1024 in Profiles
+                // 0.13–0.18, and 4096 in Profile 0.19. Generic
                 // bounds defer the admitted check to instantiation: a
                 // `[T; N]` traversal is admitted here against the absolute
                 // model ceiling (which `Param` reports by construction) and
@@ -4818,7 +4819,8 @@ impl<'a> BodyBuilder<'a> {
                     return;
                 };
                 // Admitted per-level ceiling comes from profile policy (RFC
-                // 0036): 1..=32 through Profile 0.12, 1..=1024 in 0.13.
+                // 0036): 1..=32 through Profile 0.12 and 1..=1024 in
+                // Profiles 0.13 onward (Profile 0.19 leaves this limit unchanged).
                 let ceiling =
                     mncs_syntax::max_iteration_bound_for(&self.source_profile).unwrap_or(0);
                 if bound_u32 == 0 || bound_u32 > ceiling {
@@ -11315,8 +11317,9 @@ fn view_widen_dimensions(actual: &BodyType, expected: &BodyType) -> Option<(u32,
 }
 
 /// Admitted sequence/view length ceiling for source spelling resolution
-/// under `ast`'s profile (RFC 0036): 64 through Profile 0.12, 1024 in
-/// Profile 0.13. Unknown profiles fail closed to zero.
+/// under `ast`'s profile (RFC 0036/0049): 64 through Profile 0.12, 1024 in
+/// Profiles 0.13–0.18, and 4096 in Profile 0.19. Unknown profiles fail closed
+/// to zero.
 fn admitted_sequence_ceiling(ast: &AbstractSyntaxTree) -> u32 {
     mncs_syntax::max_sequence_bound_for(&ast.language_version.text).unwrap_or(0)
 }

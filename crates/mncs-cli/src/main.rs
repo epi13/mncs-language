@@ -31,7 +31,8 @@ use mncs_embed::{
     ProviderRegistry, Session as EmbedSession,
 };
 use mncs_model::{
-    compare_body_and_ssa, compare_execution, execute_observed, execute_ssa, execute_with_policy,
+    process::MAX_ENVIRONMENT_BYTES, compare_body_and_ssa, compare_execution, execute_observed,
+    execute_ssa, execute_with_policy,
     ArtifactRepresentation, CandidateEvaluation, CausalSlice, ComparisonStatus, CompilationResult,
     CompilationStatus, CompilationStudyRequest, CompilationStudyResult, Confidence,
     DeterministicVerifier, DiagnosticCategory, DiagnosticObligation, EvidenceFreshness,
@@ -565,8 +566,37 @@ where
 const NATIVE_APPLICATION_DESCRIPTOR_SCHEMA_VERSION: &str = "mncs.native-application/1";
 const APPLICATION_CONTEXT_MAX_ARGV: usize = PROCESS_LAUNCH_VECTOR_CAPACITY;
 const APPLICATION_CONTEXT_MAX_ENVIRONMENT: usize = PROCESS_LAUNCH_VECTOR_CAPACITY;
+const APPLICATION_CONTEXT_MAX_ENVIRONMENT_VALUE_BYTES: usize = 4096;
+const APPLICATION_CONTEXT_MAX_ENVIRONMENT_BYTES: usize = MAX_ENVIRONMENT_BYTES;
 const APPLICATION_CONTEXT_MAX_STDIN: usize = 1024;
 const APPLICATION_CONTEXT_MAX_CWD: usize = 1024;
+
+fn validate_application_environment_limits(
+    environment: &[(Vec<u8>, Vec<u8>)],
+) -> Result<(), String> {
+    if environment.len() > APPLICATION_CONTEXT_MAX_ENVIRONMENT {
+        return Err(format!(
+            "environment exceeds the {}-entry bound",
+            APPLICATION_CONTEXT_MAX_ENVIRONMENT
+        ));
+    }
+    let environment_bytes = environment
+        .iter()
+        .map(|(key, value)| key.len().saturating_add(value.len()))
+        .fold(0usize, usize::saturating_add);
+    if environment_bytes > APPLICATION_CONTEXT_MAX_ENVIRONMENT_BYTES {
+        return Err("environment exceeds its 65536-byte aggregate bound".to_owned());
+    }
+    if environment.iter().any(|(key, value)| {
+        key.is_empty()
+            || key.len() > 64
+            || value.len() > APPLICATION_CONTEXT_MAX_ENVIRONMENT_VALUE_BYTES
+            || key.contains(&b'=')
+    }) {
+        return Err("environment entry exceeds its bounded key/value contract".to_owned());
+    }
+    Ok(())
+}
 
 /// Repository-owned declaration consumed by the one generic application
 /// launcher.  It names an MNCS entrypoint and its dependency roots; it does
@@ -1271,27 +1301,19 @@ fn application_context_host_value(
         })
         .collect::<Vec<_>>();
     environment.sort();
-    if environment.len() > APPLICATION_CONTEXT_MAX_ENVIRONMENT {
-        return Err(format!(
-            "environment exceeds the {}-entry bound",
-            APPLICATION_CONTEXT_MAX_ENVIRONMENT
-        ));
-    }
+    validate_application_environment_limits(&environment)?;
     let environment = environment
         .into_iter()
         .map(|(key, value)| {
-            if key.is_empty() || key.len() > 64 || value.len() > 1024 || key.contains(&b'=') {
-                return Err("environment entry exceeds its bounded key/value contract".to_owned());
-            }
             let mut fields = BTreeMap::new();
             fields.insert("key".to_owned(), host_byte_view(&key));
             fields.insert("value".to_owned(), host_byte_view(&value));
-            Ok(HostExecutionValue::Record {
+            HostExecutionValue::Record {
                 type_name: "EnvironmentEntry".to_owned(),
                 fields,
-            })
+            }
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>();
     let current_dir =
         env::current_dir().map_err(|error| format!("current directory unavailable: {error}"))?;
     let current_dir = os_string_bytes(current_dir.as_os_str());
@@ -1343,6 +1365,36 @@ fn application_context_host_value(
         type_name: "ApplicationContext".to_owned(),
         fields,
     })
+}
+
+#[cfg(test)]
+mod application_environment_tests {
+    use super::validate_application_environment_limits;
+
+    #[test]
+    fn observed_host_path_value_fits_the_new_per_entry_bound() {
+        let environment = vec![(b"PATH".to_vec(), vec![b'p'; 1447])];
+        assert!(validate_application_environment_limits(&environment).is_ok());
+    }
+
+    #[test]
+    fn application_environment_keeps_the_64_kib_aggregate_bound() {
+        let at_limit = vec![(b"K".to_vec(), vec![b'v'; 4095]); 16];
+        assert!(validate_application_environment_limits(&at_limit).is_ok());
+
+        let over_limit = vec![(b"K".to_vec(), vec![b'v'; 4095]); 17];
+        assert!(validate_application_environment_limits(&over_limit)
+            .expect_err("aggregate values exceed 64 KiB")
+            .contains("65536-byte"));
+    }
+
+    #[test]
+    fn one_value_cannot_exceed_4096_bytes() {
+        let environment = vec![(b"PATH".to_vec(), vec![b'p'; 4097])];
+        assert!(validate_application_environment_limits(&environment)
+            .expect_err("per-value bound remains finite")
+            .contains("key/value contract"));
+    }
 }
 
 fn host_byte_view(bytes: &[u8]) -> HostExecutionValue {
@@ -3551,6 +3603,13 @@ struct CompileOptions {
     /// the caller opts into a test artifact explicitly.
     include_tests: bool,
     output_dir: Option<PathBuf>,
+    /// Suppress the large JSON result on stdout after a completed compilation.
+    /// For unresolved results, suppression requires also omitting result.json.
+    /// Failed results always remain machine-readable.
+    quiet: bool,
+    /// Omit the duplicate result.json when a caller only consumes emitted
+    /// artifacts such as backend.json.
+    omit_result: bool,
     target: Option<TargetContractRef>,
     kernel_entries: Vec<String>,
     proof_artifacts: Vec<String>,
@@ -3642,7 +3701,7 @@ where
         compiler.compile_with_proofs(request, &program, &inputs, &library_roots)
     };
     if let Some(output_dir) = &options.output_dir {
-        if let Err(error) = write_compilation_outputs(output_dir, &result) {
+        if let Err(error) = write_compilation_outputs(output_dir, &result, options.omit_result) {
             eprintln!(
                 "error: unable to write compiler artifacts to {:?}: {error}",
                 output_dir
@@ -3651,6 +3710,13 @@ where
         }
     }
     let status = result.status;
+    if options.quiet
+        && (status == CompilationStatus::Completed
+            || (options.omit_result
+                && status == CompilationStatus::CompletedWithUnresolvedObligations))
+    {
+        return ExitCode::SUCCESS;
+    }
     if !print_json(&result) {
         ExitCode::from(2)
     } else if status == CompilationStatus::Failed {
@@ -5820,6 +5886,8 @@ where
     let mut include_tests = false;
     let mut test_selection_seen = false;
     let mut output_dir = None;
+    let mut quiet = false;
+    let mut omit_result = false;
     let mut target = None;
     let mut kernel_entries = Vec::new();
     let mut proof_artifacts = Vec::new();
@@ -5853,6 +5921,8 @@ where
                         .ok_or_else(|| "--output-dir requires a path".to_owned())?,
                 ));
             }
+            "--quiet" => quiet = true,
+            "--omit-result" => omit_result = true,
             "--target" => {
                 let value = args
                     .next()
@@ -5921,11 +5991,19 @@ where
     if proof_operation.is_some() && proof_artifacts.is_empty() {
         return Err("--proof-operation requires at least one --proof artifact".to_owned());
     }
+    if quiet && output_dir.is_none() {
+        return Err("--quiet requires --output-dir".to_owned());
+    }
+    if omit_result && output_dir.is_none() {
+        return Err("--omit-result requires --output-dir".to_owned());
+    }
     Ok(CompileOptions {
         program_path,
         emit,
         include_tests,
         output_dir,
+        quiet,
+        omit_result,
         target,
         kernel_entries,
         proof_artifacts,
@@ -6047,9 +6125,12 @@ fn read_program_unvalidated(path: &str) -> Result<Program, ExitCode> {
 fn write_compilation_outputs(
     output_dir: &Path,
     result: &CompilationResult,
+    omit_result: bool,
 ) -> Result<(), std::io::Error> {
     fs::create_dir_all(output_dir)?;
-    write_pretty_json(output_dir.join("result.json"), result)?;
+    if !omit_result {
+        write_pretty_json(output_dir.join("result.json"), result)?;
+    }
     if let Some(semantic) = &result.emissions.semantic {
         write_pretty_json(output_dir.join("semantic.json"), semantic)?;
     }
@@ -7567,7 +7648,7 @@ fn print_usage() {
     eprintln!("  mncs execute-ssa <program.json> <execution-request.json>");
     eprintln!("  mncs compare-execution <baseline.json> <candidate.json> <corpus.json>");
     eprintln!("  mncs check-lowering-execution <program.json> <corpus.json>");
-    eprintln!("  mncs compile <program.json|program.mncs> [--include-tests|--exclude-tests] [--emit semantic,hir,ssa,evidence,target-plan,backend] [--output-dir DIR] [--target TARGET]");
+    eprintln!("  mncs compile <program.json|program.mncs> [--include-tests|--exclude-tests] [--emit semantic,hir,ssa,evidence,target-plan,backend] [--output-dir DIR] [--target TARGET] [--quiet] [--omit-result]");
     eprintln!("  mncs compile <program> --proof <artifact.json> [--proof-operation OP]  (RFC 0007 tranche-0.2 proof ingestion)");
     eprintln!("  mncs abi <program.mncs|program.json>");
     eprintln!("  mncs execute-backend <program.json> <execution-request.json>");

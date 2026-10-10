@@ -16,7 +16,7 @@
       "structured_write"
     ],
     "evolution": "source facts evolve in place; persistent contracts carry explicit identities",
-    "profile": "0.18",
+    "profile": "0.19",
     "standard_library_namespaces": [
       "mncs.core",
       "mncs.family",
@@ -63,6 +63,7 @@
       "pure_functions",
       "raised_iteration_ceiling_1024",
       "raised_sequence_ceiling_1024",
+      "raised_sequence_ceiling_4096",
       "records",
       "repeat_sequence_literals",
       "scalar_core",
@@ -323,7 +324,7 @@
         "name": "fs_sync_at"
       }
     ],
-    "current_profile": "0.18",
+    "current_profile": "0.19",
     "declaration_kinds": [
       {
         "callable": false,
@@ -725,7 +726,7 @@
         "name": "vector"
       }
     ],
-    "inventory_identity": "sha256:c1352e7c7b1fb943a7cf8c0356c17b458ae091f1bbf6f824d705089eef3837fd",
+    "inventory_identity": "sha256:fef48bfba2b784166f578f70125e8c0b3ca8fc654e4f1733f0e53b4103932f04",
     "profiles": [
       {
         "features": [
@@ -1047,14 +1048,30 @@
         "max_vector_lanes": 64,
         "predecessor": "0.17",
         "spec_document": "docs/source-profile-0.18.md",
-        "status": "current",
+        "status": "sealed",
         "supports_elaboration": true,
         "supports_parsing": true,
         "version": "0.18"
+      },
+      {
+        "features": [
+          "raised_sequence_ceiling_4096"
+        ],
+        "max_iteration_bound": 1024,
+        "max_iteration_nesting": 2,
+        "max_iteration_work_product": 1048576,
+        "max_sequence_bound": 4096,
+        "max_vector_lanes": 64,
+        "predecessor": "0.18",
+        "spec_document": "docs/source-profile-0.19.md",
+        "status": "current",
+        "supports_elaboration": true,
+        "supports_parsing": true,
+        "version": "0.19"
       }
     ],
     "schema_version": "mncs.language-inventory/1",
-    "source_identity": "sha256:68f0b5aeee05e51e0a5e4dcf12dfa4988f43c99310aad88c727f56e6449cba02",
+    "source_identity": "sha256:0f8e7885e50f6adc27181efff5555aa732cf7cca52c647ba7993879eda8d4f49",
     "syntax_features": [
       "acyclic_calls",
       "atomic_artifact_publication",
@@ -1095,6 +1112,7 @@
       "pure_functions",
       "raised_iteration_ceiling_1024",
       "raised_sequence_ceiling_1024",
+      "raised_sequence_ceiling_4096",
       "records",
       "repeat_sequence_literals",
       "scalar_core",
@@ -1181,9 +1199,9 @@
       }
     ]
   },
-  "compiler_inventory_identity": "sha256:c1352e7c7b1fb943a7cf8c0356c17b458ae091f1bbf6f824d705089eef3837fd",
-  "content_identity": "sha256:9851e1232e4a0b820eff0833c2c2a9a3c4f04d729bd92e7205f6cc698846d959",
-  "current_profile": "0.18",
+  "compiler_inventory_identity": "sha256:fef48bfba2b784166f578f70125e8c0b3ca8fc654e4f1733f0e53b4103932f04",
+  "content_identity": "sha256:fdac575826ecbb5cfb8f945c7e31afeb70b720f2c5efd6ad299174a3d83f0819",
+  "current_profile": "0.19",
   "examples": [
     {
       "compiler_source_identity": "mncs:source:artifact:bc4c2d21bd9fec099418ea3192d43252ee4f0bfdfce796b2d49ec074fa5ae4dd",
@@ -7140,7 +7158,7 @@
     },
     {
       "capabilities": [],
-      "compiler_source_identity": "mncs:source:artifact:0967c0eb3dc7a0257d70238d518eaba5a0c12a8928518de3fef0d67b28db68a8",
+      "compiler_source_identity": "mncs:source:artifact:64ac21fe8211a13e29b66e4e68d5a7d9d02ca1602199e8ab6613920221703cea",
       "effects": [],
       "exports": [
         "ApplicationContext",
@@ -7151,11 +7169,11 @@
         "success"
       ],
       "imports": [],
-      "inventory_identity": "sha256:04adaf402818b56f748fba1b8a7553b7027d3a5a2e5605106486f6a28efcacbd",
+      "inventory_identity": "sha256:4bd3366a489e0c0ee748f1527cf52bf69796910ca822225f778a9035cee33666",
       "module": "mncs.std.application.v1",
       "path": "library/std/application.mncs",
-      "profile": "0.16",
-      "source_identity": "sha256:5669f67e921e71c0f54742325f06fddfe3b11692c1fe3d27ee515f8a3fd30c7e",
+      "profile": "0.19",
+      "source_identity": "sha256:6ba87ee26693e2c59c5098a341d5b57fe8209337e661bf5898557573eee1d243",
       "symbols": [
         {
           "identity": "mncs:0.2:function:mncs.std.application.v1::context_is_bounded",
@@ -7183,7 +7201,7 @@
           "name": "ApplicationExit"
         },
         {
-          "identity": "mncs:0.2:record-type:mncs.std.application.v1::EnvironmentEntry::key%3A%5Bbyte%3B%20up_to%2064%5D%3Bvalue%3A%5Bbyte%3B%20up_to%201024%5D%3B",
+          "identity": "mncs:0.2:record-type:mncs.std.application.v1::EnvironmentEntry::key%3A%5Bbyte%3B%20up_to%2064%5D%3Bvalue%3A%5Bbyte%3B%20up_to%204096%5D%3B",
           "kind": "record_type",
           "name": "EnvironmentEntry"
         }
@@ -8525,7 +8543,7 @@
       "capabilities": [
         "process_capability"
       ],
-      "compiler_source_identity": "mncs:source:artifact:69f1a5b8ecaa534533ed52c0949525696536c1ca9b1ed57dade853c4eae1d77a",
+      "compiler_source_identity": "mncs:source:artifact:e2d9ec023ede8fc97455784e5d9985792415dcc3a514e32d12bcd5cd6fe8880e",
       "effects": [
         {
           "capability": "process_capability",
@@ -8569,11 +8587,11 @@
         "start"
       ],
       "imports": [],
-      "inventory_identity": "sha256:0f8d67ddeef4ae1b22a6bf3d12b6dadba037c5305b73f1be002faa89ce3a4eee",
+      "inventory_identity": "sha256:02a1daaf7d4564fea600bdb411c5898a4a71fd3381067db928cddce2401cce66",
       "module": "mncs.std.process.v1",
       "path": "library/std/process.mncs",
-      "profile": "0.18",
-      "source_identity": "sha256:959073ba146668743ab5c9766cf864af34c633fcb3c12f09741f43e49eb231cd",
+      "profile": "0.19",
+      "source_identity": "sha256:c1261785be0bb78292ba5262dd082a28521338daafcd32e3ff0388f6f4ff0e30",
       "symbols": [
         {
           "identity": "mncs:0.2:finite-type:mncs.std.process.v1::ProcessStatus",
@@ -8606,7 +8624,7 @@
           "name": "start"
         },
         {
-          "identity": "mncs:0.2:record-type:mncs.std.process.v1::EnvironmentEntry::key%3A%5Bbyte%3B%20up_to%2064%5D%3Bvalue%3A%5Bbyte%3B%20up_to%201024%5D%3B",
+          "identity": "mncs:0.2:record-type:mncs.std.process.v1::EnvironmentEntry::key%3A%5Bbyte%3B%20up_to%2064%5D%3Bvalue%3A%5Bbyte%3B%20up_to%204096%5D%3B",
           "kind": "record_type",
           "name": "EnvironmentEntry"
         },
@@ -9835,7 +9853,7 @@
       ]
     }
   ],
-  "profile_registry_identity": "sha256:cd2ae92c9b2544b5915485804f9a58205bb2a0dabfdc62b12bdf9f97de795907",
+  "profile_registry_identity": "sha256:1fa50392991b5b44ef81c1327762e371138c003a12967556c31acd98d357124a",
   "profiles": [
     {
       "features": [
@@ -10157,10 +10175,26 @@
       "max_vector_lanes": 64,
       "predecessor": "0.17",
       "spec_document": "docs/source-profile-0.18.md",
-      "status": "current",
+      "status": "sealed",
       "supports_elaboration": true,
       "supports_parsing": true,
       "version": "0.18"
+    },
+    {
+      "features": [
+        "raised_sequence_ceiling_4096"
+      ],
+      "max_iteration_bound": 1024,
+      "max_iteration_nesting": 2,
+      "max_iteration_work_product": 1048576,
+      "max_sequence_bound": 4096,
+      "max_vector_lanes": 64,
+      "predecessor": "0.18",
+      "spec_document": "docs/source-profile-0.19.md",
+      "status": "current",
+      "supports_elaboration": true,
+      "supports_parsing": true,
+      "version": "0.19"
     }
   ],
   "projections": {
@@ -10175,10 +10209,10 @@
   },
   "provenance": [
     {
-      "inventory_identity": "sha256:c1352e7c7b1fb943a7cf8c0356c17b458ae091f1bbf6f824d705089eef3837fd",
+      "inventory_identity": "sha256:fef48bfba2b784166f578f70125e8c0b3ca8fc654e4f1733f0e53b4103932f04",
       "kind": "compiler_language_inventory",
       "path": "compiler:language-inventory",
-      "source_identity": "sha256:68f0b5aeee05e51e0a5e4dcf12dfa4988f43c99310aad88c727f56e6449cba02"
+      "source_identity": "sha256:0f8e7885e50f6adc27181efff5555aa732cf7cca52c647ba7993879eda8d4f49"
     },
     {
       "kind": "canonical_example",
@@ -10383,7 +10417,7 @@
     {
       "kind": "library_module",
       "path": "library/std/application.mncs",
-      "source_identity": "sha256:5669f67e921e71c0f54742325f06fddfe3b11692c1fe3d27ee515f8a3fd30c7e"
+      "source_identity": "sha256:6ba87ee26693e2c59c5098a341d5b57fe8209337e661bf5898557573eee1d243"
     },
     {
       "kind": "library_module",
@@ -10448,7 +10482,7 @@
     {
       "kind": "library_module",
       "path": "library/std/process.mncs",
-      "source_identity": "sha256:959073ba146668743ab5c9766cf864af34c633fcb3c12f09741f43e49eb231cd"
+      "source_identity": "sha256:c1261785be0bb78292ba5262dd082a28521338daafcd32e3ff0388f6f4ff0e30"
     },
     {
       "kind": "library_module",
@@ -10513,7 +10547,7 @@
     {
       "kind": "projection_generator",
       "path": "scripts/generate_language_capabilities.py",
-      "source_identity": "sha256:b2d07ab99e2a657ab7d411d57d2e6af78d92dc3ae472d26f88de97c175f1c834"
+      "source_identity": "sha256:df722ae2da6626528c01e2cf4514262956d470fd71de99449fd3dccd1a62f159"
     }
   ],
   "schema_version": "mncs.language-capabilities/1",
@@ -10521,15 +10555,18 @@
     {
       "description": "Use statically bounded sequences, vectors, and builders so capacity is explicit.",
       "guidance": [
-        "Prefer the generic bounded builder over width-specific application helpers."
+        "Prefer the generic bounded builder over width-specific application helpers.",
+        "Profile 0.19 admits sequence capacities through 4096 while retaining finite bounds."
       ],
       "id": "bounded collections",
       "modules": [
         "mncs.core.sequences.v1",
-        "mncs.core.vector.v1"
+        "mncs.core.vector.v1",
+        "mncs.std.process.v1"
       ],
       "profiles": [
-        "0.1"
+        "0.1",
+        "0.19"
       ]
     },
     {
@@ -10544,7 +10581,8 @@
       ],
       "profiles": [
         "0.6",
-        "0.18"
+        "0.18",
+        "0.19"
       ]
     },
     {
@@ -10557,7 +10595,8 @@
         "mncs.std.store.v1"
       ],
       "profiles": [
-        "0.18"
+        "0.18",
+        "0.19"
       ]
     },
     {
@@ -10582,7 +10621,7 @@
       "id": "profiles",
       "modules": [],
       "profiles": [
-        "0.18"
+        "0.19"
       ]
     }
   ]

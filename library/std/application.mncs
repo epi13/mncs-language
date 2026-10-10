@@ -1,4 +1,4 @@
-mncs 0.16;
+mncs 0.19;
 
 // mncs.std.application — the reusable typed application-entry contract.
 //
@@ -12,7 +12,7 @@ module mncs.std.application.v1;
 
 record EnvironmentEntry {
     key: [byte; up_to 64],
-    value: [byte; up_to 1024]
+    value: [byte; up_to 4096]
 }
 
 // Launch-vector capacity agrees with mncs.std.process.v1: 256 entries.

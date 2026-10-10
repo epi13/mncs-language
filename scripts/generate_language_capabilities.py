@@ -190,21 +190,28 @@ CURATED_TOPICS = [
     {
         "id": "bounded collections",
         "description": "Use statically bounded sequences, vectors, and builders so capacity is explicit.",
-        "profiles": ["0.1"],
-        "modules": ["mncs.core.sequences.v1", "mncs.core.vector.v1"],
-        "guidance": ["Prefer the generic bounded builder over width-specific application helpers."],
+        "profiles": ["0.1", "0.19"],
+        "modules": [
+            "mncs.core.sequences.v1",
+            "mncs.core.vector.v1",
+            "mncs.std.process.v1",
+        ],
+        "guidance": [
+            "Prefer the generic bounded builder over width-specific application helpers.",
+            "Profile 0.19 admits sequence capacities through 4096 while retaining finite bounds.",
+        ],
     },
     {
         "id": "effects",
         "description": "Declare and preserve capability/effect authority at the source boundary.",
-        "profiles": ["0.6", "0.18"],
+        "profiles": ["0.6", "0.18", "0.19"],
         "modules": ["mncs.core.proof_admit.v1", "mncs.std.application.v1"],
         "guidance": ["An effect declaration is part of the semantic contract, not host-side metadata."],
     },
     {
         "id": "structured artifacts",
         "description": "Read, write, and publish typed artifacts through the structured artifact effects.",
-        "profiles": ["0.18"],
+        "profiles": ["0.18", "0.19"],
         "modules": ["mncs.std.store.v1"],
         "guidance": ["Keep persistent schema identities separate from implementation filenames."],
     },
@@ -218,7 +225,7 @@ CURATED_TOPICS = [
     {
         "id": "profiles",
         "description": "Select a language profile from the authoritative source-profile registry.",
-        "profiles": ["0.18"],
+        "profiles": ["0.19"],
         "modules": [],
         "guidance": ["Use the current profile unless a compatibility boundary explicitly requires an older profile."],
     },

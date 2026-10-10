@@ -1,4 +1,4 @@
-mncs 0.18;
+mncs 0.19;
 
 // mncs.std.process — the reusable typed explicit-argv process effect.
 //
@@ -14,7 +14,7 @@ enum ProcessStatus { Running, Exited, Cancelled, TimedOut, ResourceExhausted, Ou
 
 record EnvironmentEntry {
     key: [byte; up_to 64],
-    value: [byte; up_to 1024]
+    value: [byte; up_to 4096]
 }
 
 record ProcessResourceEnvelope {
@@ -26,8 +26,9 @@ record ProcessResourceEnvelope {
 }
 
 // Process launch vectors admit 256 entries: real invocations routinely
-// carry dozens of arguments and environment entries, and the per-element
-// 1024-byte cap already bounds the worst-case request. This capacity must
+// carry dozens of arguments and environment entries. Each environment value
+// allows 4096 bytes for long host paths and remains bounded by the runtime's
+// 64 KiB aggregate environment limit. This capacity must
 // agree with mncs.std.application.v1 and the language runtime's process
 // launch validation.
 record ProcessRequest {

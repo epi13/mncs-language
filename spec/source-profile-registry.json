@@ -307,7 +307,7 @@
   },
   {
     "version": "0.18",
-    "status": "current",
+    "status": "sealed",
     "spec_document": "docs/source-profile-0.18.md",
     "predecessor": "0.17",
     "supports_parsing": true,
@@ -322,6 +322,22 @@
       "structured_write_effect",
       "nominal_artifact_codecs",
       "atomic_artifact_publication"
+    ]
+  },
+  {
+    "version": "0.19",
+    "status": "current",
+    "spec_document": "docs/source-profile-0.19.md",
+    "predecessor": "0.18",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 4096,
+    "max_iteration_bound": 1024,
+    "max_iteration_nesting": 2,
+    "max_iteration_work_product": 1048576,
+    "max_vector_lanes": 64,
+    "features": [
+      "raised_sequence_ceiling_4096"
     ]
   }
 ]

@@ -137,6 +137,11 @@ pub const SOURCE_PROFILE_VERSION_0_17: &str = "0.17";
 /// nominal value contract; it is not an application-specific JSON tree.
 pub const SOURCE_PROFILE_VERSION_0_18: &str = "0.18";
 
+/// Source Profile 0.19: extended bounded sequence and view capacity. The
+/// admitted sequence ceiling grows to 4096; iteration limits and the
+/// execution budget are unchanged.
+pub const SOURCE_PROFILE_VERSION_0_19: &str = "0.19";
+
 /// The registry is ordered oldest-first; `predecessor` links agree with
 /// this order (checked by `registry_chain_is_linear`).
 pub const SOURCE_PROFILE_REGISTRY: &[SourceProfileRecord] = &[
@@ -420,7 +425,7 @@ pub const SOURCE_PROFILE_REGISTRY: &[SourceProfileRecord] = &[
     },
     SourceProfileRecord {
         version: "0.18",
-        status: ProfileStatus::Current,
+        status: ProfileStatus::Sealed,
         spec_document: "docs/source-profile-0.18.md",
         predecessor: Some("0.17"),
         supports_parsing: true,
@@ -436,6 +441,20 @@ pub const SOURCE_PROFILE_REGISTRY: &[SourceProfileRecord] = &[
             "nominal_artifact_codecs",
             "atomic_artifact_publication",
         ],
+    },
+    SourceProfileRecord {
+        version: "0.19",
+        status: ProfileStatus::Current,
+        spec_document: "docs/source-profile-0.19.md",
+        predecessor: Some("0.18"),
+        supports_parsing: true,
+        supports_elaboration: true,
+        max_sequence_bound: 4096,
+        max_iteration_bound: 1024,
+        max_iteration_nesting: 2,
+        max_iteration_work_product: 1048576,
+        max_vector_lanes: 64,
+        features: &["raised_sequence_ceiling_4096"],
     },
 ];
 
@@ -541,7 +560,7 @@ mod tests {
             assert!(record.supports_elaboration);
             previous = Some(record.version);
         }
-        assert_eq!(SOURCE_PROFILE_REGISTRY.last().unwrap().version, "0.18");
+        assert_eq!(SOURCE_PROFILE_REGISTRY.last().unwrap().version, "0.19");
     }
 
     #[test]
@@ -556,6 +575,7 @@ mod tests {
         assert!(source_profile_supported("0.16"));
         assert!(source_profile_supported("0.17"));
         assert!(source_profile_supported("0.18"));
+        assert!(source_profile_supported("0.19"));
         assert!(!source_profile_supported(""));
     }
 
@@ -579,6 +599,11 @@ mod tests {
         assert_eq!(ceiling("0.16").max_sequence_bound, 1024);
         assert_eq!(ceiling("0.16").max_iteration_bound, 1024);
         assert_eq!(ceiling("0.16").max_iteration_work_product, 1048576);
+        assert_eq!(ceiling("0.18").max_sequence_bound, 1024);
+        assert_eq!(ceiling("0.18").max_iteration_bound, 1024);
+        assert_eq!(ceiling("0.19").max_sequence_bound, 4096);
+        assert_eq!(ceiling("0.19").max_iteration_bound, 1024);
+        assert_eq!(ceiling("0.19").max_iteration_work_product, 1048576);
     }
 
     #[test]

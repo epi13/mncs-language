@@ -1,0 +1,6 @@
+mncs 0.18;
+module test.quiet_compile;
+
+fn value() -> (result: u64) {
+    return 7;
+}
