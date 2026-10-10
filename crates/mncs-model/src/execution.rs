@@ -95,6 +95,8 @@ pub const MAX_OBSERVATION_EVENTS: usize = 4096;
 pub const MAX_OBSERVATION_VALUES: usize = 2048;
 pub const MAX_OBSERVATION_VALUE_BYTES: usize = 64 * 1024;
 const BODY_RUNTIME_PROFILE_PROGRESS_INTERVAL_STEPS: u64 = 250_000;
+const MIN_REUSED_SEQUENCE_VALIDATION_ITEMS: usize = 2048;
+const MAX_REUSED_SEQUENCE_ESTIMATE_CHILDREN: usize = 64;
 
 #[derive(Debug, Default, Serialize)]
 struct BodyFunctionProfile {
@@ -4096,6 +4098,7 @@ impl<'a> BodyExecutionSession<'a> {
             Vec::new(),
             None,
             &mut profile,
+            None,
         );
         profile.emit(request, &result);
         result
@@ -4121,6 +4124,7 @@ impl<'a> BodyExecutionSession<'a> {
             Vec::new(),
             Some(provider_runtime),
             &mut profile,
+            None,
         );
         profile.emit(request, &result);
         result
@@ -4162,6 +4166,7 @@ pub fn execute_observed(
         Vec::new(),
         None,
         &mut profile,
+        None,
     );
     if recorder.enabled() {
         let root_frame = recorder.root_frame.clone();
@@ -4190,6 +4195,7 @@ fn execute_inner(
     argument_sources: Vec<Option<SemanticId>>,
     provider_runtime: Option<&dyn ProviderRuntime>,
     profile: &mut BodyExecutionProfile,
+    trusted_arguments: Option<Vec<bool>>,
 ) -> ExecutionResult {
     profile.enter(&request.target);
     let result = execute_inner_body(
@@ -4203,6 +4209,7 @@ fn execute_inner(
         argument_sources,
         provider_runtime,
         profile,
+        trusted_arguments,
     );
     profile.leave(result.steps);
     result
@@ -4220,6 +4227,7 @@ fn execute_inner_body(
     argument_sources: Vec<Option<SemanticId>>,
     provider_runtime: Option<&dyn ProviderRuntime>,
     profile: &mut BodyExecutionProfile,
+    trusted_arguments: Option<Vec<bool>>,
 ) -> ExecutionResult {
     let program = session.program;
     if request.schema_version != EXECUTION_REQUEST_SCHEMA_VERSION {
@@ -4317,18 +4325,46 @@ fn execute_inner_body(
         );
         return exhausted;
     }
-    if let Err(reason) = validate_arguments(program, body, request) {
+    if let Err(reason) = validate_arguments(program, body, request, trusted_arguments.as_deref()) {
         return ExecutionResult::invalid(request, reason);
     }
 
     let mut result = ExecutionResult::with_session(request, program, function, session);
     let mut values = BTreeMap::new();
-    for (parameter, argument) in body.parameters.iter().zip(&request.arguments) {
-        let Some(argument) = normalize_value(program, argument, &parameter.ty) else {
+    for (index, (parameter, argument)) in body.parameters.iter().zip(&request.arguments).enumerate()
+    {
+        let trusted = trusted_arguments
+            .as_ref()
+            .and_then(|arguments| arguments.get(index))
+            .copied()
+            .unwrap_or(false);
+        let normalized = if trusted {
+            Some(argument.clone())
+        } else {
+            normalize_value(program, argument, &parameter.ty)
+        };
+        let Some(argument) = normalized else {
             return ExecutionResult::invalid(request, "argument could not be normalized");
         };
         values.insert(parameter.id.clone(), argument);
     }
+    let reusable_sequence_parameters = body
+        .parameters
+        .iter()
+        .enumerate()
+        .filter_map(|(index, parameter)| {
+            let already_reusable = trusted_arguments
+                .as_ref()
+                .and_then(|arguments| arguments.get(index))
+                .copied()
+                .unwrap_or(false);
+            let reusable = already_reusable
+                || values
+                    .get(&parameter.id)
+                    .is_some_and(sequence_validation_work_is_large);
+            reusable.then_some(parameter)
+        })
+        .collect::<Vec<_>>();
     let mut value_types = BTreeMap::new();
     for parameter in &body.parameters {
         value_types.insert(parameter.id.clone(), parameter.ty.clone());
@@ -4451,6 +4487,7 @@ fn execute_inner_body(
                 &input_sources,
                 provider_runtime,
                 profile,
+                &reusable_sequence_parameters,
             ) {
                 if let (Some(recorder), Some(frame)) = (observer.as_deref_mut(), frame_id.as_ref())
                 {
@@ -4662,6 +4699,7 @@ fn execute_operation(
     input_sources: &[Option<SemanticId>],
     provider_runtime: Option<&dyn ProviderRuntime>,
     profile: &mut BodyExecutionProfile,
+    reusable_sequence_parameters: &[&BodyParameter],
 ) -> Option<ExecutionResult> {
     let program = session.program;
     match &operation.kind {
@@ -6017,22 +6055,55 @@ fn execute_operation(
                 );
                 return Some(result.clone());
             }
+            // Most calls are small scalars or small aggregates. Check the
+            // cheap source-side size gate first so those calls do not need a
+            // callee signature lookup or trusted-argument bitmap.
+            let target_function = program.functions.iter().find(|candidate| {
+                function_id(
+                    candidate.identity_namespace(&program.module),
+                    &candidate.name,
+                ) == *function
+            });
+            let trusted_arguments = if reusable_sequence_parameters.is_empty() {
+                None
+            } else {
+                let target_parameters = target_function
+                    .and_then(|candidate| candidate.body.as_ref())
+                    .map(|body| body.parameters.as_slice())
+                    .unwrap_or(&[]);
+                let mut trusted_arguments = vec![false; operation.operands.len()];
+                for (index, operand) in operation.operands.iter().enumerate() {
+                    if reusable_sequence_parameters
+                        .iter()
+                        .any(|parameter| parameter.id == *operand)
+                    {
+                        let target_type =
+                            target_parameters.get(index).map(|parameter| &parameter.ty);
+                        if argument_validation_can_be_reused(
+                            operand,
+                            value_types.get(operand),
+                            target_type,
+                            reusable_sequence_parameters,
+                        ) {
+                            trusted_arguments[index] = true;
+                        }
+                    }
+                }
+                trusted_arguments
+                    .iter()
+                    .any(|trusted| *trusted)
+                    .then_some(trusted_arguments)
+            };
             let nested_request = ExecutionRequest {
                 schema_version: request.schema_version.clone(),
                 target: {
-                    let target = program.functions.iter().find(|candidate| {
-                        function_id(
-                            candidate.identity_namespace(&program.module),
-                            &candidate.name,
-                        ) == *function
-                    });
                     ExecutionTarget {
-                        module: target
+                        module: target_function
                             .map(|candidate| {
                                 candidate.identity_namespace(&program.module).to_owned()
                             })
                             .unwrap_or_else(|| request.target.module.clone()),
-                        function: target
+                        function: target_function
                             .map(|candidate| candidate.name.clone())
                             .unwrap_or_else(|| {
                                 function_name
@@ -6071,6 +6142,7 @@ fn execute_operation(
                 input_sources.to_vec(),
                 provider_runtime,
                 profile,
+                trusted_arguments,
             );
             if let (Some(recorder), Some(parent)) = (observer.as_deref_mut(), frame) {
                 if let Some(child) = recorder.child_frame(parent, identity) {
@@ -7396,7 +7468,7 @@ pub fn lint_corpus(program: &Program, corpus: &ExecutionCorpus) -> CorpusLintRep
                         request.target.function
                     )),
                     Some(body) => {
-                        if let Err(reason) = validate_arguments(program, body, request) {
+                        if let Err(reason) = validate_arguments(program, body, request, None) {
                             errors.push(reason);
                         }
                     }
@@ -7452,6 +7524,7 @@ fn validate_arguments(
     program: &Program,
     body: &FunctionBody,
     request: &ExecutionRequest,
+    trusted_arguments: Option<&[bool]>,
 ) -> Result<(), String> {
     if body.parameters.len() != request.arguments.len() {
         return Err(format!(
@@ -7464,6 +7537,13 @@ fn validate_arguments(
     }
     for (index, (parameter, argument)) in body.parameters.iter().zip(&request.arguments).enumerate()
     {
+        if trusted_arguments
+            .and_then(|arguments| arguments.get(index))
+            .copied()
+            .unwrap_or(false)
+        {
+            continue;
+        }
         if !value_matches_type(program, argument, &parameter.ty) {
             let mut message = format!(
                 "argument does not match parameter {:?} (function {}::{}, argument index {index}): expected {} ({}) but received {}",
@@ -7489,6 +7569,42 @@ fn validate_arguments(
         }
     }
     Ok(())
+}
+
+fn argument_validation_can_be_reused(
+    source_id: &str,
+    source_type: Option<&BodyType>,
+    target_type: Option<&BodyType>,
+    reusable_sequence_parameters: &[&BodyParameter],
+) -> bool {
+    reusable_sequence_parameters
+        .iter()
+        .any(|parameter| parameter.id == source_id)
+        && target_type.is_some()
+        && source_type == target_type
+}
+
+fn sequence_validation_work_is_large(value: &ExecutionValue) -> bool {
+    let ExecutionValue::Sequence { values } = value else {
+        return false;
+    };
+    let mut estimated_items = values.len();
+    if estimated_items >= MIN_REUSED_SEQUENCE_VALIDATION_ITEMS {
+        return true;
+    }
+    for item in values.iter().take(MAX_REUSED_SEQUENCE_ESTIMATE_CHILDREN) {
+        let nested_items = match item {
+            ExecutionValue::Sequence { values } | ExecutionValue::Vector { values } => values.len(),
+            ExecutionValue::Finite { payload, .. } => payload.len(),
+            ExecutionValue::Record { fields, .. } => fields.len(),
+            _ => 0,
+        };
+        estimated_items = estimated_items.saturating_add(nested_items);
+        if estimated_items >= MIN_REUSED_SEQUENCE_VALIDATION_ITEMS {
+            return true;
+        }
+    }
+    false
 }
 
 /// Field-identity detail for a rejected aggregate argument, shared with the
@@ -8758,6 +8874,72 @@ mod tests {
 
         assert!(profile.frames.is_empty());
         assert!(profile.functions.is_empty());
+    }
+
+    #[test]
+    fn body_call_reuses_only_same_typed_validated_parameters() {
+        let sequence = BodyType::Sequence {
+            element: Box::new(BodyType::Sequence {
+                element: Box::new(BodyType::Byte),
+                bound: SequenceBound::UpTo(1024),
+            }),
+            bound: SequenceBound::UpTo(1024),
+        };
+        let different_sequence = BodyType::Sequence {
+            element: Box::new(BodyType::Sequence {
+                element: Box::new(BodyType::Byte),
+                bound: SequenceBound::UpTo(512),
+            }),
+            bound: SequenceBound::UpTo(512),
+        };
+        let trusted_values = vec![BodyParameter {
+            id: "pages".to_owned(),
+            name: "pages".to_owned(),
+            ty: sequence.clone(),
+        }];
+        let page = ExecutionValue::Sequence {
+            values: Arc::new(vec![ExecutionValue::Byte { value: 32 }; 1024]),
+        };
+        let small_pages = ExecutionValue::Sequence {
+            values: Arc::new(vec![page.clone()]),
+        };
+        let large_pages = ExecutionValue::Sequence {
+            values: Arc::new(vec![page.clone(), page]),
+        };
+        let reusable_parameters = trusted_values.iter().collect::<Vec<_>>();
+        assert!(sequence_validation_work_is_large(&large_pages));
+        assert!(!sequence_validation_work_is_large(&small_pages));
+
+        assert!(argument_validation_can_be_reused(
+            "pages",
+            Some(&sequence),
+            Some(&sequence),
+            &reusable_parameters,
+        ));
+        assert!(!argument_validation_can_be_reused(
+            "pages",
+            Some(&sequence),
+            Some(&different_sequence),
+            &reusable_parameters,
+        ));
+        assert!(!argument_validation_can_be_reused(
+            "computed_pages",
+            Some(&sequence),
+            Some(&sequence),
+            &reusable_parameters,
+        ));
+        assert!(!argument_validation_can_be_reused(
+            "pages",
+            None,
+            Some(&sequence),
+            &reusable_parameters,
+        ));
+        assert!(!argument_validation_can_be_reused(
+            "pages",
+            Some(&sequence),
+            Some(&sequence),
+            &[],
+        ));
     }
 
     #[test]

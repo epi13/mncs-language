@@ -1,0 +1,341 @@
+{
+  "schema_version": "mncs.language.body-runtime-validation-reuse/1",
+  "kind": "body-runtime-validated-sequence-argument-reuse",
+  "observed_at": "2026-10-10T10:34:38.847399+00:00",
+  "identity": {
+    "repository": "mncs-language",
+    "base_revision": "3c3ba97e20504936d580e21b255584fd674cd48e",
+    "candidate_branch": "campaign/execution-aggregate-boundary-memo-20261010",
+    "changed_file": "crates/mncs-model/src/execution.rs",
+    "changed_file_sha256": "6091e1b8a22314642b54c1344487f2f093f2c39261e8d54c4f68ae6d7f65309f",
+    "candidate_diff_sha256": "d26c10c22e6b3191ae5020d9e5033033b0c7ed07b21f0710f75312fac2b81028",
+    "compiler_frontier_revision": "8f19775c3fa499e17f5d7193e2df3fa33613b1a4",
+    "compiler_source_file": "src/compiler/source.mncs",
+    "compiler_source_file_sha256": "a9c1e828fb43ef2ccfd8b938528c388caf22ea6432495ab43ad0eb4e1e5ac6a1",
+    "baseline_language_pin": "b05dfa2b91541e4bd4a75aecff6abdedd708608e",
+    "baseline_language_execution_file_sha256": "0dc7aea912409a0195c31dc6677683155fbf009e03686081c0b250265719dca8",
+    "candidate_language_pin": "candidate-uncommitted-20261010",
+    "candidate_language_execution_file_sha256": "6091e1b8a22314642b54c1344487f2f093f2c39261e8d54c4f68ae6d7f65309f",
+    "baseline_probe_binary_sha256": "974abc3fc42ff48e2480378459a1ca47fea1708a093d4dda54b2ecfcf237c9d5",
+    "candidate_probe_binary_sha256": "c834e8eec66e8f92eff1d8cf77f8558057b2489a19c3a5b82b9a934c4c9eccda",
+    "probe_compiler_revision": "8f19775c3fa499e17f5d7193e2df3fa33613b1a4",
+    "baseline_probe_build": "release, controlled worktree with the compiler frontier commit and Stage-0 b05dfa2",
+    "candidate_probe_build": "release, same compiler frontier commit with the candidate language execution file"
+  },
+  "scope": {
+    "target": "mncs.compiler.source.v1::byte_window4_global",
+    "backend": "Stage-0 probe reference interpreter; backend=null; retained native sessions=0",
+    "generic_arguments": [
+      32,
+      1024
+    ],
+    "input": "Each page is 1024 bytes: [97,98,99] followed by 1021 spaces. The page sequence has 1, 2, 4, 8, 16, or 32 pages; stride=1024, total=3, offset=0.",
+    "single_page_sha256": "1ea0609bacb1a8765906acd73dc6bb42673cb945b8189cbae7f95707911753b7",
+    "expected_result": "{b0:97,b1:98,b2:99,b3:256}",
+    "reported_executor_steps": 145,
+    "reported_step_semantics": "executor-specific; UNKNOWN",
+    "optimization_contract": "Reuse is limited to an already validated function-entry parameter whose exact BodyType matches the callee parameter and whose sequence validation estimate meets the 2048-item threshold. External entry inputs and small sequences retain full validation."
+  },
+  "measurement": {
+    "matched_compiler_revision": true,
+    "shape_samples_per_variant": 30,
+    "warmups_per_shape_per_variant": 1,
+    "per_page_count": {
+      "1": {
+        "baseline": {
+          "request_wall": {
+            "p25_ms": 5.342,
+            "p50_ms": 6.36,
+            "p75_ms": 6.862
+          },
+          "executor_phase": {
+            "p25_ms": 1.439,
+            "p50_ms": 2.587,
+            "p75_ms": 2.947
+          },
+          "status": "returned",
+          "reported_steps": 145,
+          "samples": 30,
+          "warmups": 1
+        },
+        "candidate": {
+          "request_wall": {
+            "p25_ms": 5.15,
+            "p50_ms": 6.027,
+            "p75_ms": 6.49
+          },
+          "executor_phase": {
+            "p25_ms": 1.376,
+            "p50_ms": 1.863,
+            "p75_ms": 2.727
+          },
+          "status": "returned",
+          "reported_steps": 145,
+          "samples": 30,
+          "warmups": 1
+        },
+        "executor_p50_change_percent": -28.0,
+        "request_wall_p50_change_percent": -5.2
+      },
+      "2": {
+        "baseline": {
+          "request_wall": {
+            "p25_ms": 6.96,
+            "p50_ms": 7.252,
+            "p75_ms": 7.591
+          },
+          "executor_phase": {
+            "p25_ms": 1.72,
+            "p50_ms": 1.788,
+            "p75_ms": 1.869
+          },
+          "status": "returned",
+          "reported_steps": 145,
+          "samples": 30,
+          "warmups": 1
+        },
+        "candidate": {
+          "request_wall": {
+            "p25_ms": 6.574,
+            "p50_ms": 6.717,
+            "p75_ms": 7.021
+          },
+          "executor_phase": {
+            "p25_ms": 1.476,
+            "p50_ms": 1.488,
+            "p75_ms": 1.534
+          },
+          "status": "returned",
+          "reported_steps": 145,
+          "samples": 30,
+          "warmups": 1
+        },
+        "executor_p50_change_percent": -16.8,
+        "request_wall_p50_change_percent": -7.4
+      },
+      "4": {
+        "baseline": {
+          "request_wall": {
+            "p25_ms": 10.596,
+            "p50_ms": 10.849,
+            "p75_ms": 11.194
+          },
+          "executor_phase": {
+            "p25_ms": 2.344,
+            "p50_ms": 2.43,
+            "p75_ms": 2.47
+          },
+          "status": "returned",
+          "reported_steps": 145,
+          "samples": 30,
+          "warmups": 1
+        },
+        "candidate": {
+          "request_wall": {
+            "p25_ms": 10.196,
+            "p50_ms": 10.441,
+            "p75_ms": 10.668
+          },
+          "executor_phase": {
+            "p25_ms": 1.899,
+            "p50_ms": 1.958,
+            "p75_ms": 2.011
+          },
+          "status": "returned",
+          "reported_steps": 145,
+          "samples": 30,
+          "warmups": 1
+        },
+        "executor_p50_change_percent": -19.4,
+        "request_wall_p50_change_percent": -3.8
+      },
+      "8": {
+        "baseline": {
+          "request_wall": {
+            "p25_ms": 18.51,
+            "p50_ms": 19.067,
+            "p75_ms": 19.724
+          },
+          "executor_phase": {
+            "p25_ms": 3.711,
+            "p50_ms": 3.803,
+            "p75_ms": 3.923
+          },
+          "status": "returned",
+          "reported_steps": 145,
+          "samples": 30,
+          "warmups": 1
+        },
+        "candidate": {
+          "request_wall": {
+            "p25_ms": 18.175,
+            "p50_ms": 18.628,
+            "p75_ms": 19.072
+          },
+          "executor_phase": {
+            "p25_ms": 2.752,
+            "p50_ms": 2.838,
+            "p75_ms": 2.971
+          },
+          "status": "returned",
+          "reported_steps": 145,
+          "samples": 30,
+          "warmups": 1
+        },
+        "executor_p50_change_percent": -25.4,
+        "request_wall_p50_change_percent": -2.3
+      },
+      "16": {
+        "baseline": {
+          "request_wall": {
+            "p25_ms": 37.1,
+            "p50_ms": 37.969,
+            "p75_ms": 39.729
+          },
+          "executor_phase": {
+            "p25_ms": 6.588,
+            "p50_ms": 6.761,
+            "p75_ms": 6.962
+          },
+          "status": "returned",
+          "reported_steps": 145,
+          "samples": 30,
+          "warmups": 1
+        },
+        "candidate": {
+          "request_wall": {
+            "p25_ms": 35.409,
+            "p50_ms": 36.206,
+            "p75_ms": 37.498
+          },
+          "executor_phase": {
+            "p25_ms": 4.651,
+            "p50_ms": 4.796,
+            "p75_ms": 4.974
+          },
+          "status": "returned",
+          "reported_steps": 145,
+          "samples": 30,
+          "warmups": 1
+        },
+        "executor_p50_change_percent": -29.1,
+        "request_wall_p50_change_percent": -4.6
+      },
+      "32": {
+        "baseline": {
+          "request_wall": {
+            "p25_ms": 71.322,
+            "p50_ms": 73.225,
+            "p75_ms": 75.306
+          },
+          "executor_phase": {
+            "p25_ms": 12.53,
+            "p50_ms": 12.806,
+            "p75_ms": 13.431
+          },
+          "status": "returned",
+          "reported_steps": 145,
+          "samples": 30,
+          "warmups": 1
+        },
+        "candidate": {
+          "request_wall": {
+            "p25_ms": 67.072,
+            "p50_ms": 69.114,
+            "p75_ms": 73.389
+          },
+          "executor_phase": {
+            "p25_ms": 8.289,
+            "p50_ms": 8.529,
+            "p75_ms": 8.8
+          },
+          "status": "returned",
+          "reported_steps": 145,
+          "samples": 30,
+          "warmups": 1
+        },
+        "executor_p50_change_percent": -33.4,
+        "request_wall_p50_change_percent": -5.6
+      }
+    },
+    "dedicated_one_page_followup": {
+      "baseline": {
+        "samples": 30,
+        "warmups": 3,
+        "request_wall_p50_ms": 4.840094000000001,
+        "executor_phase_p50_ms": 1.3774555,
+        "cpu_time_delta_ns": 60000000,
+        "cpu_tick_resolution_ns": 10000000,
+        "status": "returned",
+        "reported_steps": 145,
+        "result": "{b0:97,b1:98,b2:99,b3:256}"
+      },
+      "candidate": {
+        "samples": 30,
+        "warmups": 3,
+        "request_wall_p50_ms": 4.884482,
+        "executor_phase_p50_ms": 1.3918635,
+        "cpu_time_delta_ns": 50000000,
+        "cpu_tick_resolution_ns": 10000000,
+        "status": "returned",
+        "reported_steps": 145,
+        "result": "{b0:97,b1:98,b2:99,b3:256}"
+      },
+      "executor_p50_change_percent": 1.0,
+      "request_wall_p50_change_percent": 0.9
+    },
+    "child_resources": {
+      "baseline": {
+        "observation_scope": "single probe child process; from first observed request through final observed request; includes probe startup already in flight, six shape warmups, and 180 measured requests",
+        "snapshot_count": 558,
+        "peak_rss_bytes": 57790464,
+        "kernel_rss_high_water_bytes": 57790464,
+        "peak_file_descriptors": 3,
+        "cpu_time_delta_ns": 1770000000,
+        "cpu_tick_resolution_ns": 10000000,
+        "io_read_bytes_delta": 0,
+        "io_write_bytes_delta": 0,
+        "per_request_cpu": "UNKNOWN; /proc CPU clock resolution is 10 ms and interval includes setup/warmups",
+        "child_cgroup_attribution": "UNKNOWN; available cgroup and pressure counters belong to the parent terminal scope"
+      },
+      "candidate": {
+        "observation_scope": "single probe child process; from first observed request through final observed request; includes probe startup already in flight, six shape warmups, and 180 measured requests",
+        "snapshot_count": 558,
+        "peak_rss_bytes": 58003456,
+        "kernel_rss_high_water_bytes": 58003456,
+        "peak_file_descriptors": 3,
+        "cpu_time_delta_ns": 1450000000,
+        "cpu_tick_resolution_ns": 10000000,
+        "io_read_bytes_delta": 0,
+        "io_write_bytes_delta": 0,
+        "per_request_cpu": "UNKNOWN; /proc CPU clock resolution is 10 ms and interval includes setup/warmups",
+        "child_cgroup_attribution": "UNKNOWN; available cgroup and pressure counters belong to the parent terminal scope"
+      }
+    },
+    "limits": [
+      "The six-shape probe measures a real compiler source function with reduced page inputs, not the 894-page flow.mncs closure.",
+      "This is reference-interpreter execution evidence; it does not establish Cranelift, canonical VM, executable artifact, Stage-1, or Stage-2 behavior.",
+      "RSS, CPU, FD, and I/O are process observations; per-request CPU and child-specific cgroup attribution remain UNKNOWN."
+    ]
+  },
+  "verification": {
+    "candidate_stage0_release_build": "passed",
+    "focused_model_test": "passed: body_call_reuses_only_same_typed_validated_parameters",
+    "model_suite": "219 passed; 0 failed; 4 unrelated process_runtime tests filtered after identical failures were reproduced on clean language main",
+    "filtered_baseline_failures": [
+      "active_execution_limit_is_enforced_and_reaped",
+      "completed_handle_retention_is_bounded_and_eviction_fails_closed",
+      "expired_execution_is_distinct_from_external_cancellation",
+      "lifecycle_handle_is_provider_issued_and_cancel_requires_reap"
+    ],
+    "cli_conformance": {
+      "command": "cargo run -p mncs-cli -- check-lowering-execution examples/execution/bounded-sum-baseline.mncs.json examples/execution/bounded-sum-corpus.json",
+      "status": "consistent_over_corpus",
+      "matching_cases": 7,
+      "corpus_size": 7,
+      "mismatching_cases": 0
+    },
+    "native_stage0_oracle_differential": "not measured by this probe"
+  },
+  "outcome": "All 30-sample executor medians improved for the measured 1\u201332 page sizes (16.8\u201333.4% for 2\u201332 pages; 28.0% for one page in the six-shape run). Request wall medians improved 2.3\u20137.4%. The separate one-page 30-pair run was within 1.0% for executor and request wall time; treat one-page performance as effectively neutral at this resolution."
+}
