@@ -1,0 +1,79 @@
+{
+  "schema_version": "mncs.language.candidate-delivery-verification/1",
+  "identity": "ev_language_process_environment_candidate_equivalence_tests_20261013",
+  "owner": "mncs-language",
+  "recorded_at": "2026-10-13T03:33:08.698661Z",
+  "candidate": {
+    "repository": "mncs-language",
+    "branch": "campaign/process-environment-value-bound-20261010",
+    "commit": "fc49c0cc6afe388ff8d18341595422cc52225005",
+    "base_commit": "e8f8a5f8659c71b33cd32c964d4982bec1a9668e",
+    "main_head_at_review": "12b29d6482599465698b78c87a21c63d3adeceb6",
+    "main_upstream_head_at_review": "12b29d6482599465698b78c87a21c63d3adeceb6",
+    "main_equivalent_commit": "7cfd996",
+    "stable_patch_id": "d59075fdf3391a828010e8e1b8dde48edb869e0e",
+    "candidate_patch_matches_main": true,
+    "main_and_candidate_unique_commit_counts": {
+      "main_only": 3,
+      "candidate_only": 1
+    },
+    "delivery_disposition": "implementation patch is already present on pushed main; do not merge the redundant candidate commit"
+  },
+  "claim_observation": {
+    "control_job_id": "term-1f28f32d9ef4edb9a61ca5f5",
+    "repository": "mncs-language",
+    "live_held_claims": 0
+  },
+  "tests": {
+    "backend": "bwrap",
+    "project": "mncs-language",
+    "control_job_id": "term-a9bd8b4eb0c86ca35524c2b7",
+    "tested_head": "12b29d6482599465698b78c87a21c63d3adeceb6",
+    "network": false,
+    "cargo_net_offline": true,
+    "results": [
+      {
+        "command": "cargo test -p mncs-cli --test quiet_compile",
+        "exit_code": 0,
+        "duration_seconds": 0.854,
+        "passed": 3,
+        "failed": 0
+      },
+      {
+        "command": "cargo test -p mncs-cli --test profile_registry",
+        "exit_code": 0,
+        "duration_seconds": 3.489,
+        "passed": 4,
+        "failed": 0
+      },
+      {
+        "command": "cargo test -p mncs-compiler --test source_profile_019_sequence_bound",
+        "exit_code": 0,
+        "duration_seconds": 0.154,
+        "passed": 1,
+        "failed": 0
+      }
+    ],
+    "total_passed": 8,
+    "total_failed": 0
+  },
+  "candidate_worktree": {
+    "host_path_observed": "/tmp/mncs-language-process-environment-value-bound-20261010",
+    "protected_bwrap_path_available": false,
+    "registered_branch": "campaign/process-environment-value-bound-20261010",
+    "tracked_worktree_changes": 0,
+    "untracked_evidence": [
+      {
+        "path": "evidence/campaign-20261010-forge-core-quiet-output.json",
+        "sha256": "7b1d1a609703ffae19f0834252d68da638d279463e7d24a9e12123c4891efc42",
+        "disposition": "preserved in its original worktree; it references Forge source and candidate artifacts and remains uncommitted pending the Forge owner handoff"
+      }
+    ],
+    "classification": "patch-equivalent implementation with retained untracked evidence; worktree unavailable in the current protected namespace, not deleted"
+  },
+  "verdict": {
+    "status": "PASS",
+    "summary": "The candidate implementation is already represented by an identical stable patch on pushed Language main. Focused tests for quiet output and source-profile registry/bounds pass against that exact main source identity. The candidate branch and its Forge-related untracked evidence remain retained.",
+    "stage1_or_stage2_claim": false
+  }
+}
