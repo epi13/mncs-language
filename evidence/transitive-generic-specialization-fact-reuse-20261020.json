@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "kind": "mncs.language.transitive-generic-specialization-fact-reuse-proof",
+  "status": "passed",
+  "observed_at": "2026-10-20T18:47:39Z",
+  "repository": "mncs-language",
+  "branch": "campaign/language-verified-fact-reuse-20261020",
+  "tested_commit": "9cbae77e5d85c0e4d8977337df78092c2f13e419",
+  "implementation_revision": "844104d39cfe2685464e5bc078bd162e8a4924ab",
+  "contract": {
+    "verification_fact": "mncs.language-verification-fact/3",
+    "verifier_identity": "mncs-language-function-body-validator/4"
+  },
+  "harness": {
+    "path": "crates/mncs-compiler/tests/module_imports.rs",
+    "sha256": "0993d74360ae3aacdad17eed6a9bd15f5df7bb0cb72d3e93de7a21fd51ef1f73",
+    "test": "generic_argument_edit_checks_transitive_specializations_and_reuses_unchanged_closure"
+  },
+  "workload": {
+    "dependency_chain": "app.entry_two -> lib.relay<N> -> lib.leaf<N>",
+    "initial_specializations": [2, 3],
+    "edited_specialization": 3,
+    "new_specialization": 4,
+    "selected_caller_fact_contains_transitive_specialization_dependencies": 2
+  },
+  "reuse_decisions": {
+    "entry_three_recomputed_reason": "subject_changed",
+    "new_relay_specialization_recomputed_reason": "missing",
+    "new_leaf_specialization_recomputed_reason": "missing",
+    "entry_two_reused": true,
+    "independent_caller_reused": true,
+    "prior_relay_two_and_leaf_two_specialization_bodies_reused": true
+  },
+  "verification": {
+    "command": "CARGO_BUILD_JOBS=2 cargo test --offline --locked -p mncs-compiler --test module_imports generic_argument_edit_checks_transitive_specializations_and_reuses_unchanged_closure -- --exact",
+    "tests_passed": 1,
+    "tests_failed": 0,
+    "tests_filtered": 49,
+    "result": "passed"
+  },
+  "measurements": {
+    "wall_seconds": 0.22,
+    "cpu_seconds": 0.20,
+    "peak_rss_bytes": 51060736,
+    "swap_bytes": 0,
+    "cgroup_peak_memory_available": false
+  },
+  "limitations": [
+    "This is a Language front-end fact-reuse regression, not an application-build performance measurement.",
+    "The test verifies the selected N=2 and N=4 specialization dependency closures; it does not prove full Compiler succession."
+  ]
+}
