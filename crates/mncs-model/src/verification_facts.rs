@@ -12,8 +12,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    assumption_id, function_id, specialization_id, BodyOperationKind, BodyType, Effect, Function,
-    FunctionBody, GenericArg, GenericSpecializationRecord, Program, SemanticId, SemanticIdentities,
+    assumption_id, function_id, specialization_id, BodyOperationKind, BodyType, Effect, FiniteType,
+    Function, FunctionBody, GenericArg, GenericSpecializationRecord, Program, SemanticId,
+    SemanticIdentities,
 };
 
 pub const VERIFICATION_FACT_SCHEMA_VERSION: &str = "mncs.language-verification-fact/3";
@@ -25,6 +26,8 @@ pub const DECLARATION_FACT_SCHEMA_VERSION: &str = "mncs.language-declaration-ver
 pub const DECLARATION_FACT_REUSE_SCHEMA_VERSION: &str = "mncs.language-declaration-fact-reuse/1";
 pub const DECLARATION_FACT_VERIFIER_ID: &str = "mncs-language-function-declaration-validator/1";
 pub const DECLARATION_FACT_POLICY_ID: &str = "mncs-language-function-declaration-policy/1";
+pub const FINITE_TYPE_FACT_VERIFIER_ID: &str = "mncs-language-finite-type-validator/1";
+pub const FINITE_TYPE_FACT_POLICY_ID: &str = "mncs-language-finite-type-policy/1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -149,8 +152,10 @@ pub struct VerificationFactValidation {
     pub report: crate::ValidationReport,
     pub facts: Vec<VerificationFact>,
     pub declaration_facts: Vec<DeclarationVerificationFact>,
+    pub finite_type_declaration_facts: Vec<DeclarationVerificationFact>,
     pub reuse: VerificationFactReuseObservation,
     pub declaration_reuse: DeclarationFactReuseObservation,
+    pub finite_type_declaration_reuse: DeclarationFactReuseObservation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,11 +167,13 @@ pub struct DeclarationVerificationWarning {
     pub message: String,
 }
 
-/// A successful Language-issued function declaration result. The declaration
-/// fingerprint includes every field checked by declaration validation,
-/// including evidence annotations. Assumption dependencies are separately
-/// guarded. Warnings are stored with relative paths so reordered functions
-/// retain fresh diagnostics, and source locations are refreshed per snapshot.
+/// A successful Language-issued function or finite-type declaration result.
+/// The verifier identity distinguishes declaration kinds while this shared
+/// fact contract keeps their cache and invalidation handling consistent.
+/// Function declaration fingerprints include evidence annotations and guard
+/// assumption dependencies. Warnings use relative paths so reordered
+/// declarations retain fresh diagnostics, and source locations are refreshed
+/// per snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeclarationVerificationFact {
     pub schema_version: String,
@@ -218,11 +225,11 @@ pub struct DeclarationFactRecomputation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeclarationFactReuseObservation {
     pub schema_version: String,
-    /// Function declaration checks actually skipped after Language matched
-    /// every current declaration and assumption guard.
+    /// Declaration checks actually skipped after Language matched each
+    /// current declaration, dependency, verifier, policy, and profile guard.
     pub reused: Vec<SemanticId>,
-    /// Function declaration checks actually run, with the reason prior
-    /// evidence was unavailable or stale.
+    /// Declaration checks actually run, with the reason prior evidence was
+    /// unavailable or stale.
     pub recomputed: Vec<DeclarationFactRecomputation>,
 }
 
@@ -241,6 +248,8 @@ pub(crate) struct DeclarationFactBasis {
     pub subject: SemanticId,
     pub subject_fingerprint: String,
     pub dependencies: Vec<VerificationFactDependency>,
+    pub verifier_identity: String,
+    pub policy_identity: String,
 }
 
 impl Program {
@@ -284,6 +293,22 @@ impl Program {
             subject,
             subject_fingerprint,
             dependencies: dependencies.into_iter().collect(),
+            verifier_identity: DECLARATION_FACT_VERIFIER_ID.to_owned(),
+            policy_identity: DECLARATION_FACT_POLICY_ID.to_owned(),
+        })
+    }
+
+    pub(crate) fn finite_type_declaration_fact_basis(
+        &self,
+        finite_type: &FiniteType,
+    ) -> Option<DeclarationFactBasis> {
+        let bytes = serde_json::to_vec(finite_type).ok()?;
+        Some(DeclarationFactBasis {
+            subject: finite_type.identity.clone(),
+            subject_fingerprint: crate::sha256_hex(&bytes),
+            dependencies: Vec::new(),
+            verifier_identity: FINITE_TYPE_FACT_VERIFIER_ID.to_owned(),
+            policy_identity: FINITE_TYPE_FACT_POLICY_ID.to_owned(),
         })
     }
 
@@ -944,8 +969,8 @@ impl DeclarationVerificationFact {
             schema_version: DECLARATION_FACT_SCHEMA_VERSION.to_owned(),
             subject: basis.subject,
             subject_fingerprint: basis.subject_fingerprint,
-            verifier_identity: DECLARATION_FACT_VERIFIER_ID.to_owned(),
-            policy_identity: DECLARATION_FACT_POLICY_ID.to_owned(),
+            verifier_identity: basis.verifier_identity,
+            policy_identity: basis.policy_identity,
             language_profile: language_profile.to_owned(),
             dependencies: basis.dependencies,
             result: VerificationFactResult::Verified,
@@ -1070,8 +1095,9 @@ fn strings_in_json(value: &serde_json::Value) -> BTreeSet<String> {
 mod tests {
     use super::*;
     use crate::{
-        function_id, record_type_id, BodyBlock, BodyOperation, BodyOperationKind, BodyTerminator,
-        BodyType, BodyValue, RecordField, RecordType, Value,
+        finite_type_id, finite_variant_id, function_id, record_type_id, BodyBlock, BodyOperation,
+        BodyOperationKind, BodyTerminator, BodyType, BodyValue, FiniteVariant, RecordField,
+        RecordType, Value,
     };
 
     fn request(profile: &str, prior_facts: Vec<VerificationFact>) -> VerificationFactRequest {
@@ -1971,6 +1997,102 @@ mod tests {
             changed_profile.declaration_reuse.recomputed[0].reason,
             DeclarationFactReuseMiss::LanguageProfileChanged
         );
+    }
+
+    #[test]
+    fn finite_type_declaration_facts_reuse_refresh_locations_and_revalidate_changes() {
+        let mut program = crate::validation::tests::valid_program();
+        let module = program.module.clone();
+        program.finite_types.push(FiniteType {
+            identity: finite_type_id(&module, "TransferState"),
+            name: "TransferState".to_owned(),
+            variants: vec![
+                FiniteVariant {
+                    identity: finite_variant_id(&module, "TransferState", "Pending"),
+                    name: "Pending".to_owned(),
+                    discriminant: 0,
+                    payload: Vec::new(),
+                },
+                FiniteVariant {
+                    identity: finite_variant_id(&module, "TransferState", "Committed"),
+                    name: "Committed".to_owned(),
+                    discriminant: 1,
+                    payload: Vec::new(),
+                },
+            ],
+        });
+
+        let first = program.validate_with_verified_facts(&declaration_request("0.19", Vec::new()));
+        assert!(first.report.valid, "{:?}", first.report.errors);
+        assert_eq!(first.finite_type_declaration_facts.len(), 1);
+        assert_eq!(
+            first.finite_type_declaration_reuse.recomputed[0].reason,
+            DeclarationFactReuseMiss::Missing
+        );
+        assert_eq!(
+            first.finite_type_declaration_facts[0].verifier_identity,
+            FINITE_TYPE_FACT_VERIFIER_ID
+        );
+
+        let subject = program.finite_types[0].identity.clone();
+        let mut reused_request =
+            declaration_request("0.19", first.finite_type_declaration_facts.clone());
+        reused_request
+            .source_location_identities
+            .insert(subject.clone(), "source-map:next-snapshot".to_owned());
+        let reused = program.validate_with_verified_facts(&reused_request);
+        assert!(reused.report.valid, "{:?}", reused.report.errors);
+        assert_eq!(
+            reused.finite_type_declaration_reuse.reused,
+            vec![subject.clone()]
+        );
+        assert_eq!(
+            reused.finite_type_declaration_facts[0]
+                .source_location_identity
+                .as_deref(),
+            Some("source-map:next-snapshot")
+        );
+
+        let mut changed = program.clone();
+        changed.finite_types[0].variants[0].name = "Queued".to_owned();
+        changed.finite_types[0].variants[0].identity =
+            finite_variant_id(&module, "TransferState", "Queued");
+        let changed_result = changed.validate_with_verified_facts(&declaration_request(
+            "0.19",
+            first.finite_type_declaration_facts.clone(),
+        ));
+        assert!(
+            changed_result.report.valid,
+            "{:?}",
+            changed_result.report.errors
+        );
+        assert_eq!(
+            changed_result.finite_type_declaration_reuse.recomputed[0].reason,
+            DeclarationFactReuseMiss::SubjectChanged
+        );
+
+        let changed_profile = program.validate_with_verified_facts(&declaration_request(
+            "0.20",
+            first.finite_type_declaration_facts.clone(),
+        ));
+        assert_eq!(
+            changed_profile.finite_type_declaration_reuse.recomputed[0].reason,
+            DeclarationFactReuseMiss::LanguageProfileChanged
+        );
+
+        let mut invalid = program;
+        invalid.finite_types[0].variants[1].name = invalid.finite_types[0].variants[0].name.clone();
+        invalid.finite_types[0].variants[1].identity =
+            invalid.finite_types[0].variants[0].identity.clone();
+        let invalid_result = invalid.validate_with_verified_facts(&declaration_request(
+            "0.19",
+            first.finite_type_declaration_facts,
+        ));
+        assert!(!invalid_result.report.valid);
+        assert!(invalid_result.report.errors.iter().any(|error| {
+            error.code == "MNCS017" && error.path == "finite_types[0].variants[1].name"
+        }));
+        assert!(invalid_result.finite_type_declaration_facts.is_empty());
     }
 
     #[test]

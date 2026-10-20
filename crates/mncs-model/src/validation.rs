@@ -63,10 +63,13 @@ impl Program {
         let mut warnings = Vec::new();
         let mut facts = Vec::new();
         let mut declaration_facts = Vec::new();
+        let mut finite_type_declaration_facts = Vec::new();
         let mut reused = Vec::new();
         let mut recomputed = Vec::new();
         let mut declaration_reused = Vec::new();
         let mut declaration_recomputed = Vec::new();
+        let mut finite_type_declaration_reused = Vec::new();
+        let mut finite_type_declaration_recomputed = Vec::new();
         let mut prior_by_subject = BTreeMap::<_, Vec<&VerificationFact>>::new();
         let mut prior_declarations_by_subject =
             BTreeMap::<_, Vec<&DeclarationVerificationFact>>::new();
@@ -132,9 +135,10 @@ impl Program {
         let mut finite_type_identities = BTreeSet::new();
         for (type_index, finite_type) in self.finite_types.iter().enumerate() {
             let type_path = format!("finite_types[{type_index}]");
-            if finite_type.name.trim().is_empty()
-                || !finite_type_identities.insert(finite_type.identity.clone())
-            {
+            let name_is_valid = !finite_type.name.trim().is_empty();
+            let identity_is_unique = finite_type_identities.insert(finite_type.identity.clone());
+            let mut declaration_identity_valid = name_is_valid && identity_is_unique;
+            if !name_is_valid || !identity_is_unique {
                 errors.push(diagnostic(
                     "MNCS014",
                     format!("{type_path}.name"),
@@ -145,48 +149,116 @@ impl Program {
                 &|namespace| finite_type_id(namespace, &finite_type.name),
                 &finite_type.identity,
             ) {
+                declaration_identity_valid = false;
                 errors.push(diagnostic(
                     "MNCS015",
                     format!("{type_path}.identity"),
                     "finite type identity does not match its nominal module/name identity",
                 ));
             }
-            if finite_type.variants.is_empty() {
-                errors.push(diagnostic(
-                    "MNCS016",
-                    format!("{type_path}.variants"),
-                    "finite types require at least one variant",
-                ));
+
+            let mut current_fact = None;
+            let mut skip_variant_validation = false;
+            if declaration_identity_valid {
+                if let Some(request) = request {
+                    if let Some(basis) = self.finite_type_declaration_fact_basis(finite_type) {
+                        let language_profile = request
+                            .subject_language_profiles
+                            .get(&basis.subject)
+                            .map(String::as_str)
+                            .unwrap_or(&request.language_profile);
+                        let source_location_identity = request
+                            .source_location_identities
+                            .get(&basis.subject)
+                            .cloned();
+                        let current = DeclarationVerificationFact::from_basis(
+                            basis,
+                            language_profile,
+                            Vec::new(),
+                            source_location_identity.clone(),
+                        );
+                        let prior = prior_declarations_by_subject
+                            .get(&current.subject)
+                            .cloned()
+                            .unwrap_or_default();
+                        let reuse = match prior.as_slice() {
+                            [] => Err(DeclarationFactReuseMiss::Missing),
+                            [_first, _second, ..] => {
+                                Err(DeclarationFactReuseMiss::DuplicatePriorFacts)
+                            }
+                            [fact] => fact.current_basis_matches(&current),
+                        };
+                        match reuse {
+                            Ok(()) => {
+                                crate::record_counter("finite_type_declaration_fact_reuse");
+                                finite_type_declaration_reused.push(current.subject.clone());
+                                let mut refreshed = prior[0].clone();
+                                refreshed.source_location_identity = source_location_identity;
+                                finite_type_declaration_facts.push(refreshed);
+                                skip_variant_validation = true;
+                            }
+                            Err(reason) => {
+                                finite_type_declaration_recomputed.push(
+                                    DeclarationFactRecomputation {
+                                        subject: current.subject.clone(),
+                                        reason,
+                                    },
+                                );
+                                current_fact = Some(current);
+                            }
+                        }
+                    }
+                }
             }
-            let mut variant_names = BTreeSet::new();
-            let mut discriminants = BTreeSet::new();
-            for (variant_index, variant) in finite_type.variants.iter().enumerate() {
-                let variant_path = format!("{type_path}.variants[{variant_index}]");
-                if variant.name.trim().is_empty() || !variant_names.insert(variant.name.as_str()) {
+
+            if !skip_variant_validation {
+                let errors_before_variant_validation = errors.len();
+                if finite_type.variants.is_empty() {
                     errors.push(diagnostic(
-                        "MNCS017",
-                        format!("{variant_path}.name"),
-                        "finite variant names must be non-empty and unique within their type",
+                        "MNCS016",
+                        format!("{type_path}.variants"),
+                        "finite types require at least one variant",
                     ));
                 }
-                if !discriminants.insert(variant.discriminant)
-                    || variant.discriminant != variant_index as u32
-                {
-                    errors.push(diagnostic(
-                        "MNCS018",
-                        format!("{variant_path}.discriminant"),
-                        "finite variant discriminants must be unique and canonical declaration ordinals",
-                    ));
+
+                let mut variant_names = BTreeSet::new();
+                let mut discriminants = BTreeSet::new();
+                for (variant_index, variant) in finite_type.variants.iter().enumerate() {
+                    let variant_path = format!("{type_path}.variants[{variant_index}]");
+                    if variant.name.trim().is_empty()
+                        || !variant_names.insert(variant.name.as_str())
+                    {
+                        errors.push(diagnostic(
+                            "MNCS017",
+                            format!("{variant_path}.name"),
+                            "finite variant names must be non-empty and unique within their type",
+                        ));
+                    }
+                    if !discriminants.insert(variant.discriminant)
+                        || variant.discriminant != variant_index as u32
+                    {
+                        errors.push(diagnostic(
+                            "MNCS018",
+                            format!("{variant_path}.discriminant"),
+                            "finite variant discriminants must be unique and canonical declaration ordinals",
+                        ));
+                    }
+                    if !identity_matches_some_namespace(
+                        &|namespace| finite_variant_id(namespace, &finite_type.name, &variant.name),
+                        &variant.identity,
+                    ) {
+                        errors.push(diagnostic(
+                            "MNCS019",
+                            format!("{variant_path}.identity"),
+                            "finite variant identity does not match its nominal identity",
+                        ));
+                    }
                 }
-                if !identity_matches_some_namespace(
-                    &|namespace| finite_variant_id(namespace, &finite_type.name, &variant.name),
-                    &variant.identity,
-                ) {
-                    errors.push(diagnostic(
-                        "MNCS019",
-                        format!("{variant_path}.identity"),
-                        "finite variant identity does not match its nominal identity",
-                    ));
+
+                if declaration_identity_valid && errors.len() == errors_before_variant_validation {
+                    if let Some(fact) = current_fact {
+                        finite_type_declaration_facts.push(fact);
+                    }
                 }
             }
         }
@@ -430,10 +502,14 @@ impl Program {
         recomputed.sort_by(|left, right| left.subject.cmp(&right.subject));
         declaration_reused.sort();
         declaration_recomputed.sort_by(|left, right| left.subject.cmp(&right.subject));
+        finite_type_declaration_facts.sort_by(|left, right| left.subject.cmp(&right.subject));
+        finite_type_declaration_reused.sort();
+        finite_type_declaration_recomputed.sort_by(|left, right| left.subject.cmp(&right.subject));
         VerificationFactValidation {
             report,
             facts,
             declaration_facts,
+            finite_type_declaration_facts,
             reuse: VerificationFactReuseObservation {
                 schema_version: VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION.to_owned(),
                 reused,
@@ -443,6 +519,11 @@ impl Program {
                 schema_version: DECLARATION_FACT_REUSE_SCHEMA_VERSION.to_owned(),
                 reused: declaration_reused,
                 recomputed: declaration_recomputed,
+            },
+            finite_type_declaration_reuse: DeclarationFactReuseObservation {
+                schema_version: DECLARATION_FACT_REUSE_SCHEMA_VERSION.to_owned(),
+                reused: finite_type_declaration_reused,
+                recomputed: finite_type_declaration_recomputed,
             },
         }
     }

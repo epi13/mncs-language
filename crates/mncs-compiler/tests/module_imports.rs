@@ -1577,10 +1577,8 @@ fn projection_from_a_non_record_value_is_rejected() {
 
 #[test]
 fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_locations() {
-    let resolver = MapResolver::default().with(
-        "lib.cached",
-        "mncs 0.18;\nmodule lib.cached.v1;\nfn pass(value: u64) -> (result: u64) { return value; }\n",
-    );
+    let library_source = "mncs 0.18;\nmodule lib.cached.v1;\nenum CachedState { Ready, Failed }\nfn pass(value: u64) -> (result: u64) { return value; }\n";
+    let resolver = MapResolver::default().with("lib.cached", library_source);
     let compiler = ReferenceCompiler::default();
     let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
         language_profile: "0.19".to_owned(),
@@ -1599,6 +1597,11 @@ fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_loca
     );
     assert!(first.is_valid(), "{:?}", first.diagnostics);
     assert_eq!(first.verification_facts.len(), 2);
+    assert_eq!(first.finite_type_declaration_verification_facts.len(), 1);
+    assert_eq!(
+        first.finite_type_declaration_verification_facts[0].language_profile,
+        "0.18"
+    );
     assert_eq!(
         first
             .module_resolutions
@@ -1610,14 +1613,18 @@ fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_loca
 
     let edited_source = format!("// comment-only edit\n{source}");
     let second_envelope = resolver.envelope("root", edited_source);
+    let edited_library_source = format!("// imported comment-only edit\n{library_source}");
+    let second_resolver = MapResolver::default().with("lib.cached", &edited_library_source);
+    let first_declaration_facts = first
+        .declaration_verification_facts
+        .into_iter()
+        .chain(first.finite_type_declaration_verification_facts)
+        .collect();
     let second = compiler.front_end_with_verified_facts(
         second_envelope.clone(),
-        &resolver,
+        &second_resolver,
         &[],
-        &request(
-            first.verification_facts,
-            first.declaration_verification_facts,
-        ),
+        &request(first.verification_facts, first_declaration_facts),
     );
     assert!(second.is_valid(), "{:?}", second.diagnostics);
     assert_eq!(
@@ -1645,8 +1652,36 @@ fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_loca
         .unwrap()
         .recomputed
         .is_empty());
-    let imported_source_identity = resolver
+    assert_eq!(
+        second
+            .finite_type_declaration_fact_reuse
+            .as_ref()
+            .unwrap()
+            .reused
+            .len(),
+        1
+    );
+    assert!(second
+        .finite_type_declaration_fact_reuse
+        .as_ref()
+        .unwrap()
+        .recomputed
+        .is_empty());
+    let old_import_identity = resolver
         .envelope("lib.cached", resolver.modules["lib.cached"].clone())
+        .identity;
+    let new_import_identity = second_resolver
+        .envelope("lib.cached", second_resolver.modules["lib.cached"].clone())
+        .identity;
+    assert_ne!(old_import_identity, new_import_identity);
+    assert_eq!(
+        second.finite_type_declaration_verification_facts[0]
+            .source_location_identity
+            .as_deref(),
+        Some(new_import_identity.as_str())
+    );
+    let imported_source_identity = second_resolver
+        .envelope("lib.cached", second_resolver.modules["lib.cached"].clone())
         .identity;
     assert!(second.verification_facts.iter().all(|fact| {
         let expected = if fact.subject.as_str().contains("lib.cached") {

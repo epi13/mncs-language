@@ -20,8 +20,8 @@ use mncs_model::{
     EXECUTABLE_BODY_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSION,
 };
 use mncs_syntax::{
-    AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstMatchArm, AstMatchPattern,
-    AstStmt, ConcreteSyntaxTree, DiagnosticSeverity, DiagnosticStage, LexedDocument, ParseOutput,
+    AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstMatchArm, AstMatchPattern, AstStmt,
+    ConcreteSyntaxTree, DiagnosticSeverity, DiagnosticStage, LexedDocument, ParseOutput,
     SourceArtifactKind, SourceDiagnostic, SourceEnvelope, SourceSpan, SpannedText,
     AST_SCHEMA_VERSION, CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION, SOURCE_ENVELOPE_SCHEMA_VERSION,
     SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_9,
@@ -40,8 +40,8 @@ fn trace_timing(stage: &str, started: Instant) {
 }
 
 use crate::resolution::{NameResolution, NameResolutionIndex, ResolvedNameKind};
-use crate::source_parse_cache::{SourceParseCache, SourceParseCacheObservation};
 use crate::source_map::ExecutionSourceMap;
+use crate::source_parse_cache::{SourceParseCache, SourceParseCacheObservation};
 use crate::{fingerprint, native_node_profile, ReferenceCompiler};
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,6 +67,12 @@ pub struct SourceFrontEndResult {
     pub declaration_verification_facts: Vec<DeclarationVerificationFact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub declaration_fact_reuse: Option<DeclarationFactReuseObservation>,
+    /// Successful Language-owned finite-type declaration checks. Their
+    /// source profile and location are refreshed independently per snapshot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub finite_type_declaration_verification_facts: Vec<DeclarationVerificationFact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finite_type_declaration_fact_reuse: Option<DeclarationFactReuseObservation>,
     /// Language-owned parse cache work, when the caller supplied a persistent
     /// source parse cache for this frontend invocation.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -282,6 +288,20 @@ fn source_scoped_fact_request(
             .source_location_identities
             .insert(subject, source_identity.clone());
     }
+    for finite_type in &program.finite_types {
+        let Some((_, (source_identity, source_profile))) = source_context
+            .iter()
+            .find(|(module, _)| finite_type_id(module, &finite_type.name) == finite_type.identity)
+        else {
+            continue;
+        };
+        request
+            .subject_language_profiles
+            .insert(finite_type.identity.clone(), source_profile.clone());
+        request
+            .source_location_identities
+            .insert(finite_type.identity.clone(), source_identity.clone());
+    }
     request
 }
 
@@ -340,13 +360,7 @@ impl ReferenceCompiler {
         seeds: &[mncs_model::HostGenericSeedRequest],
         request: &VerificationFactRequest,
     ) -> SourceFrontEndResult {
-        self.front_end_with_resolver_seeds_and_facts(
-            envelope,
-            resolver,
-            seeds,
-            Some(request),
-            None,
-        )
+        self.front_end_with_resolver_seeds_and_facts(envelope, resolver, seeds, Some(request), None)
     }
 
     /// Runs the normal Language frontend with verified body facts and a
@@ -419,6 +433,8 @@ impl ReferenceCompiler {
         let mut verification_fact_reuse = None;
         let mut declaration_verification_facts = Vec::new();
         let mut declaration_fact_reuse = None;
+        let mut finite_type_declaration_verification_facts = Vec::new();
+        let mut finite_type_declaration_fact_reuse = None;
         let mut semantic_graph = None;
         let mut identities = None;
         let mut name_resolutions = NameResolutionIndex::default();
@@ -440,7 +456,9 @@ impl ReferenceCompiler {
             } else {
                 let elaboration_started = Instant::now();
                 let elaboration = elaborate_program_with_resolver_and_modules_and_seeds_with_map(
-                    tree, active_resolver, seeds,
+                    tree,
+                    active_resolver,
+                    seeds,
                 );
                 trace_timing("elaboration", elaboration_started);
                 match elaboration {
@@ -460,6 +478,10 @@ impl ReferenceCompiler {
                             verification_fact_reuse = Some(fact_result.reuse);
                             declaration_verification_facts = fact_result.declaration_facts;
                             declaration_fact_reuse = Some(fact_result.declaration_reuse);
+                            finite_type_declaration_verification_facts =
+                                fact_result.finite_type_declaration_facts;
+                            finite_type_declaration_fact_reuse =
+                                Some(fact_result.finite_type_declaration_reuse);
                             fact_result.report
                         } else {
                             elaborated.validate()
@@ -554,6 +576,8 @@ impl ReferenceCompiler {
             verification_fact_reuse,
             declaration_verification_facts,
             declaration_fact_reuse,
+            finite_type_declaration_verification_facts,
+            finite_type_declaration_fact_reuse,
             source_parse_cache_reuse: cache_resolver
                 .as_ref()
                 .map(|adapter| adapter.observation.borrow().clone()),
