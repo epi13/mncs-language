@@ -250,11 +250,15 @@ impl Program {
                     &specialization.generic_function,
                     &specialization.canonical_args,
                 );
-                if let Some(fingerprint) = identities.fingerprint(&identity) {
+                if let Some(fingerprint) = self.generic_specialization_fingerprint(
+                    specialization,
+                    &identity,
+                    identities,
+                ) {
                     dependencies.insert(VerificationFactDependency {
                         role: VerificationDependencyRole::GenericSpecialization,
                         identity,
-                        fingerprint: fingerprint.to_owned(),
+                        fingerprint,
                     });
                 }
             }
@@ -269,6 +273,53 @@ impl Program {
             declared_effects: function.effects.clone(),
             declared_capabilities: function.capabilities.clone(),
         })
+    }
+
+    fn generic_specialization_fingerprint(
+        &self,
+        specialization: &GenericSpecializationRecord,
+        identity: &SemanticId,
+        identities: &SemanticIdentities,
+    ) -> Option<String> {
+        let record_fingerprint = identities.fingerprint(identity)?;
+        let generic_function_fingerprint =
+            self.function_semantic_fingerprint(&specialization.generic_function)?;
+        let specialized_function_fingerprint =
+            self.function_semantic_fingerprint(&specialization.specialization_function)?;
+        let bytes = serde_json::to_vec(&(
+            record_fingerprint,
+            generic_function_fingerprint,
+            specialized_function_fingerprint,
+        ))
+        .ok()?;
+        Some(crate::sha256_hex(&bytes))
+    }
+
+    fn function_semantic_fingerprint(&self, identity: &SemanticId) -> Option<String> {
+        let function = self.functions.iter().find(|function| {
+            function_id(function.identity_namespace(&self.module), &function.name) == *identity
+        })?;
+        let body_fingerprint = function
+            .body
+            .as_ref()
+            .map(|body| body.fingerprint())
+            .transpose()
+            .ok()?;
+        #[derive(Serialize)]
+        struct FunctionSemanticFingerprint<'a> {
+            interface_fingerprint: String,
+            body_fingerprint: Option<String>,
+            effects: &'a [Effect],
+            capabilities: &'a [String],
+        }
+        let material = FunctionSemanticFingerprint {
+            interface_fingerprint: function.interface_fingerprint(),
+            body_fingerprint,
+            effects: &function.effects,
+            capabilities: &function.capabilities,
+        };
+        let bytes = serde_json::to_vec(&material).ok()?;
+        Some(crate::sha256_hex(&bytes))
     }
 }
 
