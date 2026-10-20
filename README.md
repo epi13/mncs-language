@@ -201,15 +201,16 @@ A key initial rule is that every effect must identify an authorizing capability,
 
 The experimental 0.2 layer adds deterministic SHA-256 content fingerprints, structural semantic identities, a typed semantic graph, dependency-aware evidence manifests, conservative invalidation, the bounded `mncs.semantic-impact/1` neighborhood, diagnostic obligations, backward causal slices, finite refinement budgets, typed isolated repair patches, explicit promotion records, semantic/authority/evidence deltas, and versioned verifier artifact import checks. The 0.3 layer accepts a small syntax-independent executable body model, computes deterministic CFG reachability/dominance, and lowers symbolic values, state regions, normal and failure paths, explicit effect capability uses, contract/evidence traceability, generated obligations, machine-intent links, lowering/portability envelopes, and transformation provenance into HIR. The experimental 0.4 layer projects that subset into validated block-parameter SSA while retaining semantic/HIR/SSA identities. Roadmap 0.5 adds explicit saturating/widening semantics, bounded plural-backend execution, machine-readable emitted/withheld promise decisions, a release-path checked constant-range certificate for LLVM `nsw`/`nuw`, Rust-control comparison, and a sealed bounded refinement-cycle artifact. Forge is a local development/evidence harness, not a sandbox, independent evaluator, or promotion authority. This is not a production compiler or backend.
 
-The model also exposes `mncs.language-verification-fact/2` for successful
+The model also exposes `mncs.language-verification-fact/3` for successful
 function-body validation. Facts bind existing semantic identities and
-fingerprints to the callable interface, directly used declarations,
+fingerprints to callable interfaces and implementations, nominal declarations,
 generic specializations, effect and capability assumptions, verifier policy,
 and source profile. `Program::validate_with_verified_facts` rechecks current
-declarations and reuses only facts whose complete guard still matches. The
-wire fields and invalidation rules are specified in
-[`spec/verification-fact-v2.md`](spec/verification-fact-v2.md); version 1
-facts are recomputed rather than reused.
+declarations and reuses only facts whose complete guard still matches. A
+changed callee body invalidates its direct callers, while unrelated bodies
+remain reusable. The current wire fields and invalidation rules are specified
+in [`spec/verification-fact-v3.md`](spec/verification-fact-v3.md); older
+versioned facts are recomputed rather than reused.
 
 ## Try the semantic prototype
 
