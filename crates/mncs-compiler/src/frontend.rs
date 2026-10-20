@@ -73,6 +73,13 @@ pub struct SourceFrontEndResult {
     pub finite_type_declaration_verification_facts: Vec<DeclarationVerificationFact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finite_type_declaration_fact_reuse: Option<DeclarationFactReuseObservation>,
+    /// Successful Language-owned record-type declaration checks. Their
+    /// dependency guards include nominal field types and current source
+    /// locations are refreshed for each source snapshot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub record_type_declaration_verification_facts: Vec<DeclarationVerificationFact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub record_type_declaration_fact_reuse: Option<DeclarationFactReuseObservation>,
     /// Language-owned parse cache work, when the caller supplied a persistent
     /// source parse cache for this frontend invocation.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -302,6 +309,20 @@ fn source_scoped_fact_request(
             .source_location_identities
             .insert(finite_type.identity.clone(), source_identity.clone());
     }
+    for record_type in &program.record_types {
+        let Some(module) = record_type.identity.declaring_module() else {
+            continue;
+        };
+        let Some((source_identity, source_profile)) = source_context.get(&module) else {
+            continue;
+        };
+        request
+            .subject_language_profiles
+            .insert(record_type.identity.clone(), source_profile.clone());
+        request
+            .source_location_identities
+            .insert(record_type.identity.clone(), source_identity.clone());
+    }
     request
 }
 
@@ -435,6 +456,8 @@ impl ReferenceCompiler {
         let mut declaration_fact_reuse = None;
         let mut finite_type_declaration_verification_facts = Vec::new();
         let mut finite_type_declaration_fact_reuse = None;
+        let mut record_type_declaration_verification_facts = Vec::new();
+        let mut record_type_declaration_fact_reuse = None;
         let mut semantic_graph = None;
         let mut identities = None;
         let mut name_resolutions = NameResolutionIndex::default();
@@ -482,6 +505,10 @@ impl ReferenceCompiler {
                                 fact_result.finite_type_declaration_facts;
                             finite_type_declaration_fact_reuse =
                                 Some(fact_result.finite_type_declaration_reuse);
+                            record_type_declaration_verification_facts =
+                                fact_result.record_type_declaration_facts;
+                            record_type_declaration_fact_reuse =
+                                Some(fact_result.record_type_declaration_reuse);
                             fact_result.report
                         } else {
                             elaborated.validate()
@@ -578,6 +605,8 @@ impl ReferenceCompiler {
             declaration_fact_reuse,
             finite_type_declaration_verification_facts,
             finite_type_declaration_fact_reuse,
+            record_type_declaration_verification_facts,
+            record_type_declaration_fact_reuse,
             source_parse_cache_reuse: cache_resolver
                 .as_ref()
                 .map(|adapter| adapter.observation.borrow().clone()),

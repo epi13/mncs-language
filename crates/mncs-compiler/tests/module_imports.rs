@@ -1585,6 +1585,7 @@ fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_loca
         subject_language_profiles: BTreeMap::new(),
         prior_facts,
         prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
         source_location_identities: BTreeMap::new(),
     };
     let source = "mncs 0.19;\nmodule app.cached;\nuse lib.cached;\nfn entry(value: u64) -> (result: u64) { return lib.cached.pass(value); }\n";
@@ -1694,6 +1695,82 @@ fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_loca
 }
 
 #[test]
+fn linked_frontend_reuses_record_declarations_and_invalidates_transitive_nominal_dependencies() {
+    let library_source = "mncs 0.18;\nmodule lib.record_facts;\nrecord Currency { code: u64 }\nrecord Money { currency: Currency }\n";
+    let root_source = "mncs 0.19;\nmodule app.record_facts;\nuse lib.record_facts;\nrecord Wallet { money: Money }\nfn entry(value: Wallet) -> (result: Wallet) { return value; }\n";
+    let resolver = MapResolver::default().with("lib.record_facts", library_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_record_type_declaration_facts| VerificationFactRequest {
+        language_profile: "0.19".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts: Vec::new(),
+        prior_declaration_facts: Vec::new(),
+        prior_record_type_declaration_facts,
+        source_location_identities: BTreeMap::new(),
+    };
+
+    let first = compiler.front_end_with_verified_facts(
+        resolver.envelope("root", root_source.to_owned()),
+        &resolver,
+        &[],
+        &request(Vec::new()),
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    assert_eq!(first.record_type_declaration_verification_facts.len(), 3);
+    assert_eq!(
+        first
+            .record_type_declaration_fact_reuse
+            .as_ref()
+            .unwrap()
+            .recomputed
+            .len(),
+        3
+    );
+
+    let comment_library = format!("// updated source map\n{library_source}");
+    let comment_resolver = MapResolver::default().with("lib.record_facts", &comment_library);
+    let second = compiler.front_end_with_verified_facts(
+        comment_resolver.envelope("root", root_source.to_owned()),
+        &comment_resolver,
+        &[],
+        &request(first.record_type_declaration_verification_facts.clone()),
+    );
+    assert!(second.is_valid(), "{:?}", second.diagnostics);
+    assert_eq!(
+        second
+            .record_type_declaration_fact_reuse
+            .as_ref()
+            .unwrap()
+            .reused
+            .len(),
+        3
+    );
+    assert!(second
+        .record_type_declaration_verification_facts
+        .iter()
+        .all(|fact| fact.source_location_identity.is_some()));
+
+    let changed_library = library_source.replace("code: u64", "code: i64");
+    let changed_resolver = MapResolver::default().with("lib.record_facts", &changed_library);
+    let changed = compiler.front_end_with_verified_facts(
+        changed_resolver.envelope("root", root_source.to_owned()),
+        &changed_resolver,
+        &[],
+        &request(second.record_type_declaration_verification_facts),
+    );
+    assert!(changed.is_valid(), "{:?}", changed.diagnostics);
+    let changed_reuse = changed.record_type_declaration_fact_reuse.unwrap();
+    assert!(changed_reuse.reused.is_empty());
+    assert_eq!(changed_reuse.recomputed.len(), 3);
+    assert!(changed_reuse
+        .recomputed
+        .iter()
+        .filter(|entry| entry.subject.as_str().contains("Money")
+            || entry.subject.as_str().contains("Wallet"))
+        .all(|entry| entry.reason == mncs_model::DeclarationFactReuseMiss::DependenciesChanged));
+}
+
+#[test]
 fn linked_frontend_reuses_unchanged_import_parses_after_cache_restart() {
     let library_source =
         "mncs 0.19;\nmodule lib.parse_cache;\nfn pass(value: u64) -> (result: u64) { return value; }\n";
@@ -1704,6 +1781,7 @@ fn linked_frontend_reuses_unchanged_import_parses_after_cache_restart() {
         subject_language_profiles: BTreeMap::new(),
         prior_facts,
         prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
         source_location_identities: BTreeMap::new(),
     };
     let source = "mncs 0.19;\nmodule app.parse_cache;\nuse lib.parse_cache;\nfn entry(value: u64) -> (result: u64) { return lib.parse_cache.pass(value); }\n";
@@ -1776,6 +1854,7 @@ fn linked_frontend_reuses_serialized_verification_facts_and_rechecks_tampered_wi
         subject_language_profiles: BTreeMap::new(),
         prior_facts,
         prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
         source_location_identities: BTreeMap::new(),
     };
     let source = "mncs 0.19;\nmodule app.fact_restart;\nuse lib.fact_restart as imported;\nfn entry(value: u64) -> (result: u64) { return imported.pass(value); }\nfn independent(value: u64) -> (result: u64) { return value; }\n";
@@ -1905,6 +1984,7 @@ fn independent(value: u64) -> (result: u64) { return value; }
         subject_language_profiles: BTreeMap::new(),
         prior_facts,
         prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
         source_location_identities: BTreeMap::new(),
     };
     let root_source = r#"mncs 0.10;
@@ -1976,6 +2056,7 @@ fn independent(value: u64) -> (result: u64) { return value; }
         subject_language_profiles: BTreeMap::new(),
         prior_facts,
         prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
         source_location_identities: BTreeMap::new(),
     };
     let root_source = r#"mncs 0.10;
@@ -2149,6 +2230,7 @@ fn independent(value: u64) -> (result: u64) { return value; }
         subject_language_profiles: BTreeMap::new(),
         prior_facts,
         prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
         source_location_identities: BTreeMap::new(),
     };
     let root_source = r#"mncs 0.10;
@@ -2295,6 +2377,7 @@ fn local(value: u64) -> (result: u64) { return value; }
         subject_language_profiles: BTreeMap::new(),
         prior_facts,
         prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
         source_location_identities: BTreeMap::new(),
     };
 
@@ -2407,6 +2490,7 @@ fn local(value: u64) -> (result: u64) { return value; }
         subject_language_profiles: BTreeMap::new(),
         prior_facts,
         prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
         source_location_identities: BTreeMap::new(),
     };
 
@@ -2533,6 +2617,7 @@ fn local(value: u64) -> (result: u64) { return value; }
         subject_language_profiles: BTreeMap::new(),
         prior_facts,
         prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
         source_location_identities: BTreeMap::new(),
     };
 
@@ -2661,6 +2746,7 @@ fn unrelated(value: u64) -> (result: u64) { return value; }
         subject_language_profiles: BTreeMap::new(),
         prior_facts,
         prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
         source_location_identities: BTreeMap::new(),
     };
     let first_resolver = MapResolver::default().with("lib.effect_facts", effect_module);

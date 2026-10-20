@@ -64,14 +64,19 @@ impl Program {
         let mut facts = Vec::new();
         let mut declaration_facts = Vec::new();
         let mut finite_type_declaration_facts = Vec::new();
+        let mut record_type_declaration_facts = Vec::new();
         let mut reused = Vec::new();
         let mut recomputed = Vec::new();
         let mut declaration_reused = Vec::new();
         let mut declaration_recomputed = Vec::new();
         let mut finite_type_declaration_reused = Vec::new();
         let mut finite_type_declaration_recomputed = Vec::new();
+        let mut record_type_declaration_reused = Vec::new();
+        let mut record_type_declaration_recomputed = Vec::new();
         let mut prior_by_subject = BTreeMap::<_, Vec<&VerificationFact>>::new();
         let mut prior_declarations_by_subject =
+            BTreeMap::<_, Vec<&DeclarationVerificationFact>>::new();
+        let mut prior_record_type_declarations_by_subject =
             BTreeMap::<_, Vec<&DeclarationVerificationFact>>::new();
         let fact_identities = request.map(|_| self.semantic_identities());
         let fact_function_index = request.map(|_| self.verification_function_index());
@@ -84,6 +89,12 @@ impl Program {
             }
             for fact in &request.prior_declaration_facts {
                 prior_declarations_by_subject
+                    .entry(&fact.subject)
+                    .or_default()
+                    .push(fact);
+            }
+            for fact in &request.prior_record_type_declaration_facts {
+                prior_record_type_declarations_by_subject
                     .entry(&fact.subject)
                     .or_default()
                     .push(fact);
@@ -258,6 +269,111 @@ impl Program {
                 if declaration_identity_valid && errors.len() == errors_before_variant_validation {
                     if let Some(fact) = current_fact {
                         finite_type_declaration_facts.push(fact);
+                    }
+                }
+            }
+        }
+
+        let mut record_type_identities = BTreeSet::new();
+        for (record_index, record_type) in self.record_types.iter().enumerate() {
+            let record_path = format!("record_types[{record_index}]");
+            let record_name_valid = !record_type.name.trim().is_empty();
+            let record_identity_valid = record_name_valid
+                && !record_type.identity.as_str().trim().is_empty()
+                && record_type_identities.insert(record_type.identity.clone());
+            if !record_name_valid || !record_identity_valid {
+                errors.push(diagnostic(
+                    "MNCS020",
+                    format!("{record_path}.identity"),
+                    "record type names and identities must be non-empty and identities must be unique",
+                ));
+            }
+
+            let mut current_fact = None;
+            let mut skip_field_validation = false;
+            if record_identity_valid {
+                if let Some(request) = request {
+                    if let Some(basis) = self.record_type_declaration_fact_basis(record_type) {
+                        let language_profile = request
+                            .subject_language_profiles
+                            .get(&basis.subject)
+                            .map(String::as_str)
+                            .unwrap_or(&request.language_profile);
+                        let source_location_identity = request
+                            .source_location_identities
+                            .get(&basis.subject)
+                            .cloned();
+                        let current = DeclarationVerificationFact::from_basis(
+                            basis,
+                            language_profile,
+                            Vec::new(),
+                            source_location_identity.clone(),
+                        );
+                        let prior = prior_record_type_declarations_by_subject
+                            .get(&current.subject)
+                            .cloned()
+                            .unwrap_or_default();
+                        let reuse = match prior.as_slice() {
+                            [] => Err(DeclarationFactReuseMiss::Missing),
+                            [_first, _second, ..] => {
+                                Err(DeclarationFactReuseMiss::DuplicatePriorFacts)
+                            }
+                            [fact] => fact.current_basis_matches(&current),
+                        };
+                        match reuse {
+                            Ok(()) => {
+                                crate::record_counter("record_type_declaration_fact_reuse");
+                                record_type_declaration_reused.push(current.subject.clone());
+                                let mut refreshed = prior[0].clone();
+                                refreshed.source_location_identity = source_location_identity;
+                                record_type_declaration_facts.push(refreshed);
+                                skip_field_validation = true;
+                            }
+                            Err(reason) => {
+                                record_type_declaration_recomputed.push(
+                                    DeclarationFactRecomputation {
+                                        subject: current.subject.clone(),
+                                        reason,
+                                    },
+                                );
+                                current_fact = Some(current);
+                            }
+                        }
+                    } else {
+                        record_type_declaration_recomputed.push(DeclarationFactRecomputation {
+                            subject: record_type.identity.clone(),
+                            reason: DeclarationFactReuseMiss::DependenciesChanged,
+                        });
+                    }
+                }
+            }
+
+            if !skip_field_validation {
+                if request.is_some() {
+                    crate::record_counter("record_type_declaration_verification");
+                }
+                let errors_before_field_validation = errors.len();
+                let mut field_names = BTreeSet::new();
+                for (field_index, field) in record_type.fields.iter().enumerate() {
+                    let field_path = format!("{record_path}.fields[{field_index}]");
+                    if field.name.trim().is_empty() || !field_names.insert(field.name.as_str()) {
+                        errors.push(diagnostic(
+                            "MNCS021",
+                            format!("{field_path}.name"),
+                            "record field names must be non-empty and unique within their record",
+                        ));
+                    }
+                    if field.field_type.trim().is_empty() {
+                        errors.push(diagnostic(
+                            "MNCS022",
+                            format!("{field_path}.type"),
+                            "record field types must not be empty",
+                        ));
+                    }
+                }
+                if record_identity_valid && errors.len() == errors_before_field_validation {
+                    if let Some(fact) = current_fact {
+                        record_type_declaration_facts.push(fact);
                     }
                 }
             }
@@ -505,11 +621,15 @@ impl Program {
         finite_type_declaration_facts.sort_by(|left, right| left.subject.cmp(&right.subject));
         finite_type_declaration_reused.sort();
         finite_type_declaration_recomputed.sort_by(|left, right| left.subject.cmp(&right.subject));
+        record_type_declaration_facts.sort_by(|left, right| left.subject.cmp(&right.subject));
+        record_type_declaration_reused.sort();
+        record_type_declaration_recomputed.sort_by(|left, right| left.subject.cmp(&right.subject));
         VerificationFactValidation {
             report,
             facts,
             declaration_facts,
             finite_type_declaration_facts,
+            record_type_declaration_facts,
             reuse: VerificationFactReuseObservation {
                 schema_version: VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION.to_owned(),
                 reused,
@@ -524,6 +644,11 @@ impl Program {
                 schema_version: DECLARATION_FACT_REUSE_SCHEMA_VERSION.to_owned(),
                 reused: finite_type_declaration_reused,
                 recomputed: finite_type_declaration_recomputed,
+            },
+            record_type_declaration_reuse: DeclarationFactReuseObservation {
+                schema_version: DECLARATION_FACT_REUSE_SCHEMA_VERSION.to_owned(),
+                reused: record_type_declaration_reused,
+                recomputed: record_type_declaration_recomputed,
             },
         }
     }

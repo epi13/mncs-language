@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assumption_id, function_id, specialization_id, BodyOperationKind, BodyType, Effect, FiniteType,
-    Function, FunctionBody, GenericArg, GenericSpecializationRecord, Program, SemanticId,
-    SemanticIdentities,
+    Function, FunctionBody, GenericArg, GenericSpecializationRecord, Program, RecordType,
+    SemanticId, SemanticIdentities,
 };
 
 pub const VERIFICATION_FACT_SCHEMA_VERSION: &str = "mncs.language-verification-fact/3";
@@ -28,6 +28,8 @@ pub const DECLARATION_FACT_VERIFIER_ID: &str = "mncs-language-function-declarati
 pub const DECLARATION_FACT_POLICY_ID: &str = "mncs-language-function-declaration-policy/1";
 pub const FINITE_TYPE_FACT_VERIFIER_ID: &str = "mncs-language-finite-type-validator/1";
 pub const FINITE_TYPE_FACT_POLICY_ID: &str = "mncs-language-finite-type-policy/1";
+pub const RECORD_TYPE_FACT_VERIFIER_ID: &str = "mncs-language-record-type-validator/1";
+pub const RECORD_TYPE_FACT_POLICY_ID: &str = "mncs-language-record-type-policy/1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -108,6 +110,11 @@ pub struct VerificationFactRequest {
     /// subjects, dependencies, and recomputation units.
     #[serde(default)]
     pub prior_declaration_facts: Vec<DeclarationVerificationFact>,
+    /// Prior successful nominal record declaration checks. Record facts are
+    /// kept separate from function and finite-type declarations so each
+    /// verifier policy and dependency set remains independently addressable.
+    #[serde(default)]
+    pub prior_record_type_declaration_facts: Vec<DeclarationVerificationFact>,
     #[serde(default)]
     pub source_location_identities: BTreeMap<SemanticId, String>,
 }
@@ -153,9 +160,11 @@ pub struct VerificationFactValidation {
     pub facts: Vec<VerificationFact>,
     pub declaration_facts: Vec<DeclarationVerificationFact>,
     pub finite_type_declaration_facts: Vec<DeclarationVerificationFact>,
+    pub record_type_declaration_facts: Vec<DeclarationVerificationFact>,
     pub reuse: VerificationFactReuseObservation,
     pub declaration_reuse: DeclarationFactReuseObservation,
     pub finite_type_declaration_reuse: DeclarationFactReuseObservation,
+    pub record_type_declaration_reuse: DeclarationFactReuseObservation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -310,6 +319,148 @@ impl Program {
             verifier_identity: FINITE_TYPE_FACT_VERIFIER_ID.to_owned(),
             policy_identity: FINITE_TYPE_FACT_POLICY_ID.to_owned(),
         })
+    }
+
+    pub(crate) fn record_type_declaration_fact_basis(
+        &self,
+        record_type: &RecordType,
+    ) -> Option<DeclarationFactBasis> {
+        let mut dependencies = BTreeSet::new();
+        let mut visited_types = BTreeSet::from([record_type.identity.clone()]);
+        for field in &record_type.fields {
+            self.add_record_field_type_dependencies(
+                record_type,
+                &field.field_type,
+                &mut dependencies,
+                &mut visited_types,
+            )?;
+        }
+        Some(DeclarationFactBasis {
+            subject: record_type.identity.clone(),
+            subject_fingerprint: record_type_semantic_fingerprint(record_type)?,
+            dependencies: dependencies.into_iter().collect(),
+            verifier_identity: RECORD_TYPE_FACT_VERIFIER_ID.to_owned(),
+            policy_identity: RECORD_TYPE_FACT_POLICY_ID.to_owned(),
+        })
+    }
+
+    fn add_record_field_type_dependencies(
+        &self,
+        owner: &RecordType,
+        field_type: &str,
+        dependencies: &mut BTreeSet<VerificationFactDependency>,
+        visited_types: &mut BTreeSet<SemanticId>,
+    ) -> Option<()> {
+        let field_type = field_type.trim();
+        if let Some(inner) = field_type
+            .strip_prefix('[')
+            .and_then(|value| value.strip_suffix(']'))
+        {
+            if let Some((element, _bound)) = inner.rsplit_once(';') {
+                return self.add_record_field_type_dependencies(
+                    owner,
+                    element.trim(),
+                    dependencies,
+                    visited_types,
+                );
+            }
+        }
+
+        let exact_records = self
+            .record_types
+            .iter()
+            .filter(|candidate| candidate.identity.as_str() == field_type)
+            .collect::<Vec<_>>();
+        let exact_finite_types = self
+            .finite_types
+            .iter()
+            .filter(|candidate| candidate.identity.as_str() == field_type)
+            .collect::<Vec<_>>();
+        if exact_records.len() + exact_finite_types.len() > 1 {
+            return None;
+        }
+        if let Some(candidate) = exact_records.first() {
+            self.add_record_type_dependency_closure(candidate, dependencies, visited_types)?;
+            return Some(());
+        }
+        if let Some(candidate) = exact_finite_types.first() {
+            dependencies.insert(VerificationFactDependency {
+                role: VerificationDependencyRole::NominalType,
+                identity: candidate.identity.clone(),
+                fingerprint: crate::sha256_hex(&serde_json::to_vec(candidate).ok()?),
+            });
+            return Some(());
+        }
+
+        let owner_module = owner.identity.declaring_module();
+        let local_records = self
+            .record_types
+            .iter()
+            .filter(|candidate| {
+                candidate.name == field_type
+                    && candidate.identity.declaring_module() == owner_module
+            })
+            .collect::<Vec<_>>();
+        let local_finite_types = self
+            .finite_types
+            .iter()
+            .filter(|candidate| {
+                candidate.name == field_type
+                    && candidate.identity.declaring_module() == owner_module
+            })
+            .collect::<Vec<_>>();
+        let (records, finite_types) = if local_records.is_empty() && local_finite_types.is_empty() {
+            (
+                self.record_types
+                    .iter()
+                    .filter(|candidate| candidate.name == field_type)
+                    .collect::<Vec<_>>(),
+                self.finite_types
+                    .iter()
+                    .filter(|candidate| candidate.name == field_type)
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            (local_records, local_finite_types)
+        };
+        if records.len() + finite_types.len() > 1 {
+            return None;
+        }
+        if let Some(candidate) = records.first() {
+            self.add_record_type_dependency_closure(candidate, dependencies, visited_types)?;
+        } else if let Some(candidate) = finite_types.first() {
+            dependencies.insert(VerificationFactDependency {
+                role: VerificationDependencyRole::NominalType,
+                identity: candidate.identity.clone(),
+                fingerprint: crate::sha256_hex(&serde_json::to_vec(candidate).ok()?),
+            });
+        }
+        Some(())
+    }
+
+    fn add_record_type_dependency_closure(
+        &self,
+        record_type: &RecordType,
+        dependencies: &mut BTreeSet<VerificationFactDependency>,
+        visited_types: &mut BTreeSet<SemanticId>,
+    ) -> Option<()> {
+        if !visited_types.insert(record_type.identity.clone()) {
+            return Some(());
+        }
+        dependencies.insert(VerificationFactDependency {
+            role: VerificationDependencyRole::NominalType,
+            identity: record_type.identity.clone(),
+            fingerprint: record_type_semantic_fingerprint(record_type)?,
+        });
+        for field in &record_type.fields {
+            self.add_record_field_type_dependencies(
+                record_type,
+                &field.field_type,
+                dependencies,
+                visited_types,
+            )?;
+        }
+        Some(())
     }
 
     pub(crate) fn body_fact_basis_with_identities(
@@ -612,6 +763,17 @@ impl Program {
         let bytes = serde_json::to_vec(&material).ok()?;
         Some(crate::sha256_hex(&bytes))
     }
+}
+
+fn record_type_semantic_fingerprint(record_type: &RecordType) -> Option<String> {
+    let mut fields = record_type
+        .fields
+        .iter()
+        .map(|field| (&field.name, &field.field_type))
+        .collect::<Vec<_>>();
+    fields.sort();
+    let bytes = serde_json::to_vec(&(&record_type.identity, &record_type.name, fields)).ok()?;
+    Some(crate::sha256_hex(&bytes))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -1106,6 +1268,7 @@ mod tests {
             subject_language_profiles: BTreeMap::new(),
             prior_facts,
             prior_declaration_facts: Vec::new(),
+            prior_record_type_declaration_facts: Vec::new(),
             source_location_identities: BTreeMap::new(),
         }
     }
@@ -1116,6 +1279,15 @@ mod tests {
     ) -> VerificationFactRequest {
         let mut request = request(profile, Vec::new());
         request.prior_declaration_facts = prior_facts;
+        request
+    }
+
+    fn record_type_declaration_request(
+        profile: &str,
+        prior_facts: Vec<DeclarationVerificationFact>,
+    ) -> VerificationFactRequest {
+        let mut request = declaration_request(profile, Vec::new());
+        request.prior_record_type_declaration_facts = prior_facts;
         request
     }
 
@@ -2093,6 +2265,129 @@ mod tests {
             error.code == "MNCS017" && error.path == "finite_types[0].variants[1].name"
         }));
         assert!(invalid_result.finite_type_declaration_facts.is_empty());
+    }
+
+    #[test]
+    fn record_type_declaration_facts_reuse_refresh_locations_and_invalidate_dependencies() {
+        let mut program = crate::validation::tests::valid_program();
+        let module = program.module.clone();
+        let currency_identity = record_type_id(&module, "Currency", &[("code", "i64")]);
+        let money_identity = record_type_id(&module, "Money", &[("currency", "Currency")]);
+        let wallet_identity = record_type_id(&module, "Wallet", &[("money", "Money")]);
+        program.record_types = vec![
+            RecordType {
+                identity: currency_identity,
+                name: "Currency".to_owned(),
+                fields: vec![RecordField {
+                    name: "code".to_owned(),
+                    field_type: "i64".to_owned(),
+                }],
+            },
+            RecordType {
+                identity: money_identity.clone(),
+                name: "Money".to_owned(),
+                fields: vec![RecordField {
+                    name: "currency".to_owned(),
+                    field_type: "Currency".to_owned(),
+                }],
+            },
+            RecordType {
+                identity: wallet_identity.clone(),
+                name: "Wallet".to_owned(),
+                fields: vec![RecordField {
+                    name: "money".to_owned(),
+                    field_type: "Money".to_owned(),
+                }],
+            },
+        ];
+
+        let first = program
+            .validate_with_verified_facts(&record_type_declaration_request("0.19", Vec::new()));
+        assert!(first.report.valid, "{:?}", first.report.errors);
+        assert_eq!(first.record_type_declaration_facts.len(), 3);
+        assert_eq!(first.record_type_declaration_reuse.recomputed.len(), 3);
+        assert_eq!(
+            first.record_type_declaration_facts[0].verifier_identity,
+            RECORD_TYPE_FACT_VERIFIER_ID
+        );
+        let restored: Vec<DeclarationVerificationFact> = serde_json::from_slice(
+            &serde_json::to_vec(&first.record_type_declaration_facts).unwrap(),
+        )
+        .unwrap();
+
+        let mut reused_request = record_type_declaration_request("0.19", restored.clone());
+        reused_request.source_location_identities.insert(
+            money_identity.clone(),
+            "source-map:next-snapshot".to_owned(),
+        );
+        let reused = program.validate_with_verified_facts(&reused_request);
+        assert!(reused.report.valid, "{:?}", reused.report.errors);
+        assert_eq!(reused.record_type_declaration_reuse.reused.len(), 3);
+        let money_fact = reused
+            .record_type_declaration_facts
+            .iter()
+            .find(|fact| fact.subject == money_identity)
+            .unwrap();
+        assert_eq!(
+            money_fact.source_location_identity.as_deref(),
+            Some("source-map:next-snapshot")
+        );
+
+        let mut changed_dependency = program.clone();
+        changed_dependency.record_types[0].fields[0].field_type = "i32".to_owned();
+        changed_dependency.record_types[0].identity =
+            record_type_id(&module, "Currency", &[("code", "i32")]);
+        let changed = changed_dependency.validate_with_verified_facts(
+            &record_type_declaration_request("0.19", restored.clone()),
+        );
+        assert!(changed.report.valid, "{:?}", changed.report.errors);
+        let money_recomputation = changed
+            .record_type_declaration_reuse
+            .recomputed
+            .iter()
+            .find(|entry| entry.subject == money_identity)
+            .unwrap();
+        assert_eq!(
+            money_recomputation.reason,
+            DeclarationFactReuseMiss::DependenciesChanged
+        );
+        let wallet_recomputation = changed
+            .record_type_declaration_reuse
+            .recomputed
+            .iter()
+            .find(|entry| entry.subject == wallet_identity)
+            .unwrap();
+        assert_eq!(
+            wallet_recomputation.reason,
+            DeclarationFactReuseMiss::DependenciesChanged
+        );
+
+        let changed_profile = program.validate_with_verified_facts(
+            &record_type_declaration_request("0.20", restored.clone()),
+        );
+        assert!(changed_profile
+            .record_type_declaration_reuse
+            .recomputed
+            .iter()
+            .all(|entry| entry.reason == DeclarationFactReuseMiss::LanguageProfileChanged));
+
+        let mut invalid = program;
+        invalid.record_types[1].fields.push(RecordField {
+            name: "currency".to_owned(),
+            field_type: "i64".to_owned(),
+        });
+        let invalid_result = invalid
+            .validate_with_verified_facts(&record_type_declaration_request("0.19", restored));
+        assert!(!invalid_result.report.valid);
+        assert!(invalid_result
+            .report
+            .errors
+            .iter()
+            .any(|error| error.code == "MNCS021"));
+        assert!(invalid_result
+            .record_type_declaration_facts
+            .iter()
+            .all(|fact| fact.subject != money_identity));
     }
 
     #[test]
