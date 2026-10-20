@@ -1725,3 +1725,104 @@ fn other(value: u64) -> (result: u64) { return g.independent(value); }
         .iter()
         .any(|subject| subject.as_str().ends_with("::other")));
 }
+
+#[test]
+fn linked_frontend_invalidates_direct_callers_on_imported_callee_body_edits() {
+    let library_source = r#"mncs 0.10;
+module lib.fact_dependency;
+fn advance(value: u64) -> (result: u64) { return value; }
+fn independent(value: u64) -> (result: u64) { return value; }
+"#;
+    let root_source = r#"mncs 0.10;
+module app.fact_dependency;
+use lib.fact_dependency as dependency;
+fn entry(value: u64) -> (result: u64) { return dependency.advance(value); }
+fn unrelated(value: u64) -> (result: u64) { return dependency.independent(value); }
+fn local(value: u64) -> (result: u64) { return value; }
+"#;
+    let resolver = MapResolver::default().with("lib.fact_dependency", library_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
+        language_profile: "0.10".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        prior_declaration_facts,
+        source_location_identities: BTreeMap::new(),
+    };
+
+    let first_envelope = resolver.envelope("root", root_source.to_owned());
+    let first = compiler.front_end_with_verified_facts(
+        first_envelope,
+        &resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    let caller_fact = first
+        .verification_facts
+        .iter()
+        .find(|fact| {
+            fact.subject
+                .as_str()
+                .ends_with("app.fact_dependency::entry")
+        })
+        .expect("imported callee caller fact");
+    assert!(caller_fact.dependencies.iter().any(|dependency| {
+        dependency.role == VerificationDependencyRole::CallableImplementation
+            && dependency
+                .identity
+                .as_str()
+                .ends_with("lib.fact_dependency::advance")
+    }));
+
+    let changed_library = library_source.replace(
+        "fn advance(value: u64) -> (result: u64) { return value; }",
+        "fn advance(value: u64) -> (result: u64) { return 0; }",
+    );
+    assert_ne!(changed_library, library_source);
+    let changed_resolver = MapResolver::default().with("lib.fact_dependency", &changed_library);
+    let changed = compiler.front_end_with_verified_facts(
+        changed_resolver.envelope("root", root_source.to_owned()),
+        &changed_resolver,
+        &[],
+        &request(
+            first.verification_facts,
+            first.declaration_verification_facts,
+        ),
+    );
+    assert!(changed.is_valid(), "{:?}", changed.diagnostics);
+
+    let reuse = changed
+        .verification_fact_reuse
+        .as_ref()
+        .expect("Language fact reuse observation");
+    assert!(reuse.recomputed.iter().any(|row| row
+        .subject
+        .as_str()
+        .ends_with("lib.fact_dependency::advance")));
+    assert!(reuse
+        .recomputed
+        .iter()
+        .any(|row| row.subject.as_str().ends_with("app.fact_dependency::entry")));
+    assert!(reuse.reused.iter().any(|subject| subject
+        .as_str()
+        .ends_with("lib.fact_dependency::independent")));
+    assert!(reuse
+        .reused
+        .iter()
+        .any(|subject| subject.as_str().ends_with("app.fact_dependency::unrelated")));
+    assert!(reuse
+        .reused
+        .iter()
+        .any(|subject| subject.as_str().ends_with("app.fact_dependency::local")));
+
+    let declaration_reuse = changed
+        .declaration_fact_reuse
+        .as_ref()
+        .expect("Language declaration fact reuse observation");
+    assert_eq!(
+        declaration_reuse.reused.len(),
+        changed.declaration_verification_facts.len()
+    );
+    assert!(declaration_reuse.recomputed.is_empty());
+}
