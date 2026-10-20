@@ -12,14 +12,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    assumption_id, function_id, specialization_id, Effect, Function, GenericSpecializationRecord,
-    Program, SemanticId, SemanticIdentities,
+    assumption_id, function_id, specialization_id, BodyOperationKind, BodyType, Effect, Function,
+    FunctionBody, GenericArg, GenericSpecializationRecord, Program, SemanticId, SemanticIdentities,
 };
 
 pub const VERIFICATION_FACT_SCHEMA_VERSION: &str = "mncs.language-verification-fact/2";
 pub const VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION: &str =
     "mncs.language-verification-fact-reuse-observation/2";
-pub const VERIFICATION_FACT_VERIFIER_ID: &str = "mncs-language-function-body-validator/1";
+pub const VERIFICATION_FACT_VERIFIER_ID: &str = "mncs-language-function-body-validator/2";
 pub const VERIFICATION_FACT_POLICY_ID: &str = "mncs-language-function-body-policy/1";
 pub const DECLARATION_FACT_SCHEMA_VERSION: &str = "mncs.language-declaration-verification-fact/1";
 pub const DECLARATION_FACT_REUSE_SCHEMA_VERSION: &str = "mncs.language-declaration-fact-reuse/1";
@@ -294,22 +294,35 @@ impl Program {
         let mut dependencies = BTreeSet::new();
         self.add_effect_and_capability_dependencies(function, identities, &mut dependencies)?;
 
-        let body_value = serde_json::to_value(body).ok()?;
-        let body_strings = strings_in_json(&body_value);
-        let mut semantic_strings = body_strings.clone();
-        semantic_strings.extend(
-            function
-                .inputs
-                .iter()
-                .chain(&function.outputs)
-                .map(|value| value.value_type.clone()),
-        );
-
-        let mut referenced_functions = BTreeSet::new();
+        // Call and nominal dependencies come from typed semantic references,
+        // not from matching arbitrary strings in the serialized body. This
+        // keeps labels, diagnostics, and user data from creating false edges.
+        // Assumption identities are still conservatively found in the body
+        // representation because their current payload is string-addressed.
+        let body_strings = strings_in_json(&serde_json::to_value(body).ok()?);
+        let calls = body_call_references(body);
+        let referenced_functions = calls
+            .iter()
+            .map(|call| call.function.clone())
+            .collect::<BTreeSet<_>>();
+        let relevant_specializations = self
+            .generic_specializations
+            .iter()
+            .filter(|specialization| {
+                specialization_is_relevant(specialization, &declaration, &calls)
+            })
+            .collect::<Vec<_>>();
+        let mut nominal_types = body_nominal_type_references(self, function, body);
+        for specialization in &relevant_specializations {
+            for argument in &specialization.args {
+                if let GenericArg::Type { ty } = argument {
+                    collect_nominal_type_references(self, ty, &mut nominal_types);
+                }
+            }
+        }
         for candidate in &self.functions {
             let identity = function_id(candidate.identity_namespace(&self.module), &candidate.name);
-            if identity != declaration && body_strings.contains(identity.as_str()) {
-                referenced_functions.insert(identity.clone());
+            if identity != declaration && referenced_functions.contains(&identity) {
                 dependencies.insert(VerificationFactDependency {
                     role: VerificationDependencyRole::CallableInterface,
                     identity,
@@ -329,9 +342,7 @@ impl Program {
         // capture those exact existing record identities and their canonical
         // identity fingerprint directly as dependencies too.
         for record_type in &self.record_types {
-            if body_strings.contains(record_type.identity.as_str())
-                || semantic_strings.contains(&record_type.name)
-            {
+            if nominal_types.contains(&record_type.identity) {
                 let serialized = serde_json::to_string(record_type).ok()?;
                 dependencies.insert(VerificationFactDependency {
                     role: VerificationDependencyRole::NominalType,
@@ -343,21 +354,12 @@ impl Program {
 
         for record in &identities.objects {
             match record.kind {
-                crate::IdentityKind::FiniteType => {
-                    let name = self
-                        .finite_types
-                        .iter()
-                        .find(|item| item.identity == record.identity)
-                        .map(|item| item.name.as_str());
-                    if body_strings.contains(record.identity.as_str())
-                        || name.is_some_and(|name| semantic_strings.contains(name))
-                    {
-                        dependencies.insert(VerificationFactDependency {
-                            role: VerificationDependencyRole::NominalType,
-                            identity: record.identity.clone(),
-                            fingerprint: record.fingerprint.clone(),
-                        });
-                    }
+                crate::IdentityKind::FiniteType if nominal_types.contains(&record.identity) => {
+                    dependencies.insert(VerificationFactDependency {
+                        role: VerificationDependencyRole::NominalType,
+                        identity: record.identity.clone(),
+                        fingerprint: record.fingerprint.clone(),
+                    });
                 }
                 crate::IdentityKind::Assumption => {
                     let used = self.assumptions.iter().any(|assumption| {
@@ -379,26 +381,19 @@ impl Program {
             }
         }
 
-        for specialization in &self.generic_specializations {
-            if specialization_is_relevant(
-                specialization,
-                &declaration,
-                &referenced_functions,
-                &body_strings,
-            ) {
-                let identity = specialization_id(
-                    &specialization.generic_function,
-                    &specialization.canonical_args,
-                );
-                if let Some(fingerprint) =
-                    self.generic_specialization_fingerprint(specialization, &identity, identities)
-                {
-                    dependencies.insert(VerificationFactDependency {
-                        role: VerificationDependencyRole::GenericSpecialization,
-                        identity,
-                        fingerprint,
-                    });
-                }
+        for specialization in relevant_specializations {
+            let identity = specialization_id(
+                &specialization.generic_function,
+                &specialization.canonical_args,
+            );
+            if let Some(fingerprint) =
+                self.generic_specialization_fingerprint(specialization, &identity, identities)
+            {
+                dependencies.insert(VerificationFactDependency {
+                    role: VerificationDependencyRole::GenericSpecialization,
+                    identity,
+                    fingerprint,
+                });
             }
         }
 
@@ -492,6 +487,187 @@ impl Program {
         };
         let bytes = serde_json::to_vec(&material).ok()?;
         Some(crate::sha256_hex(&bytes))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct BodyCallReference {
+    function: SemanticId,
+    instantiation: Option<SemanticId>,
+    specialization: Option<SemanticId>,
+    canonical_arguments: Option<String>,
+}
+
+fn body_call_references(body: &FunctionBody) -> BTreeSet<BodyCallReference> {
+    let mut calls = BTreeSet::new();
+    for block in &body.blocks {
+        for operation in &block.operations {
+            if let BodyOperationKind::Call {
+                function,
+                generic_args,
+                instantiation,
+                specialization,
+                ..
+            } = &operation.kind
+            {
+                calls.insert(BodyCallReference {
+                    function: function.clone(),
+                    instantiation: instantiation.clone(),
+                    specialization: specialization.clone(),
+                    canonical_arguments: (!generic_args.is_empty()).then(|| {
+                        generic_args
+                            .iter()
+                            .map(GenericArg::canonical_string)
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    }),
+                });
+            }
+        }
+    }
+    // The iteration closure is validated against its body blocks. Including
+    // its explicit call set keeps the dependency basis aligned with the
+    // verified iteration summary as well as the individual operations.
+    for iteration in &body.bounded_iterations {
+        calls.extend(
+            iteration
+                .callees
+                .iter()
+                .cloned()
+                .map(|function| BodyCallReference {
+                    function,
+                    instantiation: None,
+                    specialization: None,
+                    canonical_arguments: None,
+                }),
+        );
+    }
+    calls
+}
+
+fn body_nominal_type_references(
+    program: &Program,
+    function: &Function,
+    body: &FunctionBody,
+) -> BTreeSet<SemanticId> {
+    let mut identities = BTreeSet::new();
+    for value in function.inputs.iter().chain(&function.outputs) {
+        let ty = BodyType::from_semantic_name(&value.value_type);
+        collect_nominal_type_references(program, &ty, &mut identities);
+    }
+    for parameter in &body.parameters {
+        collect_nominal_type_references(program, &parameter.ty, &mut identities);
+    }
+    for iteration in &body.bounded_iterations {
+        collect_nominal_type_references(program, &iteration.state_type, &mut identities);
+        if let crate::IterationDomain::OverSequence { element_type } = &iteration.domain {
+            collect_nominal_type_references(program, element_type, &mut identities);
+        }
+    }
+    for block in &body.blocks {
+        for value in &block.parameters {
+            collect_nominal_type_references(program, &value.ty, &mut identities);
+        }
+        for operation in &block.operations {
+            for result in &operation.results {
+                collect_nominal_type_references(program, &result.ty, &mut identities);
+            }
+            match &operation.kind {
+                BodyOperationKind::Select { operand_type }
+                | BodyOperationKind::SequenceReplace {
+                    element_type: operand_type,
+                    ..
+                }
+                | BodyOperationKind::SequenceCopy {
+                    element_type: operand_type,
+                    ..
+                }
+                | BodyOperationKind::VectorConstruct {
+                    element_type: operand_type,
+                    ..
+                }
+                | BodyOperationKind::VectorSplat {
+                    element_type: operand_type,
+                    ..
+                }
+                | BodyOperationKind::VectorExtract {
+                    element_type: operand_type,
+                    ..
+                }
+                | BodyOperationKind::VectorReplace {
+                    element_type: operand_type,
+                    ..
+                }
+                | BodyOperationKind::VectorBinary {
+                    element_type: operand_type,
+                    ..
+                }
+                | BodyOperationKind::VectorCompare {
+                    element_type: operand_type,
+                    ..
+                }
+                | BodyOperationKind::VectorReduce {
+                    element_type: operand_type,
+                    ..
+                }
+                | BodyOperationKind::SequenceConstruct {
+                    element_type: operand_type,
+                    ..
+                } => collect_nominal_type_references(program, operand_type, &mut identities),
+                BodyOperationKind::Convert { from, to } => {
+                    collect_nominal_type_references(program, from, &mut identities);
+                    collect_nominal_type_references(program, to, &mut identities);
+                }
+                BodyOperationKind::FiniteConstruct { type_identity, .. }
+                | BodyOperationKind::FiniteIsVariant { type_identity, .. }
+                | BodyOperationKind::FinitePayloadProject { type_identity, .. }
+                | BodyOperationKind::RecordConstruct { type_identity, .. }
+                | BodyOperationKind::RecordProject { type_identity, .. } => {
+                    identities.insert(type_identity.clone());
+                }
+                BodyOperationKind::Call { generic_args, .. } => {
+                    for argument in generic_args {
+                        if let GenericArg::Type { ty } = argument {
+                            collect_nominal_type_references(program, ty, &mut identities);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    identities
+}
+
+fn collect_nominal_type_references(
+    program: &Program,
+    ty: &BodyType,
+    identities: &mut BTreeSet<SemanticId>,
+) {
+    match ty {
+        BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => {
+            identities.insert(identity.clone());
+        }
+        BodyType::Named(name) => {
+            identities.extend(
+                program
+                    .finite_types
+                    .iter()
+                    .filter(|item| item.identity.as_str() == name || item.name == *name)
+                    .map(|item| item.identity.clone()),
+            );
+            identities.extend(
+                program
+                    .record_types
+                    .iter()
+                    .filter(|item| item.identity.as_str() == name || item.name == *name)
+                    .map(|item| item.identity.clone()),
+            );
+        }
+        BodyType::Sequence { element, .. } | BodyType::Vector { element, .. } => {
+            collect_nominal_type_references(program, element, identities);
+        }
+        _ => {}
     }
 }
 
@@ -747,14 +923,19 @@ impl DeclarationVerificationFact {
 fn specialization_is_relevant(
     specialization: &GenericSpecializationRecord,
     declaration: &SemanticId,
-    referenced_functions: &BTreeSet<SemanticId>,
-    body_strings: &BTreeSet<String>,
+    calls: &BTreeSet<BodyCallReference>,
 ) -> bool {
-    specialization.generic_function == *declaration
-        || specialization.specialization_function == *declaration
-        || referenced_functions.contains(&specialization.generic_function)
-        || body_strings.contains(specialization.instantiation.as_str())
-        || body_strings.contains(specialization.specialization_function.as_str())
+    specialization.specialization_function == *declaration
+        || calls.iter().any(|call| {
+            let addresses_specialization = call.instantiation.as_ref()
+                == Some(&specialization.instantiation)
+                || call.specialization.as_ref() == Some(&specialization.specialization_function)
+                || call.canonical_arguments.as_deref()
+                    == Some(specialization.canonical_args.as_str());
+            addresses_specialization
+                && (call.function == specialization.generic_function
+                    || call.function == specialization.specialization_function)
+        })
 }
 
 fn strings_in_json(value: &serde_json::Value) -> BTreeSet<String> {
@@ -1060,6 +1241,185 @@ mod tests {
     }
 
     #[test]
+    fn call_name_text_does_not_create_a_nominal_type_dependency() {
+        let mut program = call_program();
+        let decoy_identity = record_type_id("Banking.Transfer", "callee", &[("amount", "i32")]);
+        program.record_types.push(RecordType {
+            identity: decoy_identity.clone(),
+            name: "callee".to_owned(),
+            fields: vec![RecordField {
+                name: "amount".to_owned(),
+                field_type: "i32".to_owned(),
+            }],
+        });
+        let identities = program.semantic_identities();
+        let caller = program
+            .functions
+            .iter()
+            .find(|function| function.name == "caller")
+            .unwrap();
+        let basis = program
+            .body_fact_basis_with_identities(caller, &identities)
+            .unwrap();
+
+        assert!(!basis.dependencies.iter().any(|dependency| {
+            dependency.role == VerificationDependencyRole::NominalType
+                && dependency.identity == decoy_identity
+        }));
+        assert!(basis.dependencies.iter().any(|dependency| {
+            dependency.role == VerificationDependencyRole::CallableInterface
+                && dependency.identity == function_id(&program.module, "callee")
+        }));
+    }
+
+    #[test]
+    fn generic_specialization_dependency_uses_the_resolved_call_selector() {
+        let mut program = call_program();
+        let generic_function = function_id(&program.module, "generic_callee");
+        let specialized_function = function_id(&program.module, "generic_callee__spec_4");
+        let instantiation = SemanticId("mncs:0.2:instantiation:generic_callee:value:4".to_owned());
+        let specialization = GenericSpecializationRecord {
+            generic_function: generic_function.clone(),
+            specialization_function: specialized_function.clone(),
+            instantiation: instantiation.clone(),
+            args: vec![GenericArg::Value { value: 4 }],
+            canonical_args: "value:4".to_owned(),
+            host_spellings: Vec::new(),
+        };
+        let body = program
+            .functions
+            .iter_mut()
+            .find(|function| function.name == "caller")
+            .unwrap()
+            .body
+            .as_mut()
+            .unwrap();
+        let BodyOperationKind::Call {
+            function,
+            generic_args,
+            instantiation: call_instantiation,
+            specialization: call_specialization,
+            ..
+        } = &mut body.blocks[0].operations[0].kind
+        else {
+            unreachable!("call_program contains a call")
+        };
+        *function = generic_function.clone();
+        *generic_args = vec![GenericArg::Value { value: 4 }];
+        *call_instantiation = Some(instantiation.clone());
+        *call_specialization = Some(specialized_function.clone());
+
+        let calls = body_call_references(body);
+        assert!(specialization_is_relevant(
+            &specialization,
+            &function_id(&program.module, "caller"),
+            &calls,
+        ));
+
+        let other_specialization = GenericSpecializationRecord {
+            generic_function: generic_function.clone(),
+            specialization_function: function_id(&program.module, "generic_callee__spec_8"),
+            instantiation: SemanticId("mncs:0.2:instantiation:generic_callee:value:8".to_owned()),
+            args: vec![GenericArg::Value { value: 8 }],
+            canonical_args: "value:8".to_owned(),
+            host_spellings: Vec::new(),
+        };
+        assert!(!specialization_is_relevant(
+            &other_specialization,
+            &function_id(&program.module, "caller"),
+            &calls,
+        ));
+    }
+
+    #[test]
+    fn specialized_generic_type_arguments_retain_nominal_dependencies() {
+        let mut program = call_program();
+        let nominal_identity = record_type_id("Banking.Transfer", "Money", &[("amount", "i32")]);
+        program.record_types.push(RecordType {
+            identity: nominal_identity.clone(),
+            name: "Money".to_owned(),
+            fields: vec![RecordField {
+                name: "amount".to_owned(),
+                field_type: "i32".to_owned(),
+            }],
+        });
+
+        let mut generic_function = program
+            .functions
+            .iter()
+            .find(|function| function.name == "callee")
+            .unwrap()
+            .clone();
+        generic_function.name = "generic_callee".to_owned();
+        let mut specialized_function = generic_function.clone();
+        specialized_function.name = "generic_callee__spec_money".to_owned();
+        let generic_identity = function_id(&program.module, &generic_function.name);
+        let specialized_identity = function_id(&program.module, &specialized_function.name);
+        let instantiation = SemanticId("mncs:0.2:instantiation:generic_callee:money".to_owned());
+        let argument = GenericArg::Type {
+            ty: BodyType::Record {
+                identity: nominal_identity.clone(),
+                name: "Money".to_owned(),
+            },
+        };
+        let canonical_args = argument.canonical_string();
+        program.generic_specializations = vec![GenericSpecializationRecord {
+            generic_function: generic_identity,
+            specialization_function: specialized_identity.clone(),
+            instantiation: instantiation.clone(),
+            args: vec![argument],
+            canonical_args,
+            host_spellings: Vec::new(),
+        }];
+        program
+            .functions
+            .extend([generic_function, specialized_function.clone()]);
+
+        let caller = program
+            .functions
+            .iter_mut()
+            .find(|function| function.name == "caller")
+            .unwrap();
+        let BodyOperationKind::Call {
+            function,
+            function_name,
+            generic_args,
+            instantiation: call_instantiation,
+            specialization: call_specialization,
+            ..
+        } = &mut caller.body.as_mut().unwrap().blocks[0].operations[0].kind
+        else {
+            unreachable!("call_program contains a call")
+        };
+        *function = specialized_identity.clone();
+        *function_name = specialized_function.name;
+        generic_args.clear();
+        *call_instantiation = Some(instantiation);
+        *call_specialization = Some(specialized_identity);
+
+        let identities = program.semantic_identities();
+        let caller = program
+            .functions
+            .iter()
+            .find(|function| function.name == "caller")
+            .unwrap();
+        let basis = program
+            .body_fact_basis_with_identities(caller, &identities)
+            .unwrap();
+        assert!(basis.dependencies.iter().any(|dependency| {
+            dependency.role == VerificationDependencyRole::NominalType
+                && dependency.identity == nominal_identity
+        }));
+        assert!(
+            basis
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.role
+                    == VerificationDependencyRole::GenericSpecialization)
+        );
+    }
+
+    #[test]
     fn changed_callee_interface_rechecks_callers_and_returns_current_diagnostics() {
         let program = call_program();
         let first = program.validate_with_verified_facts(&request("0.19", Vec::new()));
@@ -1235,7 +1595,7 @@ mod tests {
             .facts;
 
         let mut new_verifier = cached.clone();
-        new_verifier[0].verifier_identity = "mncs-language-function-body-validator/2".to_owned();
+        new_verifier[0].verifier_identity = "mncs-language-function-body-validator/3".to_owned();
         new_verifier[0].verification_witness_identity = new_verifier[0].computed_witness_identity();
         let verifier_result = program.validate_with_verified_facts(&request("0.19", new_verifier));
         assert_eq!(

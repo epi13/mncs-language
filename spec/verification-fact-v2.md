@@ -59,10 +59,16 @@ changes do not force semantic body checking.
 Version 2 does not accept version 1 facts. Old cache entries are recomputed
 once and replaced with version 2 evidence.
 
-Dependency extraction is intentionally conservative and versioned with this
-contract. A verifier or policy change must use a new identity. A future
-transport that accepts facts from an untrusted machine must add authenticated
-producer provenance before those facts can be treated as trusted evidence.
+Call, generic-specialization, and nominal-type dependencies are derived from
+the typed body references and resolved type identities. Arbitrary strings in
+call labels, diagnostics, or data do not create those dependency edges.
+Assumption dependencies remain conservative while assumption references are
+string-addressed in the body model. This extraction change uses verifier
+identity `mncs-language-function-body-validator/2`, so facts issued by the
+previous dependency algorithm are recomputed. A policy change must likewise
+use a new policy identity. A future transport that accepts facts from an
+untrusted machine must add authenticated producer provenance before those
+facts can be treated as trusted evidence.
 
 The current Compiler integration stores these facts with the application
 response in its atomic, checksummed local cache, then passes them back to
