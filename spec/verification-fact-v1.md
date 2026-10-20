@@ -3,8 +3,10 @@
 `mncs.language-verification-fact/1` records a successful Language function
 body validation that may be considered for reuse in a later validation of the
 same current program. A fact is evidence supplied back to Language; it is not
-an instruction to skip validation. Language independently reconstructs the
-current subject and all supported dependency guards before reuse.
+an executable artifact or replacement for current declaration validation,
+and it is not an instruction to skip validation. Language independently
+reconstructs the current subject and all supported dependency guards before
+reuse.
 
 ## Fact contents
 
@@ -51,3 +53,13 @@ Dependency extraction is intentionally conservative and versioned with this
 contract. A verifier or policy change must use a new identity. A future
 transport that accepts facts from an untrusted machine must add authenticated
 producer provenance before those facts can be treated as trusted evidence.
+
+The current Compiler integration stores these facts with the application
+response in its atomic, checksummed local cache, then passes them back to
+Language for independent guard checks. The witness is a content identity for
+Language-produced verification evidence, not a digital signature. Cross-
+machine or untrusted-store transport needs authenticated producer provenance.
+
+Version 1 reuses function-body validation only. It does not claim reuse of
+HIR, SSA, proof admission, executable artifacts, or downstream callers'
+behavioral properties.
