@@ -1970,11 +1970,9 @@ fn other(value: u64) -> (result: u64) { return g.independent(value); }
         .expect("first caller's concrete specialization dependency")
         .identity
         .clone();
-    assert!(
-        specialization_two
-            .as_str()
-            .contains("lib.generic_arguments")
-    );
+    assert!(specialization_two
+        .as_str()
+        .contains("lib.generic_arguments"));
     let specialization_two_record = first
         .program
         .as_ref()
@@ -2050,7 +2048,10 @@ fn other(value: u64) -> (result: u64) { return g.independent(value); }
                 .contains("lib.generic_arguments::first__spec_")
         })
         .expect("new N=4 specialization must have a fresh verification fact");
-    assert_eq!(new_specialization.reason, VerificationFactReuseMiss::Missing);
+    assert_eq!(
+        new_specialization.reason,
+        VerificationFactReuseMiss::Missing
+    );
     for independent in [
         "app.generic_arguments::entry_two",
         "app.generic_arguments::other",
@@ -2099,10 +2100,11 @@ fn other(value: u64) -> (result: u64) { return g.independent(value); }
 }
 
 #[test]
-fn linked_frontend_invalidates_direct_callers_on_imported_callee_body_edits() {
+fn linked_frontend_invalidates_transitive_callers_on_imported_dependency_edits() {
     let library_source = r#"mncs 0.10;
 module lib.fact_dependency;
-fn advance(value: u64) -> (result: u64) { return value; }
+fn leaf(value: u64) -> (result: u64) { return value; }
+fn advance(value: u64) -> (result: u64) { return leaf(value); }
 fn independent(value: u64) -> (result: u64) { return value; }
 "#;
     let root_source = r#"mncs 0.10;
@@ -2146,10 +2148,17 @@ fn local(value: u64) -> (result: u64) { return value; }
                 .as_str()
                 .ends_with("lib.fact_dependency::advance")
     }));
+    assert!(caller_fact.dependencies.iter().any(|dependency| {
+        dependency.role == VerificationDependencyRole::CallableImplementation
+            && dependency
+                .identity
+                .as_str()
+                .ends_with("lib.fact_dependency::leaf")
+    }));
 
     let changed_library = library_source.replace(
-        "fn advance(value: u64) -> (result: u64) { return value; }",
-        "fn advance(value: u64) -> (result: u64) { return 0; }",
+        "fn leaf(value: u64) -> (result: u64) { return value; }",
+        "fn leaf(value: u64) -> (result: u64) { return 0; }",
     );
     assert_ne!(changed_library, library_source);
     let changed_resolver = MapResolver::default().with("lib.fact_dependency", &changed_library);
@@ -2168,6 +2177,10 @@ fn local(value: u64) -> (result: u64) { return value; }
         .verification_fact_reuse
         .as_ref()
         .expect("Language fact reuse observation");
+    assert!(reuse
+        .recomputed
+        .iter()
+        .any(|row| row.subject.as_str().ends_with("lib.fact_dependency::leaf")));
     assert!(reuse.recomputed.iter().any(|row| row
         .subject
         .as_str()

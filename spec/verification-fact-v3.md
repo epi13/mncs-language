@@ -26,13 +26,15 @@ Each fact contains:
   identity, invalidating changes, and optional source-location identity.
 
 Call and nominal dependencies come from typed semantic references and resolved
-type identities. A direct call guards both the callee interface and its
-implementation fingerprint. Editing a callee body therefore invalidates its
-direct callers, while a change to an unrelated function does not. A generic
-call also guards the exact selected specialization and the nominal type
-arguments it carries. Effect and capability assumptions keep role-specific
-guards and invalidation records. Assumption dependencies remain conservative
-while their body references are string-addressed.
+type identities. A call guards the interface and implementation of every
+function in its reachable call closure, including dependencies used by those
+implementations. A change at any reachable implementation therefore
+invalidates its transitive callers, while a change to an unrelated function
+does not. Recursive call graphs are visited once per semantic identity. A
+generic call also guards the exact selected specialization and the nominal
+type arguments it carries. Effect and capability assumptions keep
+role-specific guards and invalidation records. Assumption dependencies remain
+conservative while their body references are string-addressed.
 
 `verification_witness_identity` is SHA-256 over all semantic fact fields
 except the independently refreshed source-location identity. It detects
@@ -60,6 +62,11 @@ and replaced with v3 evidence. A verifier or policy change must use a new
 identity. A future transport that accepts facts from an untrusted machine
 must add authenticated producer provenance before those facts can be treated
 as trusted evidence.
+
+The v3 wire shape is unchanged by transitive call-closure guards. The verifier
+identity advances to `mncs-language-function-body-validator/4`, so v3 facts
+issued by verifier version 3 are recomputed before the new dependency closure
+can be reused.
 
 Compiler owns application-build orchestration and executable artifact
 generation. Language owns these semantic facts and independently checks every

@@ -71,6 +71,7 @@ impl Program {
         let mut prior_declarations_by_subject =
             BTreeMap::<_, Vec<&DeclarationVerificationFact>>::new();
         let fact_identities = request.map(|_| self.semantic_identities());
+        let fact_function_index = request.map(|_| self.verification_function_index());
         if let Some(request) = request {
             for fact in &request.prior_facts {
                 prior_by_subject
@@ -341,11 +342,14 @@ impl Program {
                     body.validate(self, function, &function_path, &mut errors);
                     continue;
                 };
-                let Some(basis) = self.body_fact_basis_with_identities(
+                let Some(basis) = self.body_fact_basis_with_function_index(
                     function,
                     fact_identities
                         .as_ref()
                         .expect("request has semantic identities"),
+                    fact_function_index
+                        .as_ref()
+                        .expect("request has semantic function index"),
                 ) else {
                     crate::record_counter("function_body_verification");
                     body.validate(self, function, &function_path, &mut errors);

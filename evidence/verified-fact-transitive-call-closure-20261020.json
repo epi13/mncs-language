@@ -1,0 +1,69 @@
+{
+  "schema_version": "mncs.language.verification-fact-invalidation-test-evidence/1",
+  "identity": "ev_language_transitive_call_closure_fact_invalidation_20261020",
+  "owner": "mncs-language",
+  "recorded_at": "2026-10-20T17:59:02Z",
+  "producer": {
+    "repository": "mncs-language",
+    "branch": "campaign/language-verified-fact-reuse-20261020",
+    "base_revision": "530d2d4695c043ce53dd4b73c3aff960ae263faf",
+    "worktree": "/home/epi13/Documents/Projects/mncs-compiler/.worktrees/native-app-readiness-20261013/mncs-language/.worktrees/verified-fact-reuse-20261020",
+    "working_tree_patch_sha256": "ce228433494a0d4c2e13642f85b601cc4684a0621766322ac25453221095e110"
+  },
+  "source_hashes": {
+    "README.md": "6df089a54825ac274dc595368271029d771e732fba9af19d3d3ddf1794c22ea6",
+    "crates/mncs-compiler/tests/module_imports.rs": "ceee298f09ed40039d5f7503bf5772ba8dd9e798619269447ff1e4897a198e60",
+    "crates/mncs-model/src/validation.rs": "f8df976d556bb8482d0efb5013b3130855f3f6a012f81425f0cced0657968a41",
+    "crates/mncs-model/src/verification_facts.rs": "c1b2fb62bbe9bc4bb02e2b64d1c093fe3277d1246720cc3f163ed86dfe96e267",
+    "spec/verification-fact-v3.md": "5976ff3526b66faffa3f95f1cc29f4bf6071f1e466f286eaeae9f1586cfa5779"
+  },
+  "verified_fact_reuse": {
+    "fact_schema": "mncs.language-verification-fact/3",
+    "observation_schema": "mncs.language-verification-fact-reuse-observation/2",
+    "verifier_identity": "mncs-language-function-body-validator/4",
+    "change": "Body fact dependency construction traverses the complete reachable call closure, including exact selected generic specialization bodies, while visiting each semantic identity once. The current source map is refreshed independently of semantic fact reuse.",
+    "invalidation_case": "For root caller -> imported intermediate -> imported downstream, changing downstream to an invalid body recomputes downstream, intermediate, and root and emits the fresh MNB006 diagnostic. Independent bodies remain reusable.",
+    "imported_regression": "The linked frontend regression exercises the same transitive invalidation across module boundaries.",
+    "generic_regression": "The selected specialization dependency regression includes a specialization body calling a downstream function; the caller fact retains that downstream callable implementation dependency.",
+    "wire_schema_changed": false
+  },
+  "tests": [
+    {
+      "command": "cargo test --offline --locked -p mncs-model",
+      "exit_code": 0,
+      "passed": 242,
+      "failed": 0,
+      "elapsed_wall_seconds": 40.02,
+      "process_user_seconds": 63.41,
+      "process_system_seconds": 4.35,
+      "peak_rss_kib": 1284368,
+      "cgroup_peak_bytes": null
+    },
+    {
+      "command": "cargo test --offline --locked -p mncs-compiler --test module_imports",
+      "exit_code": 0,
+      "passed": 49,
+      "failed": 0,
+      "test_target_seconds": 0.53,
+      "includes": "linked_frontend_invalidates_transitive_callers_on_imported_dependency_edits"
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=2 cargo test --offline --locked -p mncs-compiler",
+      "exit_code": 0,
+      "passed": 133,
+      "failed": 0,
+      "elapsed_wall_seconds": 162.13,
+      "process_user_seconds": 562.68,
+      "process_system_seconds": 5.25,
+      "peak_rss_kib": 992068,
+      "cgroup_peak_bytes": null
+    }
+  ],
+  "checks": {
+    "changed_rust_files_rustfmt_check": "passed",
+    "git_diff_check": "passed",
+    "workspace_cargo_fmt_all_check": "reports pre-existing formatting differences in untouched workspace files; repository-wide formatting was not applied",
+    "cgroup_memory_measurement_available": false
+  },
+  "scope": "Language-owned function-body verification facts now guard the transitive callable implementation closure, so changing a reachable downstream body invalidates all affected callers instead of reusing a fact with incomplete assumptions. Unrelated function bodies still reuse their facts. This establishes targeted semantic invalidation in Language and its linked frontend tests; it does not claim HIR, SSA, backend, Forge, or whole native Test workflow reuse."
+}

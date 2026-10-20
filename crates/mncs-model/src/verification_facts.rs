@@ -19,7 +19,7 @@ use crate::{
 pub const VERIFICATION_FACT_SCHEMA_VERSION: &str = "mncs.language-verification-fact/3";
 pub const VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION: &str =
     "mncs.language-verification-fact-reuse-observation/2";
-pub const VERIFICATION_FACT_VERIFIER_ID: &str = "mncs-language-function-body-validator/3";
+pub const VERIFICATION_FACT_VERIFIER_ID: &str = "mncs-language-function-body-validator/4";
 pub const VERIFICATION_FACT_POLICY_ID: &str = "mncs-language-function-body-policy/1";
 pub const DECLARATION_FACT_SCHEMA_VERSION: &str = "mncs.language-declaration-verification-fact/1";
 pub const DECLARATION_FACT_REUSE_SCHEMA_VERSION: &str = "mncs.language-declaration-fact-reuse/1";
@@ -244,6 +244,15 @@ pub(crate) struct DeclarationFactBasis {
 }
 
 impl Program {
+    pub(crate) fn verification_function_index(&self) -> BTreeMap<SemanticId, &Function> {
+        let mut index = BTreeMap::new();
+        for function in &self.functions {
+            let identity = function_id(function.identity_namespace(&self.module), &function.name);
+            index.entry(identity).or_insert(function);
+        }
+        index
+    }
+
     pub(crate) fn declaration_fact_basis_with_identities(
         &self,
         function: &Function,
@@ -283,6 +292,16 @@ impl Program {
         function: &Function,
         identities: &SemanticIdentities,
     ) -> Option<BodyFactBasis> {
+        let function_index = self.verification_function_index();
+        self.body_fact_basis_with_function_index(function, identities, &function_index)
+    }
+
+    pub(crate) fn body_fact_basis_with_function_index(
+        &self,
+        function: &Function,
+        identities: &SemanticIdentities,
+        function_index: &BTreeMap<SemanticId, &Function>,
+    ) -> Option<BodyFactBasis> {
         let body = function.body.as_ref()?;
         let home = function.identity_namespace(&self.module);
         let subject = body.identity(home, &function.name);
@@ -301,47 +320,112 @@ impl Program {
         // keeps labels, diagnostics, and user data from creating false edges.
         // Assumption identities are still conservatively found in the body
         // representation because their current payload is string-addressed.
-        let body_strings = strings_in_json(&serde_json::to_value(body).ok()?);
+        let mut body_strings = strings_in_json(&serde_json::to_value(body).ok()?);
         let calls = body_call_references(body);
-        let referenced_functions = calls
-            .iter()
-            .map(|call| call.function.clone())
-            .collect::<BTreeSet<_>>();
-        let relevant_specializations = self
+        let mut relevant_specializations = BTreeMap::new();
+        for specialization in self
             .generic_specializations
             .iter()
             .filter(|specialization| {
                 specialization_is_relevant(specialization, &declaration, &calls)
             })
-            .collect::<Vec<_>>();
+        {
+            let identity = specialization_id(
+                &specialization.generic_function,
+                &specialization.canonical_args,
+            );
+            relevant_specializations.insert(identity, specialization);
+        }
         let mut nominal_types = body_nominal_type_references(self, function, body);
-        for specialization in &relevant_specializations {
+
+        // A caller depends on the successful verification of the entire
+        // reachable implementation closure. If a downstream dependency
+        // changes, an intermediate function's body fingerprint can stay the
+        // same while its verification fact becomes stale. Carry the
+        // dependency closure into this fact so that change also invalidates
+        // callers beyond the first edge. The visited set keeps recursive call
+        // graphs finite and preserves one dependency per semantic identity.
+        let mut pending_functions = calls
+            .iter()
+            .map(|call| call.function.clone())
+            .collect::<Vec<_>>();
+        pending_functions.extend(
+            relevant_specializations
+                .values()
+                .map(|specialization| specialization.specialization_function.clone()),
+        );
+        let mut visited_functions = BTreeSet::new();
+        let mut reachable_functions = Vec::new();
+        let mut next_pending = 0;
+        while next_pending < pending_functions.len() {
+            let identity = pending_functions[next_pending].clone();
+            next_pending += 1;
+            if identity == declaration || !visited_functions.insert(identity.clone()) {
+                continue;
+            }
+            let Some(candidate) = function_index.get(&identity).copied() else {
+                continue;
+            };
+            reachable_functions.push(candidate);
+            let Some(candidate_body) = candidate.body.as_ref() else {
+                continue;
+            };
+            body_strings.extend(strings_in_json(&serde_json::to_value(candidate_body).ok()?));
+            nominal_types.extend(body_nominal_type_references(
+                self,
+                candidate,
+                candidate_body,
+            ));
+            let candidate_calls = body_call_references(candidate_body);
+            pending_functions.extend(candidate_calls.iter().map(|call| call.function.clone()));
+            let candidate_declaration =
+                function_id(candidate.identity_namespace(&self.module), &candidate.name);
+            for specialization in self
+                .generic_specializations
+                .iter()
+                .filter(|specialization| {
+                    specialization_is_relevant(
+                        specialization,
+                        &candidate_declaration,
+                        &candidate_calls,
+                    )
+                })
+            {
+                let specialization_identity = specialization_id(
+                    &specialization.generic_function,
+                    &specialization.canonical_args,
+                );
+                if relevant_specializations
+                    .insert(specialization_identity, specialization)
+                    .is_none()
+                {
+                    pending_functions.push(specialization.specialization_function.clone());
+                }
+            }
+        }
+
+        for specialization in relevant_specializations.values() {
             for argument in &specialization.args {
                 if let GenericArg::Type { ty } = argument {
                     collect_nominal_type_references(self, ty, &mut nominal_types);
                 }
             }
         }
-        for candidate in &self.functions {
+        for candidate in &reachable_functions {
             let identity = function_id(candidate.identity_namespace(&self.module), &candidate.name);
-            if identity != declaration && referenced_functions.contains(&identity) {
-                dependencies.insert(VerificationFactDependency {
-                    role: VerificationDependencyRole::CallableInterface,
-                    identity: identity.clone(),
-                    fingerprint: candidate.interface_fingerprint(),
-                });
-                let implementation_fingerprint = self.function_semantic_fingerprint(&identity)?;
-                dependencies.insert(VerificationFactDependency {
-                    role: VerificationDependencyRole::CallableImplementation,
-                    identity,
-                    fingerprint: implementation_fingerprint,
-                });
-                self.add_effect_and_capability_dependencies(
-                    candidate,
-                    identities,
-                    &mut dependencies,
-                )?;
-            }
+            dependencies.insert(VerificationFactDependency {
+                role: VerificationDependencyRole::CallableInterface,
+                identity: identity.clone(),
+                fingerprint: candidate.interface_fingerprint(),
+            });
+            let implementation_fingerprint =
+                self.function_semantic_fingerprint(&identity, function_index)?;
+            dependencies.insert(VerificationFactDependency {
+                role: VerificationDependencyRole::CallableImplementation,
+                identity,
+                fingerprint: implementation_fingerprint,
+            });
+            self.add_effect_and_capability_dependencies(candidate, identities, &mut dependencies)?;
         }
 
         // `SemanticIdentities` preserves the legacy rule that record objects
@@ -375,7 +459,10 @@ impl Program {
                             crate::identity::assumption_id(&self.module, &assumption.id);
                         assumption_identity == record.identity
                             && (function.assumptions.contains(&assumption.id)
-                                || body_strings.contains(assumption.id.as_str()))
+                                || body_strings.contains(assumption.id.as_str())
+                                || reachable_functions.iter().any(|candidate| {
+                                    candidate.assumptions.contains(&assumption.id)
+                                }))
                     });
                     if used {
                         dependencies.insert(VerificationFactDependency {
@@ -389,14 +476,13 @@ impl Program {
             }
         }
 
-        for specialization in relevant_specializations {
-            let identity = specialization_id(
-                &specialization.generic_function,
-                &specialization.canonical_args,
-            );
-            if let Some(fingerprint) =
-                self.generic_specialization_fingerprint(specialization, &identity, identities)
-            {
+        for (identity, specialization) in relevant_specializations {
+            if let Some(fingerprint) = self.generic_specialization_fingerprint(
+                specialization,
+                &identity,
+                identities,
+                function_index,
+            ) {
                 dependencies.insert(VerificationFactDependency {
                     role: VerificationDependencyRole::GenericSpecialization,
                     identity,
@@ -455,12 +541,15 @@ impl Program {
         specialization: &GenericSpecializationRecord,
         identity: &SemanticId,
         identities: &SemanticIdentities,
+        function_index: &BTreeMap<SemanticId, &Function>,
     ) -> Option<String> {
         let record_fingerprint = identities.fingerprint(identity)?;
         let generic_function_fingerprint =
-            self.function_semantic_fingerprint(&specialization.generic_function)?;
-        let specialized_function_fingerprint =
-            self.function_semantic_fingerprint(&specialization.specialization_function)?;
+            self.function_semantic_fingerprint(&specialization.generic_function, function_index)?;
+        let specialized_function_fingerprint = self.function_semantic_fingerprint(
+            &specialization.specialization_function,
+            function_index,
+        )?;
         let bytes = serde_json::to_vec(&(
             record_fingerprint,
             generic_function_fingerprint,
@@ -470,10 +559,12 @@ impl Program {
         Some(crate::sha256_hex(&bytes))
     }
 
-    fn function_semantic_fingerprint(&self, identity: &SemanticId) -> Option<String> {
-        let function = self.functions.iter().find(|function| {
-            function_id(function.identity_namespace(&self.module), &function.name) == *identity
-        })?;
+    fn function_semantic_fingerprint(
+        &self,
+        identity: &SemanticId,
+        function_index: &BTreeMap<SemanticId, &Function>,
+    ) -> Option<String> {
+        let function = function_index.get(identity).copied()?;
         let body_fingerprint = function
             .body
             .as_ref()
@@ -1367,7 +1458,10 @@ mod tests {
         let mut specialized_function = generic_function.clone();
         specialized_function.name = "generic_callee__spec_money".to_owned();
         let generic_identity = function_id(&program.module, &generic_function.name);
+        let generic_name = generic_function.name.clone();
         let specialized_identity = function_id(&program.module, &specialized_function.name);
+        let downstream_identity = function_id(&program.module, "downstream");
+        let downstream_name = "downstream".to_owned();
         let instantiation = SemanticId("mncs:0.2:instantiation:generic_callee:money".to_owned());
         let argument = GenericArg::Type {
             ty: BodyType::Record {
@@ -1376,17 +1470,31 @@ mod tests {
             },
         };
         let canonical_args = argument.canonical_string();
+        let mut specialized_body = program.functions[1].body.clone().unwrap();
+        let BodyOperationKind::Call {
+            function,
+            function_name,
+            ..
+        } = &mut specialized_body.blocks[0].operations[0].kind
+        else {
+            unreachable!("call_program caller contains a call")
+        };
+        *function = downstream_identity.clone();
+        *function_name = downstream_name;
+        specialized_function.body = Some(specialized_body);
+        let mut downstream = program.functions[2].clone();
+        downstream.name = "downstream".to_owned();
         program.generic_specializations = vec![GenericSpecializationRecord {
-            generic_function: generic_identity,
+            generic_function: generic_identity.clone(),
             specialization_function: specialized_identity.clone(),
             instantiation: instantiation.clone(),
-            args: vec![argument],
+            args: vec![argument.clone()],
             canonical_args,
             host_spellings: Vec::new(),
         }];
         program
             .functions
-            .extend([generic_function, specialized_function.clone()]);
+            .extend([generic_function, specialized_function.clone(), downstream]);
 
         let caller = program
             .functions
@@ -1404,9 +1512,9 @@ mod tests {
         else {
             unreachable!("call_program contains a call")
         };
-        *function = specialized_identity.clone();
-        *function_name = specialized_function.name;
-        generic_args.clear();
+        *function = generic_identity;
+        *function_name = generic_name;
+        *generic_args = vec![argument];
         *call_instantiation = Some(instantiation);
         *call_specialization = Some(specialized_identity);
 
@@ -1430,6 +1538,10 @@ mod tests {
                 .any(|dependency| dependency.role
                     == VerificationDependencyRole::GenericSpecialization)
         );
+        assert!(basis.dependencies.iter().any(|dependency| {
+            dependency.role == VerificationDependencyRole::CallableImplementation
+                && dependency.identity == downstream_identity
+        }));
     }
 
     #[test]
@@ -1520,6 +1632,70 @@ mod tests {
         assert_eq!(
             caller_recomputation.reason,
             VerificationFactReuseMiss::DependenciesChanged
+        );
+        assert_eq!(result.reuse.reused, vec![independent_subject]);
+    }
+
+    #[test]
+    fn transitive_callee_dependency_rechecks_reachable_callers() {
+        let mut program = call_program();
+        let mut callee_body = program.functions[1].body.clone().unwrap();
+        let BodyOperationKind::Call {
+            function,
+            function_name,
+            ..
+        } = &mut callee_body.blocks[0].operations[0].kind
+        else {
+            unreachable!("call_program caller contains a call")
+        };
+        *function = function_id(&program.module, "downstream");
+        *function_name = "downstream".to_owned();
+        program.functions[0].body = Some(callee_body);
+        let mut downstream = program.functions[2].clone();
+        downstream.name = "downstream".to_owned();
+        program.functions.push(downstream);
+
+        let first = program.validate_with_verified_facts(&request("0.19", Vec::new()));
+        assert!(first.report.valid, "{:?}", first.report.errors);
+        let caller_subject = program.functions[1]
+            .body
+            .as_ref()
+            .unwrap()
+            .identity(&program.module, "caller");
+        let callee_subject = program.functions[0]
+            .body
+            .as_ref()
+            .unwrap()
+            .identity(&program.module, "callee");
+        let downstream_subject = program.functions[3]
+            .body
+            .as_ref()
+            .unwrap()
+            .identity(&program.module, "downstream");
+        let independent_subject = program.functions[2]
+            .body
+            .as_ref()
+            .unwrap()
+            .identity(&program.module, "independent");
+
+        let mut changed = program;
+        changed.functions[3].body.as_mut().unwrap().entry = "missing".to_owned();
+        let result = changed.validate_with_verified_facts(&request("0.19", first.facts));
+        assert!(!result.report.valid);
+        assert!(result
+            .report
+            .errors
+            .iter()
+            .any(|error| error.code == "MNB006"));
+        let recomputed = result
+            .reuse
+            .recomputed
+            .iter()
+            .map(|row| row.subject.clone())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            recomputed,
+            BTreeSet::from([caller_subject, callee_subject, downstream_subject,])
         );
         assert_eq!(result.reuse.reused, vec![independent_subject]);
     }
@@ -1656,8 +1832,18 @@ mod tests {
             .validate_with_verified_facts(&request("0.19", Vec::new()))
             .facts;
 
+        let mut old_verifier = cached.clone();
+        old_verifier[0].verifier_identity = "mncs-language-function-body-validator/3".to_owned();
+        old_verifier[0].verification_witness_identity = old_verifier[0].computed_witness_identity();
+        let old_verifier_result =
+            program.validate_with_verified_facts(&request("0.19", old_verifier));
+        assert_eq!(
+            old_verifier_result.reuse.recomputed[0].reason,
+            VerificationFactReuseMiss::VerifierChanged
+        );
+
         let mut new_verifier = cached.clone();
-        new_verifier[0].verifier_identity = "mncs-language-function-body-validator/4".to_owned();
+        new_verifier[0].verifier_identity = "mncs-language-function-body-validator/5".to_owned();
         new_verifier[0].verification_witness_identity = new_verifier[0].computed_witness_identity();
         let verifier_result = program.validate_with_verified_facts(&request("0.19", new_verifier));
         assert_eq!(

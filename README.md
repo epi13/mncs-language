@@ -207,8 +207,10 @@ fingerprints to callable interfaces and implementations, nominal declarations,
 generic specializations, effect and capability assumptions, verifier policy,
 and source profile. `Program::validate_with_verified_facts` rechecks current
 declarations and reuses only facts whose complete guard still matches. A
-changed callee body invalidates its direct callers, while unrelated bodies
-remain reusable. The current wire fields and invalidation rules are specified
+change anywhere in a called function's reachable dependency closure
+invalidates its transitive callers, while unrelated bodies remain reusable.
+Recursive call graphs are visited once per semantic identity. The current wire
+fields and invalidation rules are specified
 in [`spec/verification-fact-v3.md`](spec/verification-fact-v3.md); older
 versioned facts are recomputed rather than reused.
 
