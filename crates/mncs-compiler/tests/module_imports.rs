@@ -4,7 +4,10 @@ use mncs_compiler::{
     elaborate_program_with_resolver, elaborate_program_with_resolver_and_modules, ModuleResolver,
     NullResolver, ReferenceCompiler, ResolvedNameKind, SourceParseCache,
 };
-use mncs_model::{VerificationDependencyRole, VerificationFactRequest, VerificationFactReuseMiss};
+use mncs_model::{
+    DeclarationFactReuseMiss, DeclarationVerificationFact, VerificationDependencyRole,
+    VerificationFact, VerificationFactRequest, VerificationFactReuseMiss,
+};
 use mncs_syntax::{parse, SourceArtifactKind, SourceEnvelope};
 
 #[derive(Default)]
@@ -1724,6 +1727,132 @@ fn linked_frontend_reuses_unchanged_import_parses_after_cache_restart() {
             .reused
             .len(),
         2
+    );
+}
+
+#[test]
+fn linked_frontend_reuses_serialized_verification_facts_and_rechecks_tampered_witnesses() {
+    let library_source =
+        "mncs 0.19;\nmodule lib.fact_restart;\nfn pass(value: u64) -> (result: u64) { return value; }\n";
+    let resolver = MapResolver::default().with("lib.fact_restart", library_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
+        language_profile: "0.19".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        prior_declaration_facts,
+        source_location_identities: BTreeMap::new(),
+    };
+    let source = "mncs 0.19;\nmodule app.fact_restart;\nuse lib.fact_restart as imported;\nfn entry(value: u64) -> (result: u64) { return imported.pass(value); }\nfn independent(value: u64) -> (result: u64) { return value; }\n";
+    let first = compiler.front_end_with_verified_facts(
+        resolver.envelope("root", source.to_owned()),
+        &resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    assert_eq!(first.verification_facts.len(), 3);
+    assert_eq!(first.declaration_verification_facts.len(), 3);
+
+    // A new process restores the Language-owned facts using only the stable
+    // serialized contract; the source snapshot and semantic guards are still
+    // re-derived by Language before any validation unit is skipped.
+    let serialized_facts =
+        serde_json::to_vec(&first.verification_facts).expect("body facts serialize");
+    let serialized_declaration_facts = serde_json::to_vec(&first.declaration_verification_facts)
+        .expect("declaration facts serialize");
+    let restored_facts: Vec<VerificationFact> =
+        serde_json::from_slice(&serialized_facts).expect("body facts restore after restart");
+    let restored_declaration_facts: Vec<DeclarationVerificationFact> =
+        serde_json::from_slice(&serialized_declaration_facts)
+            .expect("declaration facts restore after restart");
+
+    let edited_source = format!("// current source snapshot\n{source}");
+    let current_envelope = resolver.envelope("root", edited_source.clone());
+    let restored = compiler.front_end_with_verified_facts(
+        current_envelope.clone(),
+        &resolver,
+        &[],
+        &request(restored_facts.clone(), restored_declaration_facts.clone()),
+    );
+    assert!(restored.is_valid(), "{:?}", restored.diagnostics);
+    let body_reuse = restored
+        .verification_fact_reuse
+        .as_ref()
+        .expect("body fact reuse observation");
+    assert_eq!(body_reuse.reused.len(), 3, "{body_reuse:?}");
+    assert!(body_reuse.recomputed.is_empty(), "{body_reuse:?}");
+    let declaration_reuse = restored
+        .declaration_fact_reuse
+        .as_ref()
+        .expect("declaration fact reuse observation");
+    assert_eq!(declaration_reuse.reused.len(), 3, "{declaration_reuse:?}");
+    assert!(
+        declaration_reuse.recomputed.is_empty(),
+        "{declaration_reuse:?}"
+    );
+    let imported_source_identity = resolver
+        .envelope("lib.fact_restart", library_source.to_owned())
+        .identity;
+    assert!(restored.verification_facts.iter().all(|fact| {
+        if fact.subject.as_str().contains("lib.fact_restart") {
+            fact.source_location_identity.as_deref() == Some(imported_source_identity.as_str())
+        } else {
+            fact.source_location_identity.as_deref() == Some(current_envelope.identity.as_str())
+        }
+    }));
+
+    let mut tampered_facts = restored_facts;
+    let entry_fact = tampered_facts
+        .iter_mut()
+        .find(|fact| fact.subject.as_str().ends_with("app.fact_restart::entry"))
+        .expect("entry body fact");
+    entry_fact.verification_witness_identity = "0".repeat(64);
+    let mut tampered_declaration_facts = restored_declaration_facts;
+    let entry_declaration = tampered_declaration_facts
+        .iter_mut()
+        .find(|fact| fact.subject.as_str().ends_with("app.fact_restart::entry"))
+        .expect("entry declaration fact");
+    entry_declaration.verification_witness_identity = "0".repeat(64);
+
+    let rechecked = compiler.front_end_with_verified_facts(
+        current_envelope,
+        &resolver,
+        &[],
+        &request(tampered_facts, tampered_declaration_facts),
+    );
+    assert!(rechecked.is_valid(), "{:?}", rechecked.diagnostics);
+    let body_reuse = rechecked
+        .verification_fact_reuse
+        .as_ref()
+        .expect("tampered body observation");
+    assert_eq!(body_reuse.reused.len(), 2, "{body_reuse:?}");
+    assert_eq!(body_reuse.recomputed.len(), 1, "{body_reuse:?}");
+    assert!(body_reuse.recomputed[0]
+        .subject
+        .as_str()
+        .ends_with("app.fact_restart::entry"));
+    assert_eq!(
+        body_reuse.recomputed[0].reason,
+        VerificationFactReuseMiss::InvalidWitness
+    );
+    let declaration_reuse = rechecked
+        .declaration_fact_reuse
+        .as_ref()
+        .expect("tampered declaration observation");
+    assert_eq!(declaration_reuse.reused.len(), 2, "{declaration_reuse:?}");
+    assert_eq!(
+        declaration_reuse.recomputed.len(),
+        1,
+        "{declaration_reuse:?}"
+    );
+    assert!(declaration_reuse.recomputed[0]
+        .subject
+        .as_str()
+        .ends_with("app.fact_restart::entry"));
+    assert_eq!(
+        declaration_reuse.recomputed[0].reason,
+        DeclarationFactReuseMiss::InvalidWitness
     );
 }
 

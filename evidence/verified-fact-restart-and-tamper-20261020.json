@@ -1,0 +1,64 @@
+{
+  "identity": "ev_language_verified_fact_restart_tamper_20261020",
+  "limitations": "This ReferenceCompiler regression exercises the Language-owned serialized fact contract. It does not measure native application artifact execution, Forge routing, canonical Store publication, or compiler succession.",
+  "owner": "mncs-language",
+  "producer": {
+    "branch": "campaign/language-verified-fact-reuse-20261020",
+    "repository": "mncs-language",
+    "tested_patch_sha256": "663e4c02ac34928a1320e1a83758b1a494555380d977d7dc81aa9401b10562dd",
+    "tested_revision": "4cf5f2e5012d700efceef6510e2413806b08a470",
+    "worktree": "/home/epi13/Documents/Projects/mncs-compiler/.worktrees/native-app-readiness-20261013/mncs-language/.worktrees/verified-fact-reuse-20261020"
+  },
+  "recorded_at": "2026-10-20T16:22:30Z",
+  "resource_measurements": {
+    "cgroup_memory_measurement_available": false,
+    "peak_rss_kib": 50096,
+    "peak_rss_measured": true,
+    "test_command_wall_seconds": 0.58,
+    "test_target_seconds": 0.53
+  },
+  "schema_version": "mncs.language.verified-fact-restart-test-evidence/1",
+  "source_hashes": {
+    "crates/mncs-compiler/tests/module_imports.rs": "a422f1ff0b74e24fe39f178c10e13189ea085f758e1f2f5d0ca2205ebacc44fc"
+  },
+  "tests": [
+    {
+      "command": "CARGO_BUILD_JOBS=2 cargo test -p mncs-compiler --test module_imports",
+      "diff_check": "git diff --check",
+      "exit_code": 0,
+      "failed": 0,
+      "format_check": "rustfmt --edition 2021 --check crates/mncs-compiler/tests/module_imports.rs",
+      "passed": 48,
+      "test_target_seconds": 0.53
+    }
+  ],
+  "verified_fact_reuse": {
+    "contract": "mncs.language-verification-fact-reuse-observation/2",
+    "declaration_tampering": {
+      "recomputed": [
+        {
+          "reason": "invalid_witness",
+          "subject": "app.fact_restart::entry"
+        }
+      ],
+      "reused_units": 2
+    },
+    "fresh_process_round_trip": {
+      "body_facts_recomputed": 0,
+      "body_facts_reused": 3,
+      "declaration_facts_recomputed": 0,
+      "declaration_facts_reused": 3,
+      "source_locations_refreshed": true
+    },
+    "observation_owner": "Language frontend",
+    "body_tampering": {
+      "recomputed": [
+        {
+          "reason": "invalid_witness",
+          "subject": "app.fact_restart::entry"
+        }
+      ],
+      "reused_units": 2
+    }
+  }
+}
