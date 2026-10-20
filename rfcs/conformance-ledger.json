@@ -3003,6 +3003,76 @@
       "stages": [],
       "evidence_confidence": "medium",
       "notes": "RFC header reads 'Implemented (experimental)'. Landed on feat/mncs-native-jit."
+    },
+    {
+      "number": "0049",
+      "title": "Machine-Native Source Profile 0.19 \u2014 bounded sequence capacity",
+      "file": "rfcs/0049-machine-native-source-profile-0-19-bounded-sequence-capacity.md",
+      "design_status": "PROPOSED",
+      "implementation_status": "PARTIAL",
+      "implementation_scope": "Experimental Source Profile 0.19 registry and Stage-0 admission for sequence capacities up to 4096; process and application environment transport validation remains open.",
+      "normativity": "experimental",
+      "acceptance_criteria": [
+        {
+          "id": "0049-C1",
+          "text": "Profile 0.19 admits 4096-capacity byte views while Profile 0.18 preserves its 1024-capacity ceiling.",
+          "state": "satisfied",
+          "evidence": [
+            "crates/mncs-compiler/tests/source_profile_019_sequence_bound.rs"
+          ]
+        },
+        {
+          "id": "0049-C2",
+          "text": "A retained process-effect execution preserves a 1447-byte environment value and the child verifies its full length.",
+          "state": "unsatisfied",
+          "evidence": []
+        },
+        {
+          "id": "0049-C3",
+          "text": "Process and application launch boundaries enforce entry, key, value, and aggregate environment bounds without truncation.",
+          "state": "unsatisfied",
+          "evidence": []
+        },
+        {
+          "id": "0049-C4",
+          "text": "Forge receipt and declared-workflow tests pass with the candidate Language provider selected.",
+          "state": "unsatisfied",
+          "evidence": []
+        }
+      ],
+      "evidence_artifacts": [
+        "rfcs/0049-machine-native-source-profile-0-19-bounded-sequence-capacity.md",
+        "crates/mncs-compiler/tests/source_profile_019_sequence_bound.rs",
+        "examples/capability-gaps/process-environment-value-1447.json"
+      ],
+      "tests": [
+        "crates/mncs-compiler/tests/source_profile_019_sequence_bound.rs"
+      ],
+      "dependents": [],
+      "dependencies": [
+        "0036",
+        "0044"
+      ],
+      "gaps": [
+        "The 1447-byte retained process-effect execution has not been established.",
+        "End-to-end Forge receipt and declared-workflow validation remains open."
+      ],
+      "pressure_sources": [
+        "Forge declared process workflow"
+      ],
+      "last_validated_revision": "ad8456c3608b937598f2a9d64a2eb25ec31c363f",
+      "profiles": [
+        "0.19"
+      ],
+      "stdlib": [
+        "mncs.std.process.v1",
+        "mncs.std.application.v1"
+      ],
+      "stages": [
+        "Stage-0"
+      ],
+      "evidence_confidence": "medium",
+      "notes": "RFC text remains Proposed. Focused profile-admission coverage passes; process transport and Forge validation obligations remain open."
     }
   ]
 }

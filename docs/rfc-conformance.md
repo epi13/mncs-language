@@ -3,7 +3,7 @@
 > Generated from `rfcs/conformance-ledger.json` by
 > `scripts/gen_rfc_ledger_docs.py`. Do not edit by hand.
 
-Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 satisfied, 32 partially satisfied, 35 unsatisfied criteria.
+Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 49 RFCs: 76 satisfied, 32 partially satisfied, 38 unsatisfied criteria.
 
 ## Reading this document
 
@@ -67,6 +67,7 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 
 | 0046 | Machine-Native Cost, Reuse, and Evidence-Efficiency Tranche | ACCEPTED | IMPLEMENTED_EXPERIMENTALLY |
 | 0047 | Provably Terminating Structural Recursion over Finite Values | DRAFT | PARTIAL |
 | 0048 | MNCS-native JIT / execution orchestration architecture | ACCEPTED | IMPLEMENTED_EXPERIMENTALLY |
+| 0049 | Machine-Native Source Profile 0.19 — bounded sequence capacity | PROPOSED | PARTIAL |
 
 ## Entries
 
@@ -810,3 +811,23 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 
   - Provider set beyond Cranelift/reference, persistent cross-process sessions, and full proof-linkage admission are future work.
   - Provider-side publication remains whole-program per generation (JIT-PRESSURE-0009 open); retained sessions amortize repeat execution but do not yet publish definitions incrementally.
 - Note: RFC header reads 'Implemented (experimental)'. Landed on feat/mncs-native-jit.
+
+### RFC 0049 — Machine-Native Source Profile 0.19 — bounded sequence capacity
+
+- Design: **PROPOSED**; implementation: **PARTIAL** (experimental; confidence medium).
+- Scope: Experimental Source Profile 0.19 registry and Stage-0 admission for sequence capacities up to 4096; process and application environment transport validation remains open.
+- Profiles: 0.19.
+- Stdlib: mncs.std.process.v1, mncs.std.application.v1.
+- Stages: Stage-0.
+- Depends on: RFC 0036, RFC 0044.
+- Tests: `crates/mncs-compiler/tests/source_profile_019_sequence_bound.rs`.
+- Acceptance criteria:
+  - [x] 0049-C1: Profile 0.19 admits 4096-capacity byte views while Profile 0.18 preserves its 1024-capacity ceiling. — evidence: `crates/mncs-compiler/tests/source_profile_019_sequence_bound.rs`
+  - [ ] 0049-C2: A retained process-effect execution preserves a 1447-byte environment value and the child verifies its full length.
+  - [ ] 0049-C3: Process and application launch boundaries enforce entry, key, value, and aggregate environment bounds without truncation.
+  - [ ] 0049-C4: Forge receipt and declared-workflow tests pass with the candidate Language provider selected.
+- Known gaps:
+  - The 1447-byte retained process-effect execution has not been established.
+  - End-to-end Forge receipt and declared-workflow validation remains open.
+- Pressure sources: Forge declared process workflow.
+- Note: RFC text remains Proposed. Focused profile-admission coverage passes; process transport and Forge validation obligations remain open.
