@@ -1979,6 +1979,8 @@ fn local(value: u64) -> (result: u64) { return value; }
         entry_recomputation.reason,
         VerificationFactReuseMiss::DependenciesChanged
     );
+    assert_eq!(reuse.recomputed.len(), 2, "{reuse:?}");
+    assert_eq!(reuse.reused.len(), 3, "{reuse:?}");
     for independent in [
         "lib.interface_facts::independent",
         "app.interface_facts::unrelated",
@@ -2020,4 +2022,124 @@ fn local(value: u64) -> (result: u64) { return value; }
             "independent declaration fact {independent} should remain reusable: {declarations:?}"
         );
     }
+}
+
+#[test]
+fn linked_frontend_invalidates_imported_nominal_type_consumers_and_keeps_diagnostics_fresh() {
+    let library_source = r#"mncs 0.10;
+module lib.nominal_facts;
+record State { value: u64 }
+fn read(state: State) -> (result: u64) { return state.value; }
+fn independent(value: u64) -> (result: u64) { return value; }
+"#;
+    let root_source = r#"mncs 0.10;
+module app.nominal_facts;
+use lib.nominal_facts as dependency;
+fn entry(state: dependency.State) -> (result: u64) { return dependency.read(state); }
+fn unrelated(value: u64) -> (result: u64) { return dependency.independent(value); }
+fn local(value: u64) -> (result: u64) { return value; }
+"#;
+    let resolver = MapResolver::default().with("lib.nominal_facts", library_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
+        language_profile: "0.10".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        prior_declaration_facts,
+        source_location_identities: BTreeMap::new(),
+    };
+
+    let first = compiler.front_end_with_verified_facts(
+        resolver.envelope("root", root_source.to_owned()),
+        &resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    assert_eq!(first.verification_facts.len(), 5);
+
+    // Changing a field name changes the nominal identity carried by both the
+    // imported callee and its consumer, even though their source call sites
+    // remain textually unchanged.
+    let changed_library = library_source
+        .replace(
+            "record State { value: u64 }",
+            "record State { amount: u64 }",
+        )
+        .replace("state.value", "state.amount");
+    assert_ne!(changed_library, library_source);
+    let changed_resolver = MapResolver::default().with("lib.nominal_facts", &changed_library);
+    let changed = compiler.front_end_with_verified_facts(
+        changed_resolver.envelope("root", root_source.to_owned()),
+        &changed_resolver,
+        &[],
+        &request(
+            first.verification_facts,
+            first.declaration_verification_facts,
+        ),
+    );
+    assert!(changed.is_valid(), "{:?}", changed.diagnostics);
+    let reuse = changed
+        .verification_fact_reuse
+        .as_ref()
+        .expect("Language function-body fact observation");
+    let read_recomputation = reuse
+        .recomputed
+        .iter()
+        .find(|row| row.subject.as_str().ends_with("lib.nominal_facts::read"))
+        .expect("changed imported projection rechecked");
+    assert_eq!(
+        read_recomputation.reason,
+        VerificationFactReuseMiss::SubjectChanged
+    );
+    let entry_recomputation = reuse
+        .recomputed
+        .iter()
+        .find(|row| row.subject.as_str().ends_with("app.nominal_facts::entry"))
+        .expect("consumer of changed nominal interface rechecked");
+    assert_eq!(
+        entry_recomputation.reason,
+        VerificationFactReuseMiss::SubjectChanged
+    );
+    assert_eq!(reuse.recomputed.len(), 2, "{reuse:?}");
+    assert_eq!(reuse.reused.len(), 3, "{reuse:?}");
+    for independent in [
+        "lib.nominal_facts::independent",
+        "app.nominal_facts::unrelated",
+        "app.nominal_facts::local",
+    ] {
+        assert!(
+            reuse
+                .reused
+                .iter()
+                .any(|subject| subject.as_str().ends_with(independent)),
+            "unrelated fact {independent} should remain reusable: {reuse:?}"
+        );
+    }
+
+    // A cached success from the changed-but-valid snapshot cannot hide a new
+    // error when the record shape changes but its old projection remains.
+    let invalid_library = changed_library.replace("state.amount", "state.value");
+    let invalid_resolver = MapResolver::default().with("lib.nominal_facts", &invalid_library);
+    let invalid = compiler.front_end_with_verified_facts(
+        invalid_resolver.envelope("root", root_source.to_owned()),
+        &invalid_resolver,
+        &[],
+        &request(
+            changed.verification_facts,
+            changed.declaration_verification_facts,
+        ),
+    );
+    assert!(!invalid.is_valid());
+    assert!(
+        invalid.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "MNE172"
+                && diagnostic
+                    .related
+                    .iter()
+                    .any(|related| related.code == "MNE162")
+        }),
+        "fresh unknown-field diagnostic must survive import wrapping: {:?}",
+        invalid.diagnostics
+    );
 }
