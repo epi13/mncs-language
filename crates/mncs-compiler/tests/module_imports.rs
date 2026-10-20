@@ -4,7 +4,7 @@ use mncs_compiler::{
     elaborate_program_with_resolver, elaborate_program_with_resolver_and_modules, ModuleResolver,
     NullResolver, ReferenceCompiler, ResolvedNameKind, SourceParseCache,
 };
-use mncs_model::{VerificationDependencyRole, VerificationFactRequest};
+use mncs_model::{VerificationDependencyRole, VerificationFactRequest, VerificationFactReuseMiss};
 use mncs_syntax::{parse, SourceArtifactKind, SourceEnvelope};
 
 #[derive(Default)]
@@ -1897,4 +1897,127 @@ fn local(value: u64) -> (result: u64) { return value; }
         changed.declaration_verification_facts.len()
     );
     assert!(declaration_reuse.recomputed.is_empty());
+}
+
+#[test]
+fn linked_frontend_invalidates_imported_signature_consumers_and_reuses_independent_facts() {
+    let library_source = r#"mncs 0.10;
+module lib.interface_facts;
+fn advance(value: u64) -> (result: u64) { return value; }
+fn independent(value: u64) -> (result: u64) { return value; }
+"#;
+    let root_source = r#"mncs 0.10;
+module app.interface_facts;
+use lib.interface_facts as dependency;
+fn entry(value: u64) -> (result: u64) { return dependency.advance(value); }
+fn unrelated(value: u64) -> (result: u64) { return dependency.independent(value); }
+fn local(value: u64) -> (result: u64) { return value; }
+"#;
+    let resolver = MapResolver::default().with("lib.interface_facts", library_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
+        language_profile: "0.10".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        prior_declaration_facts,
+        source_location_identities: BTreeMap::new(),
+    };
+
+    let first = compiler.front_end_with_verified_facts(
+        resolver.envelope("root", root_source.to_owned()),
+        &resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    assert_eq!(first.verification_facts.len(), 5);
+
+    // Renaming an imported output is a signature change even though the
+    // positional call remains type-correct. The Language frontend must
+    // recheck that consumer while retaining facts outside its dependency edge.
+    let changed_library = library_source.replace(
+        "fn advance(value: u64) -> (result: u64)",
+        "fn advance(value: u64) -> (updated: u64)",
+    );
+    assert_ne!(changed_library, library_source);
+    let changed_resolver = MapResolver::default().with("lib.interface_facts", &changed_library);
+    let changed = compiler.front_end_with_verified_facts(
+        changed_resolver.envelope("root", root_source.to_owned()),
+        &changed_resolver,
+        &[],
+        &request(
+            first.verification_facts,
+            first.declaration_verification_facts,
+        ),
+    );
+    assert!(changed.is_valid(), "{:?}", changed.diagnostics);
+    assert!(changed.diagnostics.is_empty());
+
+    let reuse = changed
+        .verification_fact_reuse
+        .as_ref()
+        .expect("Language function-body fact observation");
+    let advance_recomputation = reuse
+        .recomputed
+        .iter()
+        .find(|row| {
+            row.subject
+                .as_str()
+                .ends_with("lib.interface_facts::advance")
+        })
+        .expect("changed imported function rechecked against its new interface");
+    assert_eq!(
+        advance_recomputation.reason,
+        VerificationFactReuseMiss::DeclarationInterfaceChanged
+    );
+    let entry_recomputation = reuse
+        .recomputed
+        .iter()
+        .find(|row| row.subject.as_str().ends_with("app.interface_facts::entry"))
+        .expect("unchanged caller invalidated by imported signature change");
+    assert_eq!(
+        entry_recomputation.reason,
+        VerificationFactReuseMiss::DependenciesChanged
+    );
+    for independent in [
+        "lib.interface_facts::independent",
+        "app.interface_facts::unrelated",
+        "app.interface_facts::local",
+    ] {
+        assert!(
+            reuse
+                .reused
+                .iter()
+                .any(|subject| subject.as_str().ends_with(independent)),
+            "independent fact {independent} should remain reusable: {reuse:?}"
+        );
+    }
+    assert!(changed.verification_facts.iter().any(|fact| {
+        fact.subject
+            .as_str()
+            .ends_with("app.interface_facts::entry")
+    }));
+
+    let declarations = changed
+        .declaration_fact_reuse
+        .as_ref()
+        .expect("Language declaration fact observation");
+    assert!(declarations.recomputed.iter().any(|row| {
+        row.subject
+            .as_str()
+            .ends_with("lib.interface_facts::advance")
+    }));
+    for independent in [
+        "lib.interface_facts::independent",
+        "app.interface_facts::unrelated",
+        "app.interface_facts::local",
+    ] {
+        assert!(
+            declarations
+                .reused
+                .iter()
+                .any(|subject| subject.as_str().ends_with(independent)),
+            "independent declaration fact {independent} should remain reusable: {declarations:?}"
+        );
+    }
 }
