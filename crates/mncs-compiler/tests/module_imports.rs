@@ -1799,6 +1799,177 @@ fn other(value: u64) -> (result: u64) { return g.independent(value); }
 }
 
 #[test]
+fn generic_argument_edit_checks_new_specialization_and_reuses_unaffected_specialization() {
+    let generic_source = r#"mncs 0.10;
+module lib.generic_arguments;
+fn first<N: Nat>(values: [u64; N]) -> (result: u64) { return values[0]; }
+fn independent(value: u64) -> (result: u64) { return value; }
+"#;
+    let resolver = MapResolver::default().with("lib.generic_arguments", generic_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
+        language_profile: "0.10".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        prior_declaration_facts,
+        source_location_identities: BTreeMap::new(),
+    };
+    let root_source = r#"mncs 0.10;
+module app.generic_arguments;
+use lib.generic_arguments as g;
+fn entry_two(values: [u64; 2]) -> (result: u64) { return g.first<2>(values); }
+fn entry_three(values: [u64; 3]) -> (result: u64) { return g.first<3>(values); }
+fn other(value: u64) -> (result: u64) { return g.independent(value); }
+"#;
+    let first = compiler.front_end_with_verified_facts(
+        resolver.envelope("root", root_source.to_owned()),
+        &resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+
+    let entry_two = first
+        .verification_facts
+        .iter()
+        .find(|fact| fact.subject.as_str().ends_with("::entry_two"))
+        .expect("first specialization caller fact");
+    let specialization_two = entry_two
+        .dependencies
+        .iter()
+        .find(|dependency| dependency.role == VerificationDependencyRole::GenericSpecialization)
+        .expect("first caller's concrete specialization dependency")
+        .identity
+        .clone();
+    assert!(
+        specialization_two
+            .as_str()
+            .contains("lib.generic_arguments")
+    );
+    let specialization_two_record = first
+        .program
+        .as_ref()
+        .expect("linked program")
+        .generic_specializations
+        .iter()
+        .find(|specialization| {
+            mncs_model::specialization_id(
+                &specialization.generic_function,
+                &specialization.canonical_args,
+            ) == specialization_two
+        })
+        .expect("N=2 specialization record");
+    let specialization_two_name = specialization_two_record
+        .specialization_function
+        .as_str()
+        .rsplit("::")
+        .next()
+        .expect("specialization function name");
+    let specialization_two_body_subject = first
+        .verification_facts
+        .iter()
+        .find(|fact| {
+            fact.subject
+                .as_str()
+                .ends_with(&format!("::{specialization_two_name}"))
+        })
+        .expect("N=2 specialization body fact")
+        .subject
+        .clone();
+
+    // The changed caller gets a new concrete specialization, while entry_two
+    // continues to depend on the previously verified N=2 specialization.
+    let changed_root_source = root_source.replace(
+        "fn entry_three(values: [u64; 3]) -> (result: u64) { return g.first<3>(values); }",
+        "fn entry_three(values: [u64; 4]) -> (result: u64) { return g.first<4>(values); }",
+    );
+    assert_ne!(changed_root_source, root_source);
+    let changed = compiler.front_end_with_verified_facts(
+        resolver.envelope("root", changed_root_source),
+        &resolver,
+        &[],
+        &request(
+            first.verification_facts,
+            first.declaration_verification_facts,
+        ),
+    );
+    assert!(changed.is_valid(), "{:?}", changed.diagnostics);
+
+    let reuse = changed
+        .verification_fact_reuse
+        .as_ref()
+        .expect("Language specialization fact observation");
+    let changed_caller = reuse
+        .recomputed
+        .iter()
+        .find(|row| {
+            row.subject
+                .as_str()
+                .ends_with("app.generic_arguments::entry_three")
+        })
+        .expect("caller that selected N=4 must be reverified");
+    assert_eq!(
+        changed_caller.reason,
+        VerificationFactReuseMiss::SubjectChanged
+    );
+    let new_specialization = reuse
+        .recomputed
+        .iter()
+        .find(|row| {
+            row.subject
+                .as_str()
+                .contains("lib.generic_arguments::first__spec_")
+        })
+        .expect("new N=4 specialization must have a fresh verification fact");
+    assert_eq!(new_specialization.reason, VerificationFactReuseMiss::Missing);
+    for independent in [
+        "app.generic_arguments::entry_two",
+        "app.generic_arguments::other",
+        "lib.generic_arguments::independent",
+    ] {
+        assert!(
+            reuse
+                .reused
+                .iter()
+                .any(|subject| subject.as_str().ends_with(independent)),
+            "unaffected fact {independent} should remain reusable: {reuse:?}"
+        );
+    }
+    let changed_entry_two = changed
+        .verification_facts
+        .iter()
+        .find(|fact| {
+            fact.subject
+                .as_str()
+                .ends_with("app.generic_arguments::entry_two")
+        })
+        .expect("unchanged N=2 caller fact remains current");
+    assert!(changed_entry_two.dependencies.iter().any(|dependency| {
+        dependency.role == VerificationDependencyRole::GenericSpecialization
+            && dependency.identity == specialization_two
+    }));
+    let reused_specialization_bodies = reuse
+        .reused
+        .iter()
+        .filter(|subject| {
+            subject
+                .as_str()
+                .contains("lib.generic_arguments::first__spec_")
+        })
+        .count();
+    assert_eq!(
+        reused_specialization_bodies, 1,
+        "the unchanged N=2 specialization body should be reused: {reuse:?}"
+    );
+    assert!(reuse.reused.contains(&specialization_two_body_subject));
+    assert!(changed.verification_facts.iter().any(|fact| {
+        fact.subject
+            .as_str()
+            .contains("lib.generic_arguments::first__spec_")
+    }));
+}
+
+#[test]
 fn linked_frontend_invalidates_direct_callers_on_imported_callee_body_edits() {
     let library_source = r#"mncs 0.10;
 module lib.fact_dependency;
