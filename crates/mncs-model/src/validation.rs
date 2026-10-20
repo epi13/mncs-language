@@ -80,6 +80,7 @@ impl Program {
             BTreeMap::<_, Vec<&DeclarationVerificationFact>>::new();
         let fact_identities = request.map(|_| self.semantic_identities());
         let fact_function_index = request.map(|_| self.verification_function_index());
+        let fact_specialization_index = request.map(|_| self.verification_specialization_index());
         if let Some(request) = request {
             for fact in &request.prior_facts {
                 prior_by_subject
@@ -538,6 +539,9 @@ impl Program {
                     fact_function_index
                         .as_ref()
                         .expect("request has semantic function index"),
+                    fact_specialization_index
+                        .as_ref()
+                        .expect("request has semantic specialization index"),
                 ) else {
                     crate::record_counter("function_body_verification");
                     body.validate(self, function, &function_path, &mut errors);

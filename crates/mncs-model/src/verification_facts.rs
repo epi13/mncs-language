@@ -271,6 +271,25 @@ impl Program {
         index
     }
 
+    pub(crate) fn verification_specialization_index(
+        &self,
+    ) -> BTreeMap<SemanticId, Vec<(usize, &GenericSpecializationRecord)>> {
+        let mut index = BTreeMap::<SemanticId, Vec<(usize, &GenericSpecializationRecord)>>::new();
+        for (ordinal, specialization) in self.generic_specializations.iter().enumerate() {
+            index
+                .entry(specialization.generic_function.clone())
+                .or_default()
+                .push((ordinal, specialization));
+            if specialization.specialization_function != specialization.generic_function {
+                index
+                    .entry(specialization.specialization_function.clone())
+                    .or_default()
+                    .push((ordinal, specialization));
+            }
+        }
+        index
+    }
+
     pub(crate) fn declaration_fact_basis_with_identities(
         &self,
         function: &Function,
@@ -469,7 +488,13 @@ impl Program {
         identities: &SemanticIdentities,
     ) -> Option<BodyFactBasis> {
         let function_index = self.verification_function_index();
-        self.body_fact_basis_with_function_index(function, identities, &function_index)
+        let specialization_index = self.verification_specialization_index();
+        self.body_fact_basis_with_function_index(
+            function,
+            identities,
+            &function_index,
+            &specialization_index,
+        )
     }
 
     pub(crate) fn body_fact_basis_with_function_index(
@@ -477,6 +502,7 @@ impl Program {
         function: &Function,
         identities: &SemanticIdentities,
         function_index: &BTreeMap<SemanticId, &Function>,
+        specialization_index: &BTreeMap<SemanticId, Vec<(usize, &GenericSpecializationRecord)>>,
     ) -> Option<BodyFactBasis> {
         let body = function.body.as_ref()?;
         let home = function.identity_namespace(&self.module);
@@ -498,20 +524,8 @@ impl Program {
         // representation because their current payload is string-addressed.
         let mut body_strings = strings_in_json(&serde_json::to_value(body).ok()?);
         let calls = body_call_references(body);
-        let mut relevant_specializations = BTreeMap::new();
-        for specialization in self
-            .generic_specializations
-            .iter()
-            .filter(|specialization| {
-                specialization_is_relevant(specialization, &declaration, &calls)
-            })
-        {
-            let identity = specialization_id(
-                &specialization.generic_function,
-                &specialization.canonical_args,
-            );
-            relevant_specializations.insert(identity, specialization);
-        }
+        let mut relevant_specializations =
+            select_relevant_specializations(&declaration, &calls, specialization_index);
         let mut nominal_types = body_nominal_type_references(self, function, body);
 
         // A caller depends on the successful verification of the entire
@@ -556,21 +570,11 @@ impl Program {
             pending_functions.extend(candidate_calls.iter().map(|call| call.function.clone()));
             let candidate_declaration =
                 function_id(candidate.identity_namespace(&self.module), &candidate.name);
-            for specialization in self
-                .generic_specializations
-                .iter()
-                .filter(|specialization| {
-                    specialization_is_relevant(
-                        specialization,
-                        &candidate_declaration,
-                        &candidate_calls,
-                    )
-                })
-            {
-                let specialization_identity = specialization_id(
-                    &specialization.generic_function,
-                    &specialization.canonical_args,
-                );
+            for (specialization_identity, specialization) in select_relevant_specializations(
+                &candidate_declaration,
+                &candidate_calls,
+                specialization_index,
+            ) {
                 if relevant_specializations
                     .insert(specialization_identity, specialization)
                     .is_none()
@@ -1211,22 +1215,65 @@ impl DeclarationVerificationFact {
     }
 }
 
+#[cfg(test)]
 fn specialization_is_relevant(
     specialization: &GenericSpecializationRecord,
     declaration: &SemanticId,
     calls: &BTreeSet<BodyCallReference>,
 ) -> bool {
     specialization.specialization_function == *declaration
-        || calls.iter().any(|call| {
-            let addresses_specialization = call.instantiation.as_ref()
-                == Some(&specialization.instantiation)
-                || call.specialization.as_ref() == Some(&specialization.specialization_function)
-                || call.canonical_arguments.as_deref()
-                    == Some(specialization.canonical_args.as_str());
-            addresses_specialization
-                && (call.function == specialization.generic_function
-                    || call.function == specialization.specialization_function)
+        || calls
+            .iter()
+            .any(|call| specialization_call_matches(specialization, call))
+}
+
+fn specialization_call_matches(
+    specialization: &GenericSpecializationRecord,
+    call: &BodyCallReference,
+) -> bool {
+    let addresses_specialization = call.instantiation.as_ref()
+        == Some(&specialization.instantiation)
+        || call.specialization.as_ref() == Some(&specialization.specialization_function)
+        || call.canonical_arguments.as_deref() == Some(specialization.canonical_args.as_str());
+    addresses_specialization
+        && (call.function == specialization.generic_function
+            || call.function == specialization.specialization_function)
+}
+
+fn select_relevant_specializations<'a>(
+    declaration: &SemanticId,
+    calls: &BTreeSet<BodyCallReference>,
+    index: &BTreeMap<SemanticId, Vec<(usize, &'a GenericSpecializationRecord)>>,
+) -> BTreeMap<SemanticId, &'a GenericSpecializationRecord> {
+    let mut selected_by_ordinal = BTreeMap::<usize, &'a GenericSpecializationRecord>::new();
+    if let Some(candidates) = index.get(declaration) {
+        for (ordinal, specialization) in candidates {
+            if specialization.specialization_function == *declaration {
+                selected_by_ordinal.insert(*ordinal, *specialization);
+            }
+        }
+    }
+    for call in calls {
+        if let Some(candidates) = index.get(&call.function) {
+            for (ordinal, specialization) in candidates {
+                if specialization_call_matches(specialization, call) {
+                    selected_by_ordinal.insert(*ordinal, *specialization);
+                }
+            }
+        }
+    }
+    selected_by_ordinal
+        .into_values()
+        .map(|specialization| {
+            (
+                specialization_id(
+                    &specialization.generic_function,
+                    &specialization.canonical_args,
+                ),
+                specialization,
+            )
         })
+        .collect()
 }
 
 fn strings_in_json(value: &serde_json::Value) -> BTreeSet<String> {
@@ -1610,14 +1657,6 @@ mod tests {
         *generic_args = vec![GenericArg::Value { value: 4 }];
         *call_instantiation = Some(instantiation.clone());
         *call_specialization = Some(specialized_function.clone());
-
-        let calls = body_call_references(body);
-        assert!(specialization_is_relevant(
-            &specialization,
-            &function_id(&program.module, "caller"),
-            &calls,
-        ));
-
         let other_specialization = GenericSpecializationRecord {
             generic_function: generic_function.clone(),
             specialization_function: function_id(&program.module, "generic_callee__spec_8"),
@@ -1626,11 +1665,61 @@ mod tests {
             canonical_args: "value:8".to_owned(),
             host_spellings: Vec::new(),
         };
+        let calls = body_call_references(body);
+        assert!(specialization_is_relevant(
+            &specialization,
+            &function_id(&program.module, "caller"),
+            &calls,
+        ));
         assert!(!specialization_is_relevant(
             &other_specialization,
             &function_id(&program.module, "caller"),
             &calls,
         ));
+
+        program.generic_specializations =
+            vec![specialization.clone(), other_specialization.clone()];
+        for index in 0..2048 {
+            let unrelated_generic =
+                SemanticId(format!("mncs:0.2:function:unrelated::generic_{index}"));
+            program
+                .generic_specializations
+                .push(GenericSpecializationRecord {
+                    generic_function: unrelated_generic.clone(),
+                    specialization_function: SemanticId(format!(
+                        "mncs:0.2:function:unrelated::generic_{index}__spec"
+                    )),
+                    instantiation: SemanticId(format!(
+                        "mncs:0.2:instantiation:unrelated::generic_{index}"
+                    )),
+                    args: vec![GenericArg::Value { value: index }],
+                    canonical_args: format!("value:{index}"),
+                    host_spellings: Vec::new(),
+                });
+        }
+        let specialization_index = program.verification_specialization_index();
+        assert_eq!(program.generic_specializations.len(), 2050);
+        assert_eq!(
+            specialization_index
+                .get(&generic_function)
+                .expect("indexed generic call target")
+                .len(),
+            2,
+            "selector lookup examines the called generic's bucket, not unrelated records"
+        );
+        let indexed = select_relevant_specializations(
+            &function_id(&program.module, "caller"),
+            &calls,
+            &specialization_index,
+        );
+        assert_eq!(
+            indexed.keys().cloned().collect::<BTreeSet<_>>(),
+            BTreeSet::from([specialization_id(
+                &specialization.generic_function,
+                &specialization.canonical_args,
+            )]),
+            "indexed lookup must keep exact resolved specialization identity"
+        );
     }
 
     #[test]
