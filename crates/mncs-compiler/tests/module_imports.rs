@@ -2100,6 +2100,145 @@ fn other(value: u64) -> (result: u64) { return g.independent(value); }
 }
 
 #[test]
+fn generic_argument_edit_checks_transitive_specializations_and_reuses_unchanged_closure() {
+    let generic_source = r#"mncs 0.10;
+module lib.transitive_generic;
+fn leaf<N: Nat>(values: [u64; N]) -> (result: u64) { return values[0]; }
+fn relay<N: Nat>(values: [u64; N]) -> (result: u64) { return leaf<N>(values); }
+fn independent(value: u64) -> (result: u64) { return value; }
+"#;
+    let resolver = MapResolver::default().with("lib.transitive_generic", generic_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
+        language_profile: "0.10".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        prior_declaration_facts,
+        source_location_identities: BTreeMap::new(),
+    };
+    let root_source = r#"mncs 0.10;
+module app.transitive_generic;
+use lib.transitive_generic as g;
+fn entry_two(values: [u64; 2]) -> (result: u64) { return g.relay<2>(values); }
+fn entry_three(values: [u64; 3]) -> (result: u64) { return g.relay<3>(values); }
+fn other(value: u64) -> (result: u64) { return g.independent(value); }
+"#;
+    let first = compiler.front_end_with_verified_facts(
+        resolver.envelope("root", root_source.to_owned()),
+        &resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+
+    let entry_two = first
+        .verification_facts
+        .iter()
+        .find(|fact| {
+            fact.subject
+                .as_str()
+                .ends_with("app.transitive_generic::entry_two")
+        })
+        .expect("N=2 caller fact");
+    let two_specializations = entry_two
+        .dependencies
+        .iter()
+        .filter(|dependency| dependency.role == VerificationDependencyRole::GenericSpecialization)
+        .map(|dependency| dependency.identity.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        two_specializations.len(),
+        2,
+        "the caller fact must include both relay<2> and its transitive leaf<2> specialization"
+    );
+    let two_specialization_names = first
+        .program
+        .as_ref()
+        .expect("linked generic program")
+        .generic_specializations
+        .iter()
+        .filter(|specialization| {
+            two_specializations.contains(&mncs_model::specialization_id(
+                &specialization.generic_function,
+                &specialization.canonical_args,
+            ))
+        })
+        .map(|specialization| {
+            specialization
+                .specialization_function
+                .as_str()
+                .rsplit("::")
+                .next()
+                .expect("specialization function name")
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(two_specialization_names.len(), 2);
+    let two_specialization_bodies = first
+        .verification_facts
+        .iter()
+        .filter(|fact| {
+            two_specialization_names
+                .iter()
+                .any(|name| fact.subject.as_str().ends_with(&format!("::{name}")))
+        })
+        .map(|fact| fact.subject.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(two_specialization_bodies.len(), 2);
+
+    let changed_root_source = root_source.replace(
+        "fn entry_three(values: [u64; 3]) -> (result: u64) { return g.relay<3>(values); }",
+        "fn entry_three(values: [u64; 4]) -> (result: u64) { return g.relay<4>(values); }",
+    );
+    assert_ne!(changed_root_source, root_source);
+    let changed = compiler.front_end_with_verified_facts(
+        resolver.envelope("root", changed_root_source),
+        &resolver,
+        &[],
+        &request(
+            first.verification_facts,
+            first.declaration_verification_facts,
+        ),
+    );
+    assert!(changed.is_valid(), "{:?}", changed.diagnostics);
+    let reuse = changed
+        .verification_fact_reuse
+        .as_ref()
+        .expect("transitive specialization reuse observation");
+    assert!(reuse.recomputed.iter().any(|row| {
+        row.subject
+            .as_str()
+            .ends_with("app.transitive_generic::entry_three")
+            && row.reason == VerificationFactReuseMiss::SubjectChanged
+    }));
+    for subject in [
+        "lib.transitive_generic::relay__spec_",
+        "lib.transitive_generic::leaf__spec_",
+    ] {
+        assert!(
+            reuse.recomputed.iter().any(|row| {
+                row.subject.as_str().contains(subject)
+                    && row.reason == VerificationFactReuseMiss::Missing
+            }),
+            "new transitive specialization {subject} must be verified: {reuse:?}"
+        );
+    }
+    assert!(reuse.reused.iter().any(|subject| subject
+        .as_str()
+        .ends_with("app.transitive_generic::entry_two")));
+    assert!(reuse
+        .reused
+        .iter()
+        .any(|subject| subject.as_str().ends_with("app.transitive_generic::other")));
+    for subject in two_specialization_bodies {
+        assert!(
+            reuse.reused.contains(&subject),
+            "unchanged N=2 specialization should remain reusable: {reuse:?}"
+        );
+    }
+}
+
+#[test]
 fn linked_frontend_invalidates_transitive_callers_on_imported_dependency_edits() {
     let library_source = r#"mncs 0.10;
 module lib.fact_dependency;
