@@ -4,7 +4,10 @@ use mncs_compiler::{
     elaborate_program_with_resolver, elaborate_program_with_resolver_and_modules, ModuleResolver,
     NullResolver, ReferenceCompiler, ResolvedNameKind, SourceParseCache,
 };
-use mncs_model::{VerificationDependencyRole, VerificationFactRequest, VerificationFactReuseMiss};
+use mncs_model::{
+    DeclarationFactReuseMiss, DeclarationVerificationFact, VerificationDependencyRole,
+    VerificationFact, VerificationFactRequest, VerificationFactReuseMiss,
+};
 use mncs_syntax::{parse, SourceArtifactKind, SourceEnvelope};
 
 #[derive(Default)]
@@ -1728,6 +1731,132 @@ fn linked_frontend_reuses_unchanged_import_parses_after_cache_restart() {
 }
 
 #[test]
+fn linked_frontend_reuses_serialized_verification_facts_and_rechecks_tampered_witnesses() {
+    let library_source =
+        "mncs 0.19;\nmodule lib.fact_restart;\nfn pass(value: u64) -> (result: u64) { return value; }\n";
+    let resolver = MapResolver::default().with("lib.fact_restart", library_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
+        language_profile: "0.19".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        prior_declaration_facts,
+        source_location_identities: BTreeMap::new(),
+    };
+    let source = "mncs 0.19;\nmodule app.fact_restart;\nuse lib.fact_restart as imported;\nfn entry(value: u64) -> (result: u64) { return imported.pass(value); }\nfn independent(value: u64) -> (result: u64) { return value; }\n";
+    let first = compiler.front_end_with_verified_facts(
+        resolver.envelope("root", source.to_owned()),
+        &resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    assert_eq!(first.verification_facts.len(), 3);
+    assert_eq!(first.declaration_verification_facts.len(), 3);
+
+    // A new process restores the Language-owned facts using only the stable
+    // serialized contract; the source snapshot and semantic guards are still
+    // re-derived by Language before any validation unit is skipped.
+    let serialized_facts =
+        serde_json::to_vec(&first.verification_facts).expect("body facts serialize");
+    let serialized_declaration_facts = serde_json::to_vec(&first.declaration_verification_facts)
+        .expect("declaration facts serialize");
+    let restored_facts: Vec<VerificationFact> =
+        serde_json::from_slice(&serialized_facts).expect("body facts restore after restart");
+    let restored_declaration_facts: Vec<DeclarationVerificationFact> =
+        serde_json::from_slice(&serialized_declaration_facts)
+            .expect("declaration facts restore after restart");
+
+    let edited_source = format!("// current source snapshot\n{source}");
+    let current_envelope = resolver.envelope("root", edited_source.clone());
+    let restored = compiler.front_end_with_verified_facts(
+        current_envelope.clone(),
+        &resolver,
+        &[],
+        &request(restored_facts.clone(), restored_declaration_facts.clone()),
+    );
+    assert!(restored.is_valid(), "{:?}", restored.diagnostics);
+    let body_reuse = restored
+        .verification_fact_reuse
+        .as_ref()
+        .expect("body fact reuse observation");
+    assert_eq!(body_reuse.reused.len(), 3, "{body_reuse:?}");
+    assert!(body_reuse.recomputed.is_empty(), "{body_reuse:?}");
+    let declaration_reuse = restored
+        .declaration_fact_reuse
+        .as_ref()
+        .expect("declaration fact reuse observation");
+    assert_eq!(declaration_reuse.reused.len(), 3, "{declaration_reuse:?}");
+    assert!(
+        declaration_reuse.recomputed.is_empty(),
+        "{declaration_reuse:?}"
+    );
+    let imported_source_identity = resolver
+        .envelope("lib.fact_restart", library_source.to_owned())
+        .identity;
+    assert!(restored.verification_facts.iter().all(|fact| {
+        if fact.subject.as_str().contains("lib.fact_restart") {
+            fact.source_location_identity.as_deref() == Some(imported_source_identity.as_str())
+        } else {
+            fact.source_location_identity.as_deref() == Some(current_envelope.identity.as_str())
+        }
+    }));
+
+    let mut tampered_facts = restored_facts;
+    let entry_fact = tampered_facts
+        .iter_mut()
+        .find(|fact| fact.subject.as_str().ends_with("app.fact_restart::entry"))
+        .expect("entry body fact");
+    entry_fact.verification_witness_identity = "0".repeat(64);
+    let mut tampered_declaration_facts = restored_declaration_facts;
+    let entry_declaration = tampered_declaration_facts
+        .iter_mut()
+        .find(|fact| fact.subject.as_str().ends_with("app.fact_restart::entry"))
+        .expect("entry declaration fact");
+    entry_declaration.verification_witness_identity = "0".repeat(64);
+
+    let rechecked = compiler.front_end_with_verified_facts(
+        current_envelope,
+        &resolver,
+        &[],
+        &request(tampered_facts, tampered_declaration_facts),
+    );
+    assert!(rechecked.is_valid(), "{:?}", rechecked.diagnostics);
+    let body_reuse = rechecked
+        .verification_fact_reuse
+        .as_ref()
+        .expect("tampered body observation");
+    assert_eq!(body_reuse.reused.len(), 2, "{body_reuse:?}");
+    assert_eq!(body_reuse.recomputed.len(), 1, "{body_reuse:?}");
+    assert!(body_reuse.recomputed[0]
+        .subject
+        .as_str()
+        .ends_with("app.fact_restart::entry"));
+    assert_eq!(
+        body_reuse.recomputed[0].reason,
+        VerificationFactReuseMiss::InvalidWitness
+    );
+    let declaration_reuse = rechecked
+        .declaration_fact_reuse
+        .as_ref()
+        .expect("tampered declaration observation");
+    assert_eq!(declaration_reuse.reused.len(), 2, "{declaration_reuse:?}");
+    assert_eq!(
+        declaration_reuse.recomputed.len(),
+        1,
+        "{declaration_reuse:?}"
+    );
+    assert!(declaration_reuse.recomputed[0]
+        .subject
+        .as_str()
+        .ends_with("app.fact_restart::entry"));
+    assert_eq!(
+        declaration_reuse.recomputed[0].reason,
+        DeclarationFactReuseMiss::InvalidWitness
+    );
+}
+
+#[test]
 fn generic_body_edit_rechecks_specialization_consumers_and_reuses_independent_bodies() {
     let generic_source = r#"mncs 0.10;
 module lib.generic;
@@ -2313,4 +2442,290 @@ fn local(value: u64) -> (result: u64) { return value; }
         "fresh unknown-field diagnostic must survive import wrapping: {:?}",
         invalid.diagnostics
     );
+}
+
+#[test]
+fn linked_frontend_invalidates_imported_effect_and_capability_dependencies() {
+    let effect_module = r#"mncs 0.10;
+module lib.effect_facts;
+fn access(value: u64) -> (result: u64)
+    capability storage_read
+    effect read_storage authorized_by storage_read
+{
+    return value;
+}
+fn independent(value: u64) -> (result: u64) { return value; }
+"#;
+    let effect_root = r#"mncs 0.10;
+module app.effect_facts;
+use lib.effect_facts as imported;
+fn entry(value: u64) -> (result: u64)
+    capability storage_read
+    effect read_storage authorized_by storage_read
+    effect write_storage authorized_by storage_read
+{
+    return imported.access(value);
+}
+fn unrelated(value: u64) -> (result: u64) { return value; }
+"#;
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
+        language_profile: "0.10".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        prior_declaration_facts,
+        source_location_identities: BTreeMap::new(),
+    };
+    let first_resolver = MapResolver::default().with("lib.effect_facts", effect_module);
+    let first = compiler.front_end_with_verified_facts(
+        first_resolver.envelope("root", effect_root.to_owned()),
+        &first_resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    assert_eq!(first.verification_facts.len(), 4);
+
+    let first_entry = first
+        .verification_facts
+        .iter()
+        .find(|fact| fact.subject.as_str().ends_with("app.effect_facts::entry"))
+        .expect("imported effect caller fact");
+    let first_effect_dependencies = first_entry
+        .dependencies
+        .iter()
+        .filter(|dependency| dependency.role == VerificationDependencyRole::Effect)
+        .map(|dependency| (dependency.identity.clone(), dependency.fingerprint.clone()))
+        .collect::<Vec<_>>();
+    assert!(!first_effect_dependencies.is_empty());
+
+    // The caller already declares both effects, so changing the imported
+    // function's effect keeps the program valid while changing a guarded call
+    // assumption. In the resolved function body that call summary also affects
+    // the caller's semantic subject fingerprint, which is why Language reports
+    // SubjectChanged for the exact caller.
+    let changed_effect_module =
+        effect_module.replace("effect read_storage", "effect write_storage");
+    assert_ne!(changed_effect_module, effect_module);
+    let changed_effect_resolver =
+        MapResolver::default().with("lib.effect_facts", &changed_effect_module);
+    let changed_effect = compiler.front_end_with_verified_facts(
+        changed_effect_resolver.envelope("root", effect_root.to_owned()),
+        &changed_effect_resolver,
+        &[],
+        &request(
+            first.verification_facts.clone(),
+            first.declaration_verification_facts.clone(),
+        ),
+    );
+    assert!(
+        changed_effect.is_valid(),
+        "{:?}",
+        changed_effect.diagnostics
+    );
+    let effect_reuse = changed_effect
+        .verification_fact_reuse
+        .as_ref()
+        .expect("effect dependency reuse observation");
+    let effect_entry = effect_reuse
+        .recomputed
+        .iter()
+        .find(|row| row.subject.as_str().ends_with("app.effect_facts::entry"))
+        .expect("imported effect change invalidates its caller");
+    assert_eq!(
+        effect_entry.reason,
+        VerificationFactReuseMiss::SubjectChanged
+    );
+    assert_eq!(effect_reuse.recomputed.len(), 2, "{effect_reuse:?}");
+    assert!(effect_reuse
+        .recomputed
+        .iter()
+        .any(|row| row.subject.as_str().ends_with("lib.effect_facts::access")));
+    let effect_access = effect_reuse
+        .recomputed
+        .iter()
+        .find(|row| row.subject.as_str().ends_with("lib.effect_facts::access"))
+        .expect("changed imported effect body rechecked");
+    assert_eq!(
+        effect_access.reason,
+        VerificationFactReuseMiss::EffectAssumptionsChanged
+    );
+    assert_eq!(effect_reuse.reused.len(), 2, "{effect_reuse:?}");
+    assert!(effect_reuse
+        .reused
+        .iter()
+        .any(|subject| subject.as_str().ends_with("lib.effect_facts::independent")));
+    assert!(effect_reuse
+        .reused
+        .iter()
+        .any(|subject| subject.as_str().ends_with("app.effect_facts::unrelated")));
+    let changed_entry = changed_effect
+        .verification_facts
+        .iter()
+        .find(|fact| fact.subject.as_str().ends_with("app.effect_facts::entry"))
+        .expect("reverified imported effect caller fact");
+    let changed_effect_dependencies = changed_entry
+        .dependencies
+        .iter()
+        .filter(|dependency| dependency.role == VerificationDependencyRole::Effect)
+        .map(|dependency| (dependency.identity.clone(), dependency.fingerprint.clone()))
+        .collect::<Vec<_>>();
+    assert_ne!(first_effect_dependencies, changed_effect_dependencies);
+    assert_ne!(
+        first_entry.subject_fingerprint,
+        changed_entry.subject_fingerprint
+    );
+    assert!(effect_reuse
+        .reused
+        .iter()
+        .any(|subject| subject.as_str().ends_with("app.effect_facts::unrelated")));
+
+    let capability_module = r#"mncs 0.10;
+module lib.capability_facts;
+fn access(value: u64) -> (result: u64)
+    capability storage_read
+{
+    return value;
+}
+fn independent(value: u64) -> (result: u64) { return value; }
+"#;
+    let capability_root = r#"mncs 0.10;
+module app.capability_facts;
+use lib.capability_facts as imported;
+fn entry(value: u64) -> (result: u64)
+    capability storage_read
+    capability storage_write
+{
+    return imported.access(value);
+}
+fn unrelated(value: u64) -> (result: u64) { return value; }
+"#;
+    let first_capability_resolver =
+        MapResolver::default().with("lib.capability_facts", capability_module);
+    let first_capability = compiler.front_end_with_verified_facts(
+        first_capability_resolver.envelope("root", capability_root.to_owned()),
+        &first_capability_resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+    );
+    assert!(
+        first_capability.is_valid(),
+        "{:?}",
+        first_capability.diagnostics
+    );
+    assert_eq!(first_capability.verification_facts.len(), 4);
+
+    let first_capability_entry = first_capability
+        .verification_facts
+        .iter()
+        .find(|fact| {
+            fact.subject
+                .as_str()
+                .ends_with("app.capability_facts::entry")
+        })
+        .expect("imported capability caller fact");
+    let first_capability_subject_fingerprint = first_capability_entry.subject_fingerprint.clone();
+    let first_capability_dependencies = first_capability_entry
+        .dependencies
+        .iter()
+        .filter(|dependency| dependency.role == VerificationDependencyRole::Capability)
+        .map(|dependency| (dependency.identity.clone(), dependency.fingerprint.clone()))
+        .collect::<Vec<_>>();
+    assert!(!first_capability_dependencies.is_empty());
+
+    // Both capabilities are already admitted by the caller. The changed
+    // imported call requirement remains valid but changes the caller's
+    // resolved semantic body and guarded capability dependency.
+    let changed_capability_module =
+        capability_module.replace("capability storage_read", "capability storage_write");
+    assert_ne!(changed_capability_module, capability_module);
+    let changed_capability_resolver =
+        MapResolver::default().with("lib.capability_facts", &changed_capability_module);
+    let changed_capability = compiler.front_end_with_verified_facts(
+        changed_capability_resolver.envelope("root", capability_root.to_owned()),
+        &changed_capability_resolver,
+        &[],
+        &request(
+            first_capability.verification_facts,
+            first_capability.declaration_verification_facts,
+        ),
+    );
+    assert!(
+        changed_capability.is_valid(),
+        "{:?}",
+        changed_capability.diagnostics
+    );
+    let capability_reuse = changed_capability
+        .verification_fact_reuse
+        .as_ref()
+        .expect("capability dependency reuse observation");
+    let capability_entry = capability_reuse
+        .recomputed
+        .iter()
+        .find(|row| {
+            row.subject
+                .as_str()
+                .ends_with("app.capability_facts::entry")
+        })
+        .expect("imported capability change invalidates its caller");
+    assert_eq!(
+        capability_entry.reason,
+        VerificationFactReuseMiss::SubjectChanged
+    );
+    assert_eq!(capability_reuse.recomputed.len(), 2, "{capability_reuse:?}");
+    assert!(capability_reuse.recomputed.iter().any(|row| {
+        row.subject
+            .as_str()
+            .ends_with("lib.capability_facts::access")
+    }));
+    let capability_access = capability_reuse
+        .recomputed
+        .iter()
+        .find(|row| {
+            row.subject
+                .as_str()
+                .ends_with("lib.capability_facts::access")
+        })
+        .expect("changed imported capability body rechecked");
+    assert_eq!(
+        capability_access.reason,
+        VerificationFactReuseMiss::CapabilityAssumptionsChanged
+    );
+    assert_eq!(capability_reuse.reused.len(), 2, "{capability_reuse:?}");
+    assert!(capability_reuse.reused.iter().any(|subject| {
+        subject
+            .as_str()
+            .ends_with("lib.capability_facts::independent")
+    }));
+    assert!(capability_reuse.reused.iter().any(|subject| {
+        subject
+            .as_str()
+            .ends_with("app.capability_facts::unrelated")
+    }));
+    let changed_capability_entry = changed_capability
+        .verification_facts
+        .iter()
+        .find(|fact| {
+            fact.subject
+                .as_str()
+                .ends_with("app.capability_facts::entry")
+        })
+        .expect("reverified imported capability caller fact");
+    let changed_capability_dependencies = changed_capability_entry
+        .dependencies
+        .iter()
+        .filter(|dependency| dependency.role == VerificationDependencyRole::Capability)
+        .map(|dependency| (dependency.identity.clone(), dependency.fingerprint.clone()))
+        .collect::<Vec<_>>();
+    assert_ne!(
+        first_capability_dependencies,
+        changed_capability_dependencies
+    );
+    assert_ne!(
+        first_capability_subject_fingerprint,
+        changed_capability_entry.subject_fingerprint
+    );
+    assert!(capability_reuse.reused.iter().any(|subject| subject
+        .as_str()
+        .ends_with("app.capability_facts::unrelated")));
 }
