@@ -2,6 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::verification_facts::{
+    VerificationFact, VerificationFactRecomputation, VerificationFactRequest,
+    VerificationFactReuseMiss, VerificationFactReuseObservation, VerificationFactValidation,
+    VERIFICATION_FACT_SCHEMA_VERSION,
+};
 use crate::{
     finite_type_id, finite_variant_id, function_id, Program, Value, SUPPORTED_SCHEMA_VERSION,
 };
@@ -33,9 +38,39 @@ pub struct Diagnostic {
 
 impl Program {
     pub fn validate(&self) -> ValidationReport {
+        self.validate_internal(None).report
+    }
+
+    /// Validate the current program while reusing only Language-issued,
+    /// successful function-body facts whose subject, callable interface,
+    /// dependencies, profile, verifier, and policy still match.
+    pub fn validate_with_verified_facts(
+        &self,
+        request: &VerificationFactRequest,
+    ) -> VerificationFactValidation {
+        self.validate_internal(Some(request))
+    }
+
+    fn validate_internal(
+        &self,
+        request: Option<&VerificationFactRequest>,
+    ) -> VerificationFactValidation {
         crate::record_counter("semantic_validation");
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
+        let mut facts = Vec::new();
+        let mut reused = Vec::new();
+        let mut recomputed = Vec::new();
+        let mut prior_by_subject = BTreeMap::<_, Vec<&VerificationFact>>::new();
+        let fact_identities = request.map(|_| self.semantic_identities());
+        if let Some(request) = request {
+            for fact in &request.prior_facts {
+                prior_by_subject
+                    .entry(&fact.subject)
+                    .or_default()
+                    .push(fact);
+            }
+        }
 
         if self.schema_version != SUPPORTED_SCHEMA_VERSION {
             errors.push(diagnostic(
@@ -265,7 +300,66 @@ impl Program {
                 ));
             }
             if let Some(body) = &function.body {
-                body.validate(self, function, &function_path, &mut errors);
+                let Some(request) = request else {
+                    crate::record_counter("function_body_verification");
+                    body.validate(self, function, &function_path, &mut errors);
+                    continue;
+                };
+                let Some(basis) = self.body_fact_basis_with_identities(
+                    function,
+                    fact_identities
+                        .as_ref()
+                        .expect("request has semantic identities"),
+                ) else {
+                    crate::record_counter("function_body_verification");
+                    body.validate(self, function, &function_path, &mut errors);
+                    continue;
+                };
+                let source_location_identity = request
+                    .source_location_identities
+                    .get(&basis.subject)
+                    .cloned();
+                let language_profile = request
+                    .subject_language_profiles
+                    .get(&basis.subject)
+                    .map(String::as_str)
+                    .unwrap_or(&request.language_profile);
+                let current = VerificationFact::from_basis(
+                    basis,
+                    language_profile,
+                    source_location_identity.clone(),
+                );
+                let prior = prior_by_subject
+                    .get(&current.subject)
+                    .cloned()
+                    .unwrap_or_default();
+                let reuse = match prior.as_slice() {
+                    [] => Err(VerificationFactReuseMiss::Missing),
+                    [_first, _second, ..] => Err(VerificationFactReuseMiss::DuplicatePriorFacts),
+                    [fact] => fact.current_basis_matches(&current),
+                };
+                match reuse {
+                    Ok(()) => {
+                        crate::record_counter("verified_fact_reuse");
+                        reused.push(current.subject.clone());
+                        let mut refreshed = prior[0].clone();
+                        refreshed.source_location_identity = source_location_identity;
+                        facts.push(refreshed);
+                    }
+                    Err(reason) => {
+                        recomputed.push(VerificationFactRecomputation {
+                            subject: current.subject.clone(),
+                            reason,
+                        });
+                        crate::record_counter("function_body_verification");
+                        let mut body_errors = Vec::new();
+                        body.validate(self, function, &function_path, &mut body_errors);
+                        if body_errors.is_empty() {
+                            facts.push(current);
+                        }
+                        errors.extend(body_errors);
+                    }
+                }
             }
         }
 
@@ -277,7 +371,7 @@ impl Program {
             ));
         }
 
-        ValidationReport {
+        let report = ValidationReport {
             valid: errors.is_empty(),
             errors,
             warnings,
@@ -288,6 +382,18 @@ impl Program {
                 effects: self.functions.iter().map(|f| f.effects.len()).sum(),
                 evidence_claims: self.functions.iter().map(|f| f.evidence.len()).sum(),
                 assumptions: self.assumptions.len(),
+            },
+        };
+        facts.sort_by(|left, right| left.subject.cmp(&right.subject));
+        reused.sort();
+        recomputed.sort_by(|left, right| left.subject.cmp(&right.subject));
+        VerificationFactValidation {
+            report,
+            facts,
+            reuse: VerificationFactReuseObservation {
+                schema_version: VERIFICATION_FACT_SCHEMA_VERSION.to_owned(),
+                reused,
+                recomputed,
             },
         }
     }

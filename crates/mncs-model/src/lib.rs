@@ -40,6 +40,7 @@ mod termination;
 mod translation;
 mod validation;
 pub mod value_contract;
+mod verification_facts;
 mod verifier;
 
 pub use authority::{
@@ -234,6 +235,13 @@ pub use translation::{
 pub use validation::{Diagnostic, ValidationReport, ValidationSummary};
 pub use value_contract::{
     first_aggregate_mismatch, order_fields_by_name, FieldOrderError, FieldOrderProblem,
+};
+pub use verification_facts::{
+    VerificationDependencyRole, VerificationFact, VerificationFactDependency,
+    VerificationFactInvalidator, VerificationFactRecomputation, VerificationFactRequest,
+    VerificationFactResult, VerificationFactReuseMiss, VerificationFactReuseObservation,
+    VerificationFactValidation, VERIFICATION_FACT_POLICY_ID, VERIFICATION_FACT_SCHEMA_VERSION,
+    VERIFICATION_FACT_VERIFIER_ID,
 };
 pub use verifier::{
     AlignmentVerifierInput, CapabilityVerifierInput, DeterministicVerifier, EvidenceAuthorityClass,

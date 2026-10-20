@@ -486,6 +486,20 @@ pub(crate) fn canonical_function(function: &Function) -> JsonValue {
     result
 }
 
+impl Function {
+    /// Fingerprint the callable declaration without its implementation body.
+    /// Verified-body facts bind this interface separately from the body so a
+    /// body edit can reuse independent callers while a signature, contract,
+    /// effect, capability, or assumption edit invalidates them.
+    pub fn interface_fingerprint(&self) -> String {
+        let mut interface = self.clone();
+        interface.body = None;
+        let canonical = canonical_function(&interface);
+        let bytes = serde_json::to_vec(&canonical).expect("canonical function interface");
+        sha256_hex(&bytes)
+    }
+}
+
 pub(crate) fn canonical_contract(contract: &ContractClause) -> JsonValue {
     object([
         ("expression", JsonValue::String(contract.expression.clone())),

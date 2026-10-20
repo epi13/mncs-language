@@ -15,6 +15,7 @@ use mncs_model::{
     Requirement, ResolutionProvenance, SemanticBinding, SemanticBindingKind, SemanticBindingTable,
     SemanticGraph, SemanticId, SemanticIdentities, SemanticNamespace, SemanticReference,
     SemanticScope, TransformationEdge, TransformationStatus, ValidationReport, Value,
+    VerificationFact, VerificationFactRequest, VerificationFactReuseObservation,
     EXECUTABLE_BODY_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSION,
 };
 use mncs_syntax::{
@@ -51,6 +52,13 @@ pub struct SourceFrontEndResult {
     pub semantic_graph: Option<SemanticGraph>,
     pub identities: Option<SemanticIdentities>,
     pub validation: Option<ValidationReport>,
+    /// Successful Language-owned body-verification receipts produced or
+    /// reused during this frontend run. These are the only facts downstream
+    /// incremental builders may persist for a later source snapshot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verification_facts: Vec<VerificationFact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_fact_reuse: Option<VerificationFactReuseObservation>,
     /// Compact, versioned semantic binding substrate used by elaboration,
     /// tooling, and downstream identity/evidence consumers.
     pub binding_table: Option<SemanticBindingTable>,
@@ -122,6 +130,11 @@ pub struct ModuleResolution {
     pub module_identity: SemanticId,
     pub source_identity: String,
     pub source_logical_name: String,
+    /// Profile parsed from this exact resolved source artifact. Kept internal
+    /// to the compiler API so public application-build response contracts do
+    /// not change merely to route verification assumptions.
+    #[serde(skip)]
+    pub source_profile: String,
     pub semantic_fingerprint: Option<String>,
 }
 
@@ -205,6 +218,54 @@ fn build_test_inventory(
     }
 }
 
+fn source_scoped_fact_request(
+    prior: &VerificationFactRequest,
+    root_envelope: &SourceEnvelope,
+    root_ast: &AbstractSyntaxTree,
+    program: &Program,
+    modules: &[ModuleResolution],
+) -> VerificationFactRequest {
+    let mut source_context = BTreeMap::new();
+    source_context.insert(
+        program.module.clone(),
+        (
+            root_envelope.identity.clone(),
+            root_ast.language_version.text.clone(),
+        ),
+    );
+    for module in modules {
+        source_context.insert(
+            module.declared_module.clone(),
+            (
+                module.source_identity.clone(),
+                module.source_profile.clone(),
+            ),
+        );
+    }
+
+    let mut request = prior.clone();
+    request.language_profile = root_ast.language_version.text.clone();
+    request.subject_language_profiles.clear();
+    request.source_location_identities.clear();
+    for function in &program.functions {
+        let Some(body) = &function.body else {
+            continue;
+        };
+        let home = function.identity_namespace(&program.module);
+        let (source_identity, source_profile) = source_context
+            .get(home)
+            .expect("every linked function resolves to its source artifact and profile");
+        let subject = body.identity(home, &function.name);
+        request
+            .subject_language_profiles
+            .insert(subject.clone(), source_profile.clone());
+        request
+            .source_location_identities
+            .insert(subject, source_identity.clone());
+    }
+    request
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SourceStudyOutput {
     pub front_end: SourceFrontEndResult,
@@ -246,6 +307,30 @@ impl ReferenceCompiler {
         resolver: &dyn ModuleResolver,
         seeds: &[mncs_model::HostGenericSeedRequest],
     ) -> SourceFrontEndResult {
+        self.front_end_with_resolver_seeds_and_facts(envelope, resolver, seeds, None)
+    }
+
+    /// Runs the normal Language frontend while allowing the Language model to
+    /// validate each current function body against supplied prior facts.
+    /// Declaration checks, parsing, resolution, and all stale or absent body
+    /// facts still run in the current process.
+    pub fn front_end_with_verified_facts(
+        &self,
+        envelope: SourceEnvelope,
+        resolver: &dyn ModuleResolver,
+        seeds: &[mncs_model::HostGenericSeedRequest],
+        request: &VerificationFactRequest,
+    ) -> SourceFrontEndResult {
+        self.front_end_with_resolver_seeds_and_facts(envelope, resolver, seeds, Some(request))
+    }
+
+    fn front_end_with_resolver_seeds_and_facts(
+        &self,
+        envelope: SourceEnvelope,
+        resolver: &dyn ModuleResolver,
+        seeds: &[mncs_model::HostGenericSeedRequest],
+        verification_request: Option<&VerificationFactRequest>,
+    ) -> SourceFrontEndResult {
         let started = Instant::now();
         let ParseOutput {
             lexical,
@@ -275,6 +360,8 @@ impl ReferenceCompiler {
         let mut diagnostics = diagnostics;
         let mut program = None;
         let mut validation = None;
+        let mut verification_facts = Vec::new();
+        let mut verification_fact_reuse = None;
         let mut semantic_graph = None;
         let mut identities = None;
         let mut name_resolutions = NameResolutionIndex::default();
@@ -301,8 +388,23 @@ impl ReferenceCompiler {
                 trace_timing("elaboration", elaboration_started);
                 match elaboration {
                     (Ok(elaborated), resolutions, resolved_modules, operation_sources) => {
-                        module_resolutions = resolved_modules;
-                        let report = elaborated.validate();
+                        module_resolutions = resolved_modules.clone();
+                        let report = if let Some(request) = verification_request {
+                            let scoped_request = source_scoped_fact_request(
+                                request,
+                                &envelope,
+                                tree,
+                                &elaborated,
+                                &resolved_modules,
+                            );
+                            let fact_result =
+                                elaborated.validate_with_verified_facts(&scoped_request);
+                            verification_facts = fact_result.facts;
+                            verification_fact_reuse = Some(fact_result.reuse);
+                            fact_result.report
+                        } else {
+                            elaborated.validate()
+                        };
                         binding_table = elaborated.binding_table.clone();
                         let canonical = elaborated
                             .canonical_form()
@@ -389,6 +491,8 @@ impl ReferenceCompiler {
             semantic_graph,
             identities,
             validation,
+            verification_facts,
+            verification_fact_reuse,
             binding_table,
             name_resolutions,
             module_resolutions,
@@ -709,6 +813,7 @@ pub fn elaborate_program_with_resolver_and_modules_and_seeds_with_map(
     let mut resolutions = Vec::new();
     let mut elaborated = BTreeMap::new();
     let mut declaration_spans = BTreeMap::new();
+    let mut module_profiles = BTreeMap::new();
     let mut visiting = BTreeSet::new();
     let mut module_ceilings = BTreeMap::new();
     let mut operation_sources = None;
@@ -719,6 +824,7 @@ pub fn elaborate_program_with_resolver_and_modules_and_seeds_with_map(
         &mut declaration_spans,
         &mut visiting,
         &mut module_ceilings,
+        &mut module_profiles,
     ) {
         diagnostics.append(&mut errors);
         Err(diagnostics)
@@ -767,12 +873,14 @@ pub fn elaborate_program_with_resolver_and_modules_and_seeds_with_map(
         .into_iter()
         .filter_map(|(requested_module, program)| {
             let source = sources.get(&requested_module)?;
+            let source_profile = module_profiles.get(&requested_module)?.clone();
             Some(ModuleResolution {
                 requested_module,
                 declared_module: program.module.clone(),
                 module_identity: module_id(&program.module),
                 source_identity: source.identity.clone(),
                 source_logical_name: source.logical_name.clone(),
+                source_profile,
                 semantic_fingerprint: program.content_fingerprint().ok(),
             })
         })
@@ -864,6 +972,7 @@ fn elaborate_import_closure(
     declaration_spans: &mut BTreeMap<String, DeclarationSpans>,
     visiting: &mut BTreeSet<String>,
     module_ceilings: &mut BTreeMap<String, u32>,
+    module_profiles: &mut BTreeMap<String, String>,
 ) -> Result<(), Vec<SourceDiagnostic>> {
     let name = ast.module.text.clone();
     if elaborated.contains_key(&name) {
@@ -880,6 +989,7 @@ fn elaborate_import_closure(
         name.clone(),
         mncs_syntax::max_sequence_bound_for(&ast.language_version.text).unwrap_or(0),
     );
+    module_profiles.insert(name.clone(), ast.language_version.text.clone());
     declaration_spans.insert(name.clone(), DeclarationSpans::from_ast(ast));
     if !visiting.insert(name.clone()) {
         return Err(vec![elaboration_diagnostic(
@@ -953,6 +1063,7 @@ fn elaborate_import_closure(
             declaration_spans,
             visiting,
             module_ceilings,
+            module_profiles,
         ) {
             return Err(errors
                 .into_iter()

@@ -4,6 +4,7 @@ use mncs_compiler::{
     elaborate_program_with_resolver, elaborate_program_with_resolver_and_modules, ModuleResolver,
     NullResolver, ReferenceCompiler, ResolvedNameKind,
 };
+use mncs_model::VerificationFactRequest;
 use mncs_syntax::{parse, SourceArtifactKind, SourceEnvelope};
 
 #[derive(Default)]
@@ -1569,4 +1570,73 @@ fn projection_from_a_non_record_value_is_rejected() {
     )
     .unwrap_err();
     assert!(errors.contains(&"MNE161".to_owned()), "got {errors:?}");
+}
+
+#[test]
+fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_locations() {
+    let resolver = MapResolver::default().with(
+        "lib.cached",
+        "mncs 0.18;\nmodule lib.cached;\nfn pass(value: u64) -> (result: u64) { return value; }\n",
+    );
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts| VerificationFactRequest {
+        language_profile: "0.19".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        source_location_identities: BTreeMap::new(),
+    };
+    let source = "mncs 0.19;\nmodule app.cached;\nuse lib.cached;\nfn entry(value: u64) -> (result: u64) { return lib.cached.pass(value); }\n";
+    let first_envelope = resolver.envelope("root", source.to_owned());
+    let first = compiler.front_end_with_verified_facts(
+        first_envelope.clone(),
+        &resolver,
+        &[],
+        &request(Vec::new()),
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    assert_eq!(first.verification_facts.len(), 2);
+    assert_eq!(
+        first
+            .module_resolutions
+            .iter()
+            .find(|module| module.declared_module == "lib.cached")
+            .map(|module| module.source_profile.as_str()),
+        Some("0.18")
+    );
+
+    let edited_source = format!("// comment-only edit\n{source}");
+    let second_envelope = resolver.envelope("root", edited_source);
+    let second = compiler.front_end_with_verified_facts(
+        second_envelope.clone(),
+        &resolver,
+        &[],
+        &request(first.verification_facts),
+    );
+    assert!(second.is_valid(), "{:?}", second.diagnostics);
+    assert_eq!(
+        second
+            .verification_fact_reuse
+            .as_ref()
+            .unwrap()
+            .reused
+            .len(),
+        2
+    );
+    assert!(second
+        .verification_fact_reuse
+        .as_ref()
+        .unwrap()
+        .recomputed
+        .is_empty());
+    let imported_source_identity = resolver
+        .envelope("lib.cached", resolver.modules["lib.cached"].clone())
+        .identity;
+    assert!(second.verification_facts.iter().all(|fact| {
+        let expected = if fact.subject.as_str().contains("lib.cached") {
+            imported_source_identity.as_str()
+        } else {
+            second_envelope.identity.as_str()
+        };
+        fact.source_location_identity.as_deref() == Some(expected)
+    }));
 }
