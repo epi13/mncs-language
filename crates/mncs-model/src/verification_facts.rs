@@ -16,7 +16,9 @@ use crate::{
     Program, SemanticId, SemanticIdentities,
 };
 
-pub const VERIFICATION_FACT_SCHEMA_VERSION: &str = "mncs.language-verification-fact/1";
+pub const VERIFICATION_FACT_SCHEMA_VERSION: &str = "mncs.language-verification-fact/2";
+pub const VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION: &str =
+    "mncs.language-verification-fact-reuse-observation/2";
 pub const VERIFICATION_FACT_VERIFIER_ID: &str = "mncs-language-function-body-validator/1";
 pub const VERIFICATION_FACT_POLICY_ID: &str = "mncs-language-function-body-policy/1";
 pub const DECLARATION_FACT_SCHEMA_VERSION: &str = "mncs.language-declaration-verification-fact/1";
@@ -31,6 +33,8 @@ pub enum VerificationDependencyRole {
     NominalType,
     Assumption,
     GenericSpecialization,
+    Effect,
+    Capability,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -46,6 +50,8 @@ pub enum VerificationFactInvalidator {
     SubjectBodyChanged(SemanticId),
     DeclarationInterfaceChanged(SemanticId),
     DependencyChanged(SemanticId),
+    EffectAssumptionChanged(SemanticId),
+    CapabilityAssumptionChanged(SemanticId),
     VerifierChanged,
     PolicyChanged,
     LanguageProfileChanged,
@@ -112,6 +118,8 @@ pub enum VerificationFactReuseMiss {
     SubjectChanged,
     DeclarationInterfaceChanged,
     DependenciesChanged,
+    EffectAssumptionsChanged,
+    CapabilityAssumptionsChanged,
     VerifierChanged,
     PolicyChanged,
     LanguageProfileChanged,
@@ -284,6 +292,7 @@ impl Program {
             fingerprint: function.interface_fingerprint(),
         };
         let mut dependencies = BTreeSet::new();
+        self.add_effect_and_capability_dependencies(function, identities, &mut dependencies)?;
 
         let body_value = serde_json::to_value(body).ok()?;
         let body_strings = strings_in_json(&body_value);
@@ -306,6 +315,11 @@ impl Program {
                     identity,
                     fingerprint: candidate.interface_fingerprint(),
                 });
+                self.add_effect_and_capability_dependencies(
+                    candidate,
+                    identities,
+                    &mut dependencies,
+                )?;
             }
         }
 
@@ -399,6 +413,40 @@ impl Program {
         })
     }
 
+    fn add_effect_and_capability_dependencies(
+        &self,
+        function: &Function,
+        identities: &SemanticIdentities,
+        dependencies: &mut BTreeSet<VerificationFactDependency>,
+    ) -> Option<()> {
+        let namespace = function.identity_namespace(&self.module);
+        for capability in &function.capabilities {
+            let identity = crate::identity::capability_id(namespace, &function.name, capability);
+            dependencies.insert(VerificationFactDependency {
+                role: VerificationDependencyRole::Capability,
+                fingerprint: identities.fingerprint(&identity)?.to_owned(),
+                identity,
+            });
+        }
+
+        let mut effect_occurrences = BTreeMap::<String, usize>::new();
+        for effect in &function.effects {
+            let canonical =
+                crate::canonical::canonical_json_value(&crate::canonical::canonical_effect(effect))
+                    .ok()?;
+            let occurrence = effect_occurrences.entry(canonical.clone()).or_default();
+            let identity =
+                crate::identity::effect_id(namespace, &function.name, &canonical, *occurrence);
+            *occurrence += 1;
+            dependencies.insert(VerificationFactDependency {
+                role: VerificationDependencyRole::Effect,
+                fingerprint: identities.fingerprint(&identity)?.to_owned(),
+                identity,
+            });
+        }
+        Some(())
+    }
+
     fn generic_specialization_fingerprint(
         &self,
         specialization: &GenericSpecializationRecord,
@@ -462,9 +510,21 @@ impl VerificationFact {
             VerificationFactInvalidator::PolicyChanged,
             VerificationFactInvalidator::LanguageProfileChanged,
         ];
-        invalidating_changes.extend(basis.dependencies.iter().map(|dependency| {
-            VerificationFactInvalidator::DependencyChanged(dependency.identity.clone())
-        }));
+        invalidating_changes.extend(basis.dependencies.iter().map(
+            |dependency| match dependency.role {
+                VerificationDependencyRole::Effect => {
+                    VerificationFactInvalidator::EffectAssumptionChanged(
+                        dependency.identity.clone(),
+                    )
+                }
+                VerificationDependencyRole::Capability => {
+                    VerificationFactInvalidator::CapabilityAssumptionChanged(
+                        dependency.identity.clone(),
+                    )
+                }
+                _ => VerificationFactInvalidator::DependencyChanged(dependency.identity.clone()),
+            },
+        ));
         let mut fact = Self {
             schema_version: VERIFICATION_FACT_SCHEMA_VERSION.to_owned(),
             subject: basis.subject,
@@ -503,6 +563,21 @@ impl VerificationFact {
         {
             return Err(VerificationFactReuseMiss::SubjectChanged);
         }
+        if self.declared_effects != current.declared_effects
+            || dependencies_for_role(&self.dependencies, VerificationDependencyRole::Effect)
+                != dependencies_for_role(&current.dependencies, VerificationDependencyRole::Effect)
+        {
+            return Err(VerificationFactReuseMiss::EffectAssumptionsChanged);
+        }
+        if self.declared_capabilities != current.declared_capabilities
+            || dependencies_for_role(&self.dependencies, VerificationDependencyRole::Capability)
+                != dependencies_for_role(
+                    &current.dependencies,
+                    VerificationDependencyRole::Capability,
+                )
+        {
+            return Err(VerificationFactReuseMiss::CapabilityAssumptionsChanged);
+        }
         if self.declaration_interface != current.declaration_interface {
             return Err(VerificationFactReuseMiss::DeclarationInterfaceChanged);
         }
@@ -520,11 +595,6 @@ impl VerificationFact {
         }
         if self.language_profile != current.language_profile {
             return Err(VerificationFactReuseMiss::LanguageProfileChanged);
-        }
-        if self.declared_effects != current.declared_effects
-            || self.declared_capabilities != current.declared_capabilities
-        {
-            return Err(VerificationFactReuseMiss::DeclarationInterfaceChanged);
         }
         Ok(())
     }
@@ -562,6 +632,16 @@ impl VerificationFact {
         let bytes = serde_json::to_vec(&witness).expect("verification witness is serializable");
         crate::sha256_hex(&bytes)
     }
+}
+
+fn dependencies_for_role(
+    dependencies: &[VerificationFactDependency],
+    role: VerificationDependencyRole,
+) -> Vec<&VerificationFactDependency> {
+    dependencies
+        .iter()
+        .filter(|dependency| dependency.role == role)
+        .collect()
 }
 
 impl DeclarationVerificationFact {
@@ -802,7 +882,9 @@ mod tests {
                 values: vec!["result".to_owned()],
             },
         }];
-        program.functions = vec![callee, caller];
+        let mut independent = program.functions[0].clone();
+        independent.name = "independent".to_owned();
+        program.functions = vec![callee, caller, independent];
         program
     }
 
@@ -823,6 +905,14 @@ mod tests {
             VerificationFactReuseMiss::Missing
         );
         assert_eq!(first.facts.len(), 1);
+        assert_eq!(
+            first.facts[0].schema_version,
+            VERIFICATION_FACT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            first.reuse.schema_version,
+            VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION
+        );
         assert_eq!(first.facts[0].subject, subject);
         assert_eq!(first.facts[0].result, VerificationFactResult::Verified);
         assert_eq!(
@@ -980,6 +1070,11 @@ mod tests {
             .find(|fact| fact.subject.as_str().ends_with("::caller"))
             .expect("caller body fact");
         let caller_subject = caller_fact.subject.clone();
+        let independent_subject = program.functions[2]
+            .body
+            .as_ref()
+            .unwrap()
+            .identity(&program.module, "independent");
         assert!(caller_fact.dependencies.iter().any(|dependency| {
             dependency.role == VerificationDependencyRole::CallableInterface
                 && dependency.identity == function_id(&program.module, "callee")
@@ -1004,7 +1099,132 @@ mod tests {
             caller_recomputation.reason,
             VerificationFactReuseMiss::DependenciesChanged
         );
-        assert!(result.reuse.reused.is_empty());
+        assert_eq!(result.reuse.reused, vec![independent_subject]);
+    }
+
+    #[test]
+    fn effect_and_capability_dependencies_recheck_only_their_callers() {
+        let program = call_program();
+        let first = program.validate_with_verified_facts(&request("0.19", Vec::new()));
+        assert!(first.report.valid, "{:?}", first.report.errors);
+        let caller_subject = first
+            .facts
+            .iter()
+            .find(|fact| fact.subject.as_str().ends_with("::caller"))
+            .expect("caller body fact")
+            .subject
+            .clone();
+        let independent_subject = program.functions[2]
+            .body
+            .as_ref()
+            .unwrap()
+            .identity(&program.module, "independent");
+
+        let mut effect_changed = program.clone();
+        effect_changed.functions[0].effects.push(Effect {
+            kind: "read".to_owned(),
+            target: "storage".to_owned(),
+            capability: "storage.read".to_owned(),
+        });
+        let effect_identities = effect_changed.semantic_identities();
+        let effect_caller = effect_changed
+            .functions
+            .iter()
+            .find(|function| function.name == "caller")
+            .unwrap();
+        let effect_basis = effect_changed
+            .body_fact_basis_with_identities(effect_caller, &effect_identities)
+            .unwrap();
+        assert!(effect_basis.dependencies.iter().any(|dependency| {
+            dependency.role == VerificationDependencyRole::Effect
+                && dependency.identity.as_str().contains("callee")
+        }));
+        let effect_result =
+            effect_changed.validate_with_verified_facts(&request("0.19", first.facts.clone()));
+        let effect_recomputation = effect_result
+            .reuse
+            .recomputed
+            .iter()
+            .find(|row| row.subject == caller_subject)
+            .expect("effect edit invalidates the caller");
+        assert_eq!(
+            effect_recomputation.reason,
+            VerificationFactReuseMiss::EffectAssumptionsChanged
+        );
+        assert!(effect_result.reuse.reused.contains(&independent_subject));
+
+        let mut capability_changed = program;
+        capability_changed.functions[0]
+            .capabilities
+            .push("storage.read".to_owned());
+        let capability_result =
+            capability_changed.validate_with_verified_facts(&request("0.19", first.facts));
+        let capability_recomputation = capability_result
+            .reuse
+            .recomputed
+            .iter()
+            .find(|row| row.subject == caller_subject)
+            .expect("capability edit invalidates the caller");
+        assert_eq!(
+            capability_recomputation.reason,
+            VerificationFactReuseMiss::CapabilityAssumptionsChanged
+        );
+        assert!(capability_result
+            .reuse
+            .reused
+            .contains(&independent_subject));
+    }
+
+    #[test]
+    fn facts_record_effect_and_capability_assumptions_as_invalidators() {
+        let mut program = crate::body::tests::executable_program();
+        program.functions[0].effects.push(Effect {
+            kind: "read".to_owned(),
+            target: "storage".to_owned(),
+            capability: "storage.read".to_owned(),
+        });
+        program.functions[0]
+            .capabilities
+            .push("storage.read".to_owned());
+        let first = program.validate_with_verified_facts(&request("0.19", Vec::new()));
+        assert!(first.report.valid, "{:?}", first.report.errors);
+        let fact = &first.facts[0];
+        let effect = fact
+            .dependencies
+            .iter()
+            .find(|dependency| dependency.role == VerificationDependencyRole::Effect)
+            .expect("effect assumption dependency");
+        let capability = fact
+            .dependencies
+            .iter()
+            .find(|dependency| dependency.role == VerificationDependencyRole::Capability)
+            .expect("capability assumption dependency");
+        assert!(fact.invalidating_changes.contains(
+            &VerificationFactInvalidator::EffectAssumptionChanged(effect.identity.clone())
+        ));
+        assert!(fact.invalidating_changes.contains(
+            &VerificationFactInvalidator::CapabilityAssumptionChanged(capability.identity.clone())
+        ));
+
+        let mut changed_effect = program.clone();
+        changed_effect.functions[0].effects[0].target = "cache".to_owned();
+        let effect_result =
+            changed_effect.validate_with_verified_facts(&request("0.19", first.facts.clone()));
+        assert_eq!(
+            effect_result.reuse.recomputed[0].reason,
+            VerificationFactReuseMiss::EffectAssumptionsChanged
+        );
+
+        let mut changed_capability = program;
+        changed_capability.functions[0]
+            .capabilities
+            .push("storage.write".to_owned());
+        let capability_result =
+            changed_capability.validate_with_verified_facts(&request("0.19", first.facts));
+        assert_eq!(
+            capability_result.reuse.recomputed[0].reason,
+            VerificationFactReuseMiss::CapabilityAssumptionsChanged
+        );
     }
 
     #[test]
@@ -1040,7 +1260,7 @@ mod tests {
             changed_assumption.validate_with_verified_facts(&request("0.19", cached));
         assert_eq!(
             assumption_result.reuse.recomputed[0].reason,
-            VerificationFactReuseMiss::DeclarationInterfaceChanged
+            VerificationFactReuseMiss::CapabilityAssumptionsChanged
         );
         assert!(assumption_result.reuse.reused.is_empty());
     }

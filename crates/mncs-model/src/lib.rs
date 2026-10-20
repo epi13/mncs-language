@@ -245,7 +245,8 @@ pub use verification_facts::{
     VerificationFactResult, VerificationFactReuseMiss, VerificationFactReuseObservation,
     VerificationFactValidation, DECLARATION_FACT_POLICY_ID, DECLARATION_FACT_REUSE_SCHEMA_VERSION,
     DECLARATION_FACT_SCHEMA_VERSION, DECLARATION_FACT_VERIFIER_ID, VERIFICATION_FACT_POLICY_ID,
-    VERIFICATION_FACT_SCHEMA_VERSION, VERIFICATION_FACT_VERIFIER_ID,
+    VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION, VERIFICATION_FACT_SCHEMA_VERSION,
+    VERIFICATION_FACT_VERIFIER_ID,
 };
 pub use verifier::{
     AlignmentVerifierInput, CapabilityVerifierInput, DeterministicVerifier, EvidenceAuthorityClass,

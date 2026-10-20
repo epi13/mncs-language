@@ -7,7 +7,7 @@ use crate::verification_facts::{
     DeclarationVerificationFact, DeclarationVerificationWarning, VerificationFact,
     VerificationFactRecomputation, VerificationFactRequest, VerificationFactReuseMiss,
     VerificationFactReuseObservation, VerificationFactValidation,
-    DECLARATION_FACT_REUSE_SCHEMA_VERSION, VERIFICATION_FACT_SCHEMA_VERSION,
+    DECLARATION_FACT_REUSE_SCHEMA_VERSION, VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION,
 };
 use crate::{
     finite_type_id, finite_variant_id, function_id, Function, Program, Value,
@@ -431,7 +431,7 @@ impl Program {
             facts,
             declaration_facts,
             reuse: VerificationFactReuseObservation {
-                schema_version: VERIFICATION_FACT_SCHEMA_VERSION.to_owned(),
+                schema_version: VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION.to_owned(),
                 reused,
                 recomputed,
             },
