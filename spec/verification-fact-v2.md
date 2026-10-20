@@ -1,5 +1,8 @@
 # Language verification facts (v2)
 
+This document records the historical v2 contract. The current contract is
+[`verification-fact-v3.md`](verification-fact-v3.md).
+
 `mncs.language-verification-fact/2` records a successful Language function-body
 validation that may be considered for reuse in a later validation of the same
 current program. Its reuse observation is

@@ -16,10 +16,10 @@ use crate::{
     FunctionBody, GenericArg, GenericSpecializationRecord, Program, SemanticId, SemanticIdentities,
 };
 
-pub const VERIFICATION_FACT_SCHEMA_VERSION: &str = "mncs.language-verification-fact/2";
+pub const VERIFICATION_FACT_SCHEMA_VERSION: &str = "mncs.language-verification-fact/3";
 pub const VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION: &str =
     "mncs.language-verification-fact-reuse-observation/2";
-pub const VERIFICATION_FACT_VERIFIER_ID: &str = "mncs-language-function-body-validator/2";
+pub const VERIFICATION_FACT_VERIFIER_ID: &str = "mncs-language-function-body-validator/3";
 pub const VERIFICATION_FACT_POLICY_ID: &str = "mncs-language-function-body-policy/1";
 pub const DECLARATION_FACT_SCHEMA_VERSION: &str = "mncs.language-declaration-verification-fact/1";
 pub const DECLARATION_FACT_REUSE_SCHEMA_VERSION: &str = "mncs.language-declaration-fact-reuse/1";
@@ -30,6 +30,7 @@ pub const DECLARATION_FACT_POLICY_ID: &str = "mncs-language-function-declaration
 #[serde(rename_all = "snake_case")]
 pub enum VerificationDependencyRole {
     CallableInterface,
+    CallableImplementation,
     NominalType,
     Assumption,
     GenericSpecialization,
@@ -50,6 +51,7 @@ pub enum VerificationFactInvalidator {
     SubjectBodyChanged(SemanticId),
     DeclarationInterfaceChanged(SemanticId),
     DependencyChanged(SemanticId),
+    CallableImplementationChanged(SemanticId),
     EffectAssumptionChanged(SemanticId),
     CapabilityAssumptionChanged(SemanticId),
     VerifierChanged,
@@ -325,8 +327,14 @@ impl Program {
             if identity != declaration && referenced_functions.contains(&identity) {
                 dependencies.insert(VerificationFactDependency {
                     role: VerificationDependencyRole::CallableInterface,
-                    identity,
+                    identity: identity.clone(),
                     fingerprint: candidate.interface_fingerprint(),
+                });
+                let implementation_fingerprint = self.function_semantic_fingerprint(&identity)?;
+                dependencies.insert(VerificationFactDependency {
+                    role: VerificationDependencyRole::CallableImplementation,
+                    identity,
+                    fingerprint: implementation_fingerprint,
                 });
                 self.add_effect_and_capability_dependencies(
                     candidate,
@@ -688,6 +696,11 @@ impl VerificationFact {
         ];
         invalidating_changes.extend(basis.dependencies.iter().map(
             |dependency| match dependency.role {
+                VerificationDependencyRole::CallableImplementation => {
+                    VerificationFactInvalidator::CallableImplementationChanged(
+                        dependency.identity.clone(),
+                    )
+                }
                 VerificationDependencyRole::Effect => {
                     VerificationFactInvalidator::EffectAssumptionChanged(
                         dependency.identity.clone(),
@@ -1463,6 +1476,55 @@ mod tests {
     }
 
     #[test]
+    fn changed_callee_implementation_rechecks_direct_callers_only() {
+        let mut program = call_program();
+        let independent_body = program.functions[2].body.clone().unwrap();
+        program.functions[0].body = Some(independent_body);
+        let first = program.validate_with_verified_facts(&request("0.19", Vec::new()));
+        assert!(first.report.valid, "{:?}", first.report.errors);
+        let caller_subject = first
+            .facts
+            .iter()
+            .find(|fact| fact.subject.as_str().ends_with("::caller"))
+            .expect("caller body fact")
+            .subject
+            .clone();
+        let independent_subject = program.functions[2]
+            .body
+            .as_ref()
+            .unwrap()
+            .identity(&program.module, "independent");
+        assert!(first.facts.iter().any(|fact| {
+            fact.subject == caller_subject
+                && fact.dependencies.iter().any(|dependency| {
+                    dependency.role == VerificationDependencyRole::CallableImplementation
+                        && dependency.identity == function_id(&program.module, "callee")
+                })
+        }));
+
+        let mut changed = program;
+        changed.functions[0].body.as_mut().unwrap().entry = "missing".to_owned();
+        let result = changed.validate_with_verified_facts(&request("0.19", first.facts));
+        assert!(!result.report.valid);
+        assert!(result
+            .report
+            .errors
+            .iter()
+            .any(|error| error.code == "MNB006"));
+        let caller_recomputation = result
+            .reuse
+            .recomputed
+            .iter()
+            .find(|row| row.subject == caller_subject)
+            .expect("callee body edit invalidates the direct caller");
+        assert_eq!(
+            caller_recomputation.reason,
+            VerificationFactReuseMiss::DependenciesChanged
+        );
+        assert_eq!(result.reuse.reused, vec![independent_subject]);
+    }
+
+    #[test]
     fn effect_and_capability_dependencies_recheck_only_their_callers() {
         let program = call_program();
         let first = program.validate_with_verified_facts(&request("0.19", Vec::new()));
@@ -1595,7 +1657,7 @@ mod tests {
             .facts;
 
         let mut new_verifier = cached.clone();
-        new_verifier[0].verifier_identity = "mncs-language-function-body-validator/3".to_owned();
+        new_verifier[0].verifier_identity = "mncs-language-function-body-validator/4".to_owned();
         new_verifier[0].verification_witness_identity = new_verifier[0].computed_witness_identity();
         let verifier_result = program.validate_with_verified_facts(&request("0.19", new_verifier));
         assert_eq!(
