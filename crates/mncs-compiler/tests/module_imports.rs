@@ -4,7 +4,7 @@ use mncs_compiler::{
     elaborate_program_with_resolver, elaborate_program_with_resolver_and_modules, ModuleResolver,
     NullResolver, ReferenceCompiler, ResolvedNameKind,
 };
-use mncs_model::VerificationFactRequest;
+use mncs_model::{VerificationDependencyRole, VerificationFactRequest};
 use mncs_syntax::{parse, SourceArtifactKind, SourceEnvelope};
 
 #[derive(Default)]
@@ -1639,4 +1639,70 @@ fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_loca
         };
         fact.source_location_identity.as_deref() == Some(expected)
     }));
+}
+
+#[test]
+fn generic_body_edit_rechecks_specialization_consumers_and_reuses_independent_bodies() {
+    let generic_source = r#"mncs 0.10;
+module lib.generic;
+fn first<N: Nat>(values: [u64; N]) -> (result: u64) { return values[0]; }
+fn independent(value: u64) -> (result: u64) { return value; }
+"#;
+    let resolver = MapResolver::default().with("lib.generic", generic_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts| VerificationFactRequest {
+        language_profile: "0.10".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        source_location_identities: BTreeMap::new(),
+    };
+    let root_source = r#"mncs 0.10;
+module app.generic_facts;
+use lib.generic as g;
+fn entry(values: [u64; 2]) -> (result: u64) { return g.first<2>(values); }
+fn other(value: u64) -> (result: u64) { return g.independent(value); }
+"#;
+    let first_envelope = resolver.envelope("root", root_source.to_owned());
+    let first = compiler.front_end_with_verified_facts(
+        first_envelope,
+        &resolver,
+        &[],
+        &request(Vec::new()),
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    let entry_fact = first
+        .verification_facts
+        .iter()
+        .find(|fact| fact.subject.as_str().ends_with("::entry"))
+        .expect("generic caller fact");
+    assert!(entry_fact.dependencies.iter().any(|dependency| {
+        dependency.role == VerificationDependencyRole::GenericSpecialization
+            && dependency.identity.as_str().contains("lib.generic")
+    }));
+
+    let changed_generic_source = generic_source.replace("values[0]", "values[1]");
+    let changed_resolver = MapResolver::default().with("lib.generic", &changed_generic_source);
+    let changed_envelope = changed_resolver.envelope("root", root_source.to_owned());
+    let changed = compiler.front_end_with_verified_facts(
+        changed_envelope,
+        &changed_resolver,
+        &[],
+        &request(first.verification_facts),
+    );
+    assert!(changed.is_valid(), "{:?}", changed.diagnostics);
+    let reuse = changed
+        .verification_fact_reuse
+        .as_ref()
+        .expect("Language fact reuse observation");
+    assert!(reuse
+        .recomputed
+        .iter()
+        .any(|row| row.subject.as_str().ends_with("::entry")));
+    assert!(reuse.recomputed.iter().any(|row| {
+        row.subject.as_str().contains("lib.generic::first__spec_")
+    }));
+    assert!(reuse
+        .reused
+        .iter()
+        .any(|subject| subject.as_str().ends_with("::other")));
 }

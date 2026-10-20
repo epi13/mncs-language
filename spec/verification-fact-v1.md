@@ -18,7 +18,11 @@ Each fact contains:
   of its inputs, outputs, contracts, declared assumptions, effects, and
   capabilities, excluding the implementation body;
 - `dependencies`: sorted guards for callable interfaces, nominal types,
-  assumptions, and generic specializations referenced by the body;
+  assumptions, and generic specializations referenced by the body. A
+  specialization guard binds its existing specialization identity together
+  with the generic declaration and the concrete specialization's callable
+  interface and body fingerprints, so a generic implementation edit
+  invalidates consumers that depend on that specialization;
 - `verifier_identity`, `policy_identity`, and `language_profile`: the
   implementation and assumptions under which the body was checked;
 - `declared_effects` and `declared_capabilities`: the exact effect surface
