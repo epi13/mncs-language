@@ -1,0 +1,100 @@
+{
+  "schema_version": "mncs.language.verification-fact-invalidation-test-evidence/1",
+  "identity": "ev_language_cross_module_fact_invalidation_20261020",
+  "owner": "mncs-language",
+  "recorded_at": "2026-10-20T14:24:14.978133+00:00",
+  "producer": {
+    "repository": "mncs-language",
+    "branch": "campaign/language-verified-fact-reuse-20261020",
+    "tested_revision": "1ad205e14e5fc833e831c5c3e1e19a0e16cae842",
+    "worktree": "/home/epi13/Documents/Projects/mncs-compiler/.worktrees/native-app-readiness-20261013/mncs-language/.worktrees/verified-fact-reuse-20261020"
+  },
+  "tests": [
+    {
+      "command": "env CARGO_BUILD_JOBS=2 cargo test --offline -p mncs-compiler --test module_imports",
+      "exit_code": 0,
+      "passed": 46,
+      "failed": 0,
+      "test_target_seconds": 0.5
+    },
+    {
+      "command": "env CARGO_BUILD_JOBS=2 cargo test --offline -p mncs-cli --test rfc_ledger",
+      "exit_code": 0,
+      "passed": 5,
+      "failed": 0,
+      "test_target_seconds": 23.02
+    }
+  ],
+  "verified_fact_reuse": {
+    "observation_owner": "Language frontend",
+    "contract": "mncs.language-verification-fact-reuse-observation/2",
+    "imported_signature_change": {
+      "function_body_units_before": 5,
+      "reused": [
+        "lib.interface_facts::independent",
+        "app.interface_facts::unrelated",
+        "app.interface_facts::local"
+      ],
+      "recomputed": [
+        {
+          "subject": "lib.interface_facts::advance",
+          "reason": "declaration_interface_changed"
+        },
+        {
+          "subject": "app.interface_facts::entry",
+          "reason": "dependencies_changed"
+        }
+      ]
+    },
+    "imported_nominal_shape_change": {
+      "function_body_units_before": 5,
+      "reused": [
+        "lib.nominal_facts::independent",
+        "app.nominal_facts::unrelated",
+        "app.nominal_facts::local"
+      ],
+      "recomputed": [
+        {
+          "subject": "lib.nominal_facts::read",
+          "reason": "subject_changed"
+        },
+        {
+          "subject": "app.nominal_facts::entry",
+          "reason": "subject_changed"
+        }
+      ],
+      "invalid_projection_after_successful_snapshot": {
+        "valid": false,
+        "diagnostic_path": [
+          "MNE172",
+          "MNE162"
+        ],
+        "description": "The import wrapper retained the fresh unknown-field diagnostic after reusing prior successful facts from the immediately preceding valid snapshot."
+      }
+    }
+  },
+  "rfc_ledger_correction": {
+    "rfc": "0049",
+    "row_added": true,
+    "satisfied_criteria": [
+      "0049-C1"
+    ],
+    "open_criteria": [
+      "0049-C2",
+      "0049-C3",
+      "0049-C4"
+    ],
+    "description": "The checked-in RFC and index previously lacked a canonical ledger row; the proposed implementation and remaining process/Forge obligations are now represented explicitly."
+  },
+  "source_hashes": {
+    "crates/mncs-compiler/tests/module_imports.rs": "26d1d363f1d661e6574de74d886abe07a6b9554c81ff2a877058ab2f9719583b",
+    "rfcs/conformance-ledger.json": "db7d9185d6af21a1fc9ed83a4ee5246bd2954e336c9a2fbf52b52794eefd2ae8",
+    "docs/rfc-conformance.md": "f6ae095c47adab52064d3438332f58d726d529e48b92f82cd259bff50df5d2a9"
+  },
+  "resource_measurements": {
+    "process_cpu_seconds": null,
+    "peak_rss_bytes": null,
+    "cgroup_memory_peak_bytes": null,
+    "note": "Not measured for this focused regression run; test target wall durations are recorded above."
+  }
+}
