@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use mncs_compiler::{
     elaborate_program_with_resolver, elaborate_program_with_resolver_and_modules, ModuleResolver,
-    NullResolver, ReferenceCompiler, ResolvedNameKind,
+    NullResolver, ReferenceCompiler, ResolvedNameKind, SourceParseCache,
 };
 use mncs_model::{VerificationDependencyRole, VerificationFactRequest};
 use mncs_syntax::{parse, SourceArtifactKind, SourceEnvelope};
@@ -1653,6 +1653,78 @@ fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_loca
         };
         fact.source_location_identity.as_deref() == Some(expected)
     }));
+}
+
+#[test]
+fn linked_frontend_reuses_unchanged_import_parses_after_cache_restart() {
+    let library_source =
+        "mncs 0.19;\nmodule lib.parse_cache;\nfn pass(value: u64) -> (result: u64) { return value; }\n";
+    let resolver = MapResolver::default().with("lib.parse_cache", library_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
+        language_profile: "0.19".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        prior_declaration_facts,
+        source_location_identities: BTreeMap::new(),
+    };
+    let source = "mncs 0.19;\nmodule app.parse_cache;\nuse lib.parse_cache;\nfn entry(value: u64) -> (result: u64) { return lib.parse_cache.pass(value); }\n";
+    let mut parse_cache = SourceParseCache::default();
+    let first = compiler.front_end_with_verified_facts_and_source_parse_cache(
+        resolver.envelope("root", source.to_owned()),
+        &resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+        &mut parse_cache,
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    let first_cache_observation = first
+        .source_parse_cache_reuse
+        .as_ref()
+        .expect("parse cache observation");
+    assert_eq!(first_cache_observation.parsed_source_identities.len(), 2);
+    assert_eq!(first_cache_observation.reused_source_identities.len(), 0);
+    assert_eq!(first_cache_observation.published_entry_count, 2);
+
+    // A fresh process restores only the caller-owned Language parse cache.
+    let serialized_cache = serde_json::to_vec(&parse_cache).expect("parse cache serializes");
+    let mut parse_cache: SourceParseCache =
+        serde_json::from_slice(&serialized_cache).expect("parse cache restores");
+
+    let edited_source = format!("// root snapshot comment edit\n{source}");
+    let second = compiler.front_end_with_verified_facts_and_source_parse_cache(
+        resolver.envelope("root", edited_source),
+        &resolver,
+        &[],
+        &request(
+            first.verification_facts,
+            first.declaration_verification_facts,
+        ),
+        &mut parse_cache,
+    );
+    assert!(second.is_valid(), "{:?}", second.diagnostics);
+    let observation = second
+        .source_parse_cache_reuse
+        .as_ref()
+        .expect("parse cache observation");
+    assert_eq!(observation.reused_source_identities.len(), 1);
+    assert_eq!(
+        observation.reused_source_identities[0],
+        resolver
+            .envelope("lib.parse_cache", library_source.to_owned())
+            .identity
+    );
+    assert_eq!(observation.parsed_source_identities.len(), 1);
+    assert_eq!(observation.published_entry_count, 1);
+    assert_eq!(
+        second
+            .verification_fact_reuse
+            .as_ref()
+            .expect("semantic fact observation")
+            .reused
+            .len(),
+        2
+    );
 }
 
 #[test]

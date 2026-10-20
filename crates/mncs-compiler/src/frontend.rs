@@ -20,7 +20,7 @@ use mncs_model::{
     EXECUTABLE_BODY_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSION,
 };
 use mncs_syntax::{
-    parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstMatchArm, AstMatchPattern,
+    AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstMatchArm, AstMatchPattern,
     AstStmt, ConcreteSyntaxTree, DiagnosticSeverity, DiagnosticStage, LexedDocument, ParseOutput,
     SourceArtifactKind, SourceDiagnostic, SourceEnvelope, SourceSpan, SpannedText,
     AST_SCHEMA_VERSION, CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION, SOURCE_ENVELOPE_SCHEMA_VERSION,
@@ -40,6 +40,7 @@ fn trace_timing(stage: &str, started: Instant) {
 }
 
 use crate::resolution::{NameResolution, NameResolutionIndex, ResolvedNameKind};
+use crate::source_parse_cache::{SourceParseCache, SourceParseCacheObservation};
 use crate::source_map::ExecutionSourceMap;
 use crate::{fingerprint, native_node_profile, ReferenceCompiler};
 
@@ -66,6 +67,10 @@ pub struct SourceFrontEndResult {
     pub declaration_verification_facts: Vec<DeclarationVerificationFact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub declaration_fact_reuse: Option<DeclarationFactReuseObservation>,
+    /// Language-owned parse cache work, when the caller supplied a persistent
+    /// source parse cache for this frontend invocation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_parse_cache_reuse: Option<SourceParseCacheObservation>,
     /// Compact, versioned semantic binding substrate used by elaboration,
     /// tooling, and downstream identity/evidence consumers.
     pub binding_table: Option<SemanticBindingTable>,
@@ -321,7 +326,7 @@ impl ReferenceCompiler {
         resolver: &dyn ModuleResolver,
         seeds: &[mncs_model::HostGenericSeedRequest],
     ) -> SourceFrontEndResult {
-        self.front_end_with_resolver_seeds_and_facts(envelope, resolver, seeds, None)
+        self.front_end_with_resolver_seeds_and_facts(envelope, resolver, seeds, None, None)
     }
 
     /// Runs the normal Language frontend while allowing the Language model to
@@ -335,7 +340,34 @@ impl ReferenceCompiler {
         seeds: &[mncs_model::HostGenericSeedRequest],
         request: &VerificationFactRequest,
     ) -> SourceFrontEndResult {
-        self.front_end_with_resolver_seeds_and_facts(envelope, resolver, seeds, Some(request))
+        self.front_end_with_resolver_seeds_and_facts(
+            envelope,
+            resolver,
+            seeds,
+            Some(request),
+            None,
+        )
+    }
+
+    /// Runs the normal Language frontend with verified body facts and a
+    /// caller-owned parse cache that can be serialized between processes.
+    /// Parse results are reused only for an exact sealed source envelope under
+    /// the same parser policy, syntax schemas, and source-profile registry.
+    pub fn front_end_with_verified_facts_and_source_parse_cache(
+        &self,
+        envelope: SourceEnvelope,
+        resolver: &dyn ModuleResolver,
+        seeds: &[mncs_model::HostGenericSeedRequest],
+        request: &VerificationFactRequest,
+        parse_cache: &mut SourceParseCache,
+    ) -> SourceFrontEndResult {
+        self.front_end_with_resolver_seeds_and_facts(
+            envelope,
+            resolver,
+            seeds,
+            Some(request),
+            Some(parse_cache),
+        )
     }
 
     fn front_end_with_resolver_seeds_and_facts(
@@ -344,15 +376,24 @@ impl ReferenceCompiler {
         resolver: &dyn ModuleResolver,
         seeds: &[mncs_model::HostGenericSeedRequest],
         verification_request: Option<&VerificationFactRequest>,
+        parse_cache: Option<&mut SourceParseCache>,
     ) -> SourceFrontEndResult {
+        let cache_resolver = parse_cache.map(|cache| SourceParseCacheResolver {
+            inner: resolver,
+            cache: RefCell::new(cache),
+            observation: RefCell::new(SourceParseCacheObservation::default()),
+        });
+        let active_resolver: &dyn ModuleResolver = cache_resolver
+            .as_ref()
+            .map(|adapter| adapter as &dyn ModuleResolver)
+            .unwrap_or(resolver);
         let started = Instant::now();
         let ParseOutput {
             lexical,
             cst,
             ast,
             diagnostics,
-        } = parse(&envelope);
-        mncs_model::record_counter("source_parse");
+        } = active_resolver.parse_source(&envelope);
         trace_timing("parse", started);
         let mut artifacts = vec![
             CompilerArtifactRef::new(
@@ -399,7 +440,7 @@ impl ReferenceCompiler {
             } else {
                 let elaboration_started = Instant::now();
                 let elaboration = elaborate_program_with_resolver_and_modules_and_seeds_with_map(
-                    tree, resolver, seeds,
+                    tree, active_resolver, seeds,
                 );
                 trace_timing("elaboration", elaboration_started);
                 match elaboration {
@@ -513,6 +554,9 @@ impl ReferenceCompiler {
             verification_fact_reuse,
             declaration_verification_facts,
             declaration_fact_reuse,
+            source_parse_cache_reuse: cache_resolver
+                .as_ref()
+                .map(|adapter| adapter.observation.borrow().clone()),
             binding_table,
             name_resolutions,
             module_resolutions,
@@ -714,6 +758,14 @@ pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<Source
 pub trait ModuleResolver {
     fn resolve(&self, module: &str) -> Option<SourceEnvelope>;
 
+    /// Parse one resolved source envelope. The default keeps existing
+    /// resolvers compatible; cache-aware frontends override this path while
+    /// retaining the resolver as the authority for module selection.
+    fn parse_source(&self, envelope: &SourceEnvelope) -> ParseOutput {
+        mncs_model::record_counter("source_parse");
+        mncs_syntax::parse(envelope)
+    }
+
     /// Detailed resolution distinguishing a miss from conflicting
     /// candidates (HARNESS-PRESSURE-008). The default derives from
     /// `resolve`, reporting no conflict information; resolvers that search
@@ -748,6 +800,28 @@ pub struct NullResolver;
 impl ModuleResolver for NullResolver {
     fn resolve(&self, _module: &str) -> Option<SourceEnvelope> {
         None
+    }
+}
+
+struct SourceParseCacheResolver<'a> {
+    inner: &'a dyn ModuleResolver,
+    cache: RefCell<&'a mut SourceParseCache>,
+    observation: RefCell<SourceParseCacheObservation>,
+}
+
+impl ModuleResolver for SourceParseCacheResolver<'_> {
+    fn resolve(&self, module: &str) -> Option<SourceEnvelope> {
+        self.inner.resolve(module)
+    }
+
+    fn resolve_detailed(&self, module: &str) -> ModuleResolutionOutcome {
+        self.inner.resolve_detailed(module)
+    }
+
+    fn parse_source(&self, envelope: &SourceEnvelope) -> ParseOutput {
+        self.cache
+            .borrow_mut()
+            .parse(envelope, &mut self.observation.borrow_mut())
     }
 }
 
@@ -948,6 +1022,10 @@ impl ModuleResolver for RecordingResolver<'_> {
         }
         outcome
     }
+
+    fn parse_source(&self, envelope: &SourceEnvelope) -> ParseOutput {
+        self.inner.parse_source(envelope)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1050,7 +1128,7 @@ fn elaborate_import_closure(
                 )]);
             }
         };
-        let parsed = mncs_syntax::parse(&dependency_envelope);
+        let parsed = resolver.parse_source(&dependency_envelope);
         let Some(dependency_ast) = parsed.ast else {
             return Err(vec![import_failure_diagnostic(
                 &dependency_name,
