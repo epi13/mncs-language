@@ -1,0 +1,89 @@
+{
+  "identity": "ev_language_imported_effect_capability_fact_invalidation_20261020",
+  "limitations": "This regression validates Language-owned dependency tracking for imported effect and capability changes. The test target uses the ReferenceCompiler frontend; it does not measure native application artifact execution, Forge routing, canonical Store publication, or compiler succession.",
+  "owner": "mncs-language",
+  "producer": {
+    "branch": "campaign/language-verified-fact-reuse-20261020",
+    "repository": "mncs-language",
+    "tested_patch_sha256": "af8eb82fec42459136bfcbf782e774aae752b45e7f3814b2a270f58c67e03751",
+    "tested_revision": "79ca114f214c2bacd9ff7bd060cfc56b513113d1",
+    "worktree": "/home/epi13/Documents/Projects/mncs-compiler/.worktrees/native-app-readiness-20261013/mncs-language/.worktrees/verified-fact-reuse-20261020"
+  },
+  "recorded_at": "2026-10-20T16:12:37.586676+00:00",
+  "resource_measurements": {
+    "cgroup_memory_measurement_available": false,
+    "peak_rss_measured": false,
+    "test_target_wall_seconds": 0.49
+  },
+  "schema_version": "mncs.language.verification-fact-invalidation-test-evidence/1",
+  "source_hashes": {
+    "crates/mncs-compiler/tests/module_imports.rs": "95cd26d2930aaaa37947b2dcf2359b8e2308f2e3528b4c173b1075e1bfef3f88"
+  },
+  "tests": [
+    {
+      "command": "CARGO_BUILD_JOBS=2 cargo test -p mncs-compiler --test module_imports",
+      "diff_check": "git diff --check",
+      "exit_code": 0,
+      "failed": 0,
+      "format_check": "rustfmt --edition 2021 --check crates/mncs-compiler/tests/module_imports.rs",
+      "passed": 47,
+      "test_target_seconds": 0.49,
+      "workspace_format_check": {
+        "changed_file_rustfmt_check": "passed",
+        "command": "cargo fmt --all -- --check",
+        "scope": "untouched workspace files outside crates/mncs-compiler/tests/module_imports.rs",
+        "status": "failed_existing_formatting_drift"
+      }
+    }
+  ],
+  "verified_fact_reuse": {
+    "contract": "mncs.language-verification-fact-reuse-observation/2",
+    "imported_capability_change": {
+      "body_fact_units_before": 4,
+      "caller_declares_both_capabilities": true,
+      "caller_semantic_subject_fingerprint_changed": true,
+      "changed_function": "access",
+      "changed_module": "lib.capability_facts",
+      "imported_capability_dependency_changed": true,
+      "recomputed": [
+        {
+          "reason": "capability_assumptions_changed",
+          "subject": "lib.capability_facts::access"
+        },
+        {
+          "reason": "subject_changed",
+          "subject": "app.capability_facts::entry"
+        }
+      ],
+      "reused": [
+        "lib.capability_facts::independent",
+        "app.capability_facts::unrelated"
+      ],
+      "valid_after_change": true
+    },
+    "imported_effect_change": {
+      "body_fact_units_before": 4,
+      "caller_declares_both_effects": true,
+      "caller_semantic_subject_fingerprint_changed": true,
+      "changed_function": "access",
+      "changed_module": "lib.effect_facts",
+      "imported_effect_dependency_changed": true,
+      "recomputed": [
+        {
+          "reason": "effect_assumptions_changed",
+          "subject": "lib.effect_facts::access"
+        },
+        {
+          "reason": "subject_changed",
+          "subject": "app.effect_facts::entry"
+        }
+      ],
+      "reused": [
+        "lib.effect_facts::independent",
+        "app.effect_facts::unrelated"
+      ],
+      "valid_after_change": true
+    },
+    "observation_owner": "Language frontend"
+  }
+}
