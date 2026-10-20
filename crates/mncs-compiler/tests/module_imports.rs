@@ -1579,10 +1579,11 @@ fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_loca
         "mncs 0.18;\nmodule lib.cached.v1;\nfn pass(value: u64) -> (result: u64) { return value; }\n",
     );
     let compiler = ReferenceCompiler::default();
-    let request = |prior_facts| VerificationFactRequest {
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
         language_profile: "0.19".to_owned(),
         subject_language_profiles: BTreeMap::new(),
         prior_facts,
+        prior_declaration_facts,
         source_location_identities: BTreeMap::new(),
     };
     let source = "mncs 0.19;\nmodule app.cached;\nuse lib.cached;\nfn entry(value: u64) -> (result: u64) { return lib.cached.pass(value); }\n";
@@ -1591,7 +1592,7 @@ fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_loca
         first_envelope.clone(),
         &resolver,
         &[],
-        &request(Vec::new()),
+        &request(Vec::new(), Vec::new()),
     );
     assert!(first.is_valid(), "{:?}", first.diagnostics);
     assert_eq!(first.verification_facts.len(), 2);
@@ -1610,7 +1611,10 @@ fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_loca
         second_envelope.clone(),
         &resolver,
         &[],
-        &request(first.verification_facts),
+        &request(
+            first.verification_facts,
+            first.declaration_verification_facts,
+        ),
     );
     assert!(second.is_valid(), "{:?}", second.diagnostics);
     assert_eq!(
@@ -1624,6 +1628,16 @@ fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_loca
     );
     assert!(second
         .verification_fact_reuse
+        .as_ref()
+        .unwrap()
+        .recomputed
+        .is_empty());
+    assert_eq!(
+        second.declaration_fact_reuse.as_ref().unwrap().reused.len(),
+        2
+    );
+    assert!(second
+        .declaration_fact_reuse
         .as_ref()
         .unwrap()
         .recomputed
@@ -1650,10 +1664,11 @@ fn independent(value: u64) -> (result: u64) { return value; }
 "#;
     let resolver = MapResolver::default().with("lib.generic", generic_source);
     let compiler = ReferenceCompiler::default();
-    let request = |prior_facts| VerificationFactRequest {
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
         language_profile: "0.10".to_owned(),
         subject_language_profiles: BTreeMap::new(),
         prior_facts,
+        prior_declaration_facts,
         source_location_identities: BTreeMap::new(),
     };
     let root_source = r#"mncs 0.10;
@@ -1667,7 +1682,7 @@ fn other(value: u64) -> (result: u64) { return g.independent(value); }
         first_envelope,
         &resolver,
         &[],
-        &request(Vec::new()),
+        &request(Vec::new(), Vec::new()),
     );
     assert!(first.is_valid(), "{:?}", first.diagnostics);
     let entry_fact = first
@@ -1687,7 +1702,10 @@ fn other(value: u64) -> (result: u64) { return g.independent(value); }
         changed_envelope,
         &changed_resolver,
         &[],
-        &request(first.verification_facts),
+        &request(
+            first.verification_facts,
+            first.declaration_verification_facts,
+        ),
     );
     assert!(changed.is_valid(), "{:?}", changed.diagnostics);
     let reuse = changed
@@ -1698,9 +1716,10 @@ fn other(value: u64) -> (result: u64) { return g.independent(value); }
         .recomputed
         .iter()
         .any(|row| row.subject.as_str().ends_with("::entry")));
-    assert!(reuse.recomputed.iter().any(|row| {
-        row.subject.as_str().contains("lib.generic::first__spec_")
-    }));
+    assert!(reuse
+        .recomputed
+        .iter()
+        .any(|row| { row.subject.as_str().contains("lib.generic::first__spec_") }));
     assert!(reuse
         .reused
         .iter()

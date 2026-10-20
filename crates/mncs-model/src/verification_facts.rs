@@ -1,4 +1,5 @@
-//! Versioned evidence for reusing successful function-body validation.
+//! Versioned evidence for reusing successful declaration and function-body
+//! validation.
 //!
 //! Facts are inputs to the Language validator, never authority on their own:
 //! the validator re-derives the current subject, declaration interface,
@@ -11,13 +12,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    function_id, specialization_id, Effect, Function, GenericSpecializationRecord, Program,
-    SemanticId, SemanticIdentities,
+    assumption_id, function_id, specialization_id, Effect, Function, GenericSpecializationRecord,
+    Program, SemanticId, SemanticIdentities,
 };
 
 pub const VERIFICATION_FACT_SCHEMA_VERSION: &str = "mncs.language-verification-fact/1";
 pub const VERIFICATION_FACT_VERIFIER_ID: &str = "mncs-language-function-body-validator/1";
 pub const VERIFICATION_FACT_POLICY_ID: &str = "mncs-language-function-body-policy/1";
+pub const DECLARATION_FACT_SCHEMA_VERSION: &str = "mncs.language-declaration-verification-fact/1";
+pub const DECLARATION_FACT_REUSE_SCHEMA_VERSION: &str = "mncs.language-declaration-fact-reuse/1";
+pub const DECLARATION_FACT_VERIFIER_ID: &str = "mncs-language-function-declaration-validator/1";
+pub const DECLARATION_FACT_POLICY_ID: &str = "mncs-language-function-declaration-policy/1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,6 +92,11 @@ pub struct VerificationFactRequest {
     pub subject_language_profiles: BTreeMap<SemanticId, String>,
     #[serde(default)]
     pub prior_facts: Vec<VerificationFact>,
+    /// Prior successful declaration checks. Body facts remain a separate
+    /// contract because declaration and body validation have different
+    /// subjects, dependencies, and recomputation units.
+    #[serde(default)]
+    pub prior_declaration_facts: Vec<DeclarationVerificationFact>,
     #[serde(default)]
     pub source_location_identities: BTreeMap<SemanticId, String>,
 }
@@ -128,7 +138,82 @@ pub struct VerificationFactReuseObservation {
 pub struct VerificationFactValidation {
     pub report: crate::ValidationReport,
     pub facts: Vec<VerificationFact>,
+    pub declaration_facts: Vec<DeclarationVerificationFact>,
     pub reuse: VerificationFactReuseObservation,
+    pub declaration_reuse: DeclarationFactReuseObservation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeclarationVerificationWarning {
+    pub code: String,
+    /// Path suffix relative to the current `functions[index]` slot. The
+    /// validator attaches the current slot when it replays this warning.
+    pub relative_path: String,
+    pub message: String,
+}
+
+/// A successful Language-issued function declaration result. The declaration
+/// fingerprint includes every field checked by declaration validation,
+/// including evidence annotations. Assumption dependencies are separately
+/// guarded. Warnings are stored with relative paths so reordered functions
+/// retain fresh diagnostics, and source locations are refreshed per snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeclarationVerificationFact {
+    pub schema_version: String,
+    pub subject: SemanticId,
+    pub subject_fingerprint: String,
+    pub verifier_identity: String,
+    pub policy_identity: String,
+    pub language_profile: String,
+    pub dependencies: Vec<VerificationFactDependency>,
+    pub result: VerificationFactResult,
+    pub verification_witness_identity: String,
+    pub invalidating_changes: Vec<DeclarationFactInvalidator>,
+    pub warnings: Vec<DeclarationVerificationWarning>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_location_identity: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "identity")]
+pub enum DeclarationFactInvalidator {
+    SubjectDeclarationChanged(SemanticId),
+    DependencyChanged(SemanticId),
+    VerifierChanged,
+    PolicyChanged,
+    LanguageProfileChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeclarationFactReuseMiss {
+    Missing,
+    DuplicatePriorFacts,
+    UnsupportedSchema,
+    UnsupportedResult,
+    InvalidWitness,
+    SubjectChanged,
+    DependenciesChanged,
+    VerifierChanged,
+    PolicyChanged,
+    LanguageProfileChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeclarationFactRecomputation {
+    pub subject: SemanticId,
+    pub reason: DeclarationFactReuseMiss,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeclarationFactReuseObservation {
+    pub schema_version: String,
+    /// Function declaration checks actually skipped after Language matched
+    /// every current declaration and assumption guard.
+    pub reused: Vec<SemanticId>,
+    /// Function declaration checks actually run, with the reason prior
+    /// evidence was unavailable or stale.
+    pub recomputed: Vec<DeclarationFactRecomputation>,
 }
 
 #[derive(Debug, Clone)]
@@ -141,7 +226,48 @@ pub(crate) struct BodyFactBasis {
     pub declared_capabilities: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct DeclarationFactBasis {
+    pub subject: SemanticId,
+    pub subject_fingerprint: String,
+    pub dependencies: Vec<VerificationFactDependency>,
+}
+
 impl Program {
+    pub(crate) fn declaration_fact_basis_with_identities(
+        &self,
+        function: &Function,
+        identities: &SemanticIdentities,
+    ) -> Option<DeclarationFactBasis> {
+        let home = function.identity_namespace(&self.module);
+        let subject = function_id(home, &function.name);
+        let mut declaration = function.clone();
+        declaration.body = None;
+        let bytes = serde_json::to_vec(&declaration).ok()?;
+        let subject_fingerprint = crate::sha256_hex(&bytes);
+        let mut dependencies = BTreeSet::new();
+        for assumption in &function.assumptions {
+            let identity = assumption_id(&self.module, assumption);
+            // Missing assumptions are included as explicit dependencies. The
+            // current validator will reject the declaration, and a previously
+            // successful fact will fail the exact dependency comparison.
+            let fingerprint = identities
+                .fingerprint(&identity)
+                .unwrap_or("missing")
+                .to_owned();
+            dependencies.insert(VerificationFactDependency {
+                role: VerificationDependencyRole::Assumption,
+                identity,
+                fingerprint,
+            });
+        }
+        Some(DeclarationFactBasis {
+            subject,
+            subject_fingerprint,
+            dependencies: dependencies.into_iter().collect(),
+        })
+    }
+
     pub(crate) fn body_fact_basis_with_identities(
         &self,
         function: &Function,
@@ -250,11 +376,9 @@ impl Program {
                     &specialization.generic_function,
                     &specialization.canonical_args,
                 );
-                if let Some(fingerprint) = self.generic_specialization_fingerprint(
-                    specialization,
-                    &identity,
-                    identities,
-                ) {
+                if let Some(fingerprint) =
+                    self.generic_specialization_fingerprint(specialization, &identity, identities)
+                {
                     dependencies.insert(VerificationFactDependency {
                         role: VerificationDependencyRole::GenericSpecialization,
                         identity,
@@ -440,6 +564,106 @@ impl VerificationFact {
     }
 }
 
+impl DeclarationVerificationFact {
+    pub(crate) fn from_basis(
+        basis: DeclarationFactBasis,
+        language_profile: &str,
+        warnings: Vec<DeclarationVerificationWarning>,
+        source_location_identity: Option<String>,
+    ) -> Self {
+        let mut invalidating_changes = vec![
+            DeclarationFactInvalidator::SubjectDeclarationChanged(basis.subject.clone()),
+            DeclarationFactInvalidator::VerifierChanged,
+            DeclarationFactInvalidator::PolicyChanged,
+            DeclarationFactInvalidator::LanguageProfileChanged,
+        ];
+        invalidating_changes.extend(basis.dependencies.iter().map(|dependency| {
+            DeclarationFactInvalidator::DependencyChanged(dependency.identity.clone())
+        }));
+        let mut fact = Self {
+            schema_version: DECLARATION_FACT_SCHEMA_VERSION.to_owned(),
+            subject: basis.subject,
+            subject_fingerprint: basis.subject_fingerprint,
+            verifier_identity: DECLARATION_FACT_VERIFIER_ID.to_owned(),
+            policy_identity: DECLARATION_FACT_POLICY_ID.to_owned(),
+            language_profile: language_profile.to_owned(),
+            dependencies: basis.dependencies,
+            result: VerificationFactResult::Verified,
+            verification_witness_identity: String::new(),
+            invalidating_changes,
+            warnings,
+            source_location_identity,
+        };
+        fact.verification_witness_identity = fact.computed_witness_identity();
+        fact
+    }
+
+    pub(crate) fn current_basis_matches(
+        &self,
+        current: &Self,
+    ) -> Result<(), DeclarationFactReuseMiss> {
+        if self.schema_version != DECLARATION_FACT_SCHEMA_VERSION {
+            return Err(DeclarationFactReuseMiss::UnsupportedSchema);
+        }
+        if self.result != VerificationFactResult::Verified {
+            return Err(DeclarationFactReuseMiss::UnsupportedResult);
+        }
+        if self.verification_witness_identity != self.computed_witness_identity() {
+            return Err(DeclarationFactReuseMiss::InvalidWitness);
+        }
+        if self.subject != current.subject
+            || self.subject_fingerprint != current.subject_fingerprint
+        {
+            return Err(DeclarationFactReuseMiss::SubjectChanged);
+        }
+        if self.dependencies != current.dependencies
+            || self.invalidating_changes != current.invalidating_changes
+        {
+            return Err(DeclarationFactReuseMiss::DependenciesChanged);
+        }
+        if self.verifier_identity != current.verifier_identity {
+            return Err(DeclarationFactReuseMiss::VerifierChanged);
+        }
+        if self.policy_identity != current.policy_identity {
+            return Err(DeclarationFactReuseMiss::PolicyChanged);
+        }
+        if self.language_profile != current.language_profile {
+            return Err(DeclarationFactReuseMiss::LanguageProfileChanged);
+        }
+        Ok(())
+    }
+
+    fn computed_witness_identity(&self) -> String {
+        #[derive(Serialize)]
+        struct Witness<'a> {
+            schema_version: &'a str,
+            subject: &'a SemanticId,
+            subject_fingerprint: &'a str,
+            verifier_identity: &'a str,
+            policy_identity: &'a str,
+            language_profile: &'a str,
+            dependencies: &'a [VerificationFactDependency],
+            result: VerificationFactResult,
+            invalidating_changes: &'a [DeclarationFactInvalidator],
+            warnings: &'a [DeclarationVerificationWarning],
+        }
+        let witness = Witness {
+            schema_version: &self.schema_version,
+            subject: &self.subject,
+            subject_fingerprint: &self.subject_fingerprint,
+            verifier_identity: &self.verifier_identity,
+            policy_identity: &self.policy_identity,
+            language_profile: &self.language_profile,
+            dependencies: &self.dependencies,
+            result: self.result,
+            invalidating_changes: &self.invalidating_changes,
+            warnings: &self.warnings,
+        };
+        let bytes = serde_json::to_vec(&witness).expect("declaration fact witness is serializable");
+        crate::sha256_hex(&bytes)
+    }
+}
+
 fn specialization_is_relevant(
     specialization: &GenericSpecializationRecord,
     declaration: &SemanticId,
@@ -490,8 +714,18 @@ mod tests {
             language_profile: profile.to_owned(),
             subject_language_profiles: BTreeMap::new(),
             prior_facts,
+            prior_declaration_facts: Vec::new(),
             source_location_identities: BTreeMap::new(),
         }
+    }
+
+    fn declaration_request(
+        profile: &str,
+        prior_facts: Vec<DeclarationVerificationFact>,
+    ) -> VerificationFactRequest {
+        let mut request = request(profile, Vec::new());
+        request.prior_declaration_facts = prior_facts;
+        request
     }
 
     fn record_program() -> Program {
@@ -809,5 +1043,122 @@ mod tests {
             VerificationFactReuseMiss::DeclarationInterfaceChanged
         );
         assert!(assumption_result.reuse.reused.is_empty());
+    }
+
+    #[test]
+    fn declaration_facts_round_trip_reuse_and_refresh_location_paths() {
+        let mut program = crate::validation::tests::valid_program();
+        program.functions[0].evidence.clear();
+        let first = program.validate_with_verified_facts(&declaration_request("0.19", Vec::new()));
+        assert!(first.report.valid, "{:?}", first.report.errors);
+        assert_eq!(first.declaration_facts.len(), 1);
+        assert_eq!(
+            first.declaration_reuse.recomputed[0].reason,
+            DeclarationFactReuseMiss::Missing
+        );
+        assert_eq!(
+            first.declaration_facts[0].result,
+            VerificationFactResult::Verified
+        );
+        assert_eq!(first.declaration_facts[0].warnings.len(), 1);
+        assert_eq!(
+            first.declaration_facts[0].warnings[0].relative_path,
+            ".contracts.positive_amount"
+        );
+
+        let restored: Vec<DeclarationVerificationFact> =
+            serde_json::from_slice(&serde_json::to_vec(&first.declaration_facts).unwrap()).unwrap();
+        let subject = function_id(&program.module, "transfer");
+        let mut request = declaration_request("0.19", restored);
+        request
+            .source_location_identities
+            .insert(subject.clone(), "source-map:new-snapshot".to_owned());
+        let mut reordered = program.clone();
+        let mut earlier = reordered.functions[0].clone();
+        earlier.name = "earlier".to_owned();
+        reordered.functions.insert(0, earlier);
+        let second = reordered.validate_with_verified_facts(&request);
+        assert!(second.report.valid, "{:?}", second.report.errors);
+        assert_eq!(second.declaration_reuse.reused, vec![subject.clone()]);
+        assert_eq!(
+            second.declaration_facts[1]
+                .source_location_identity
+                .as_deref(),
+            Some("source-map:new-snapshot")
+        );
+        assert!(second.report.warnings.iter().any(|warning| {
+            warning.path == "functions[1].contracts.positive_amount" && warning.code == "MNCS101"
+        }));
+    }
+
+    #[test]
+    fn declaration_facts_invalidate_changed_assumptions_and_refresh_diagnostics() {
+        let program = crate::validation::tests::valid_program();
+        let initial =
+            program.validate_with_verified_facts(&declaration_request("0.19", Vec::new()));
+        let cached = initial.declaration_facts;
+
+        let mut changed_assumption = program.clone();
+        changed_assumption.assumptions[0].statement =
+            "committed writes are durably replicated".to_owned();
+        let changed = changed_assumption
+            .validate_with_verified_facts(&declaration_request("0.19", cached.clone()));
+        assert!(changed.report.valid, "{:?}", changed.report.errors);
+        assert_eq!(
+            changed.declaration_reuse.recomputed[0].reason,
+            DeclarationFactReuseMiss::DependenciesChanged
+        );
+        assert_eq!(changed.declaration_facts.len(), 1);
+
+        let mut invalid = program;
+        invalid.functions[0].evidence[0].verifier = " ".to_owned();
+        let failed = invalid.validate_with_verified_facts(&declaration_request("0.19", cached));
+        assert!(!failed.report.valid);
+        assert!(failed.report.errors.iter().any(|error| {
+            error.code == "MNCS013" && error.path == "functions[0].evidence[0].verifier"
+        }));
+        assert_eq!(
+            failed.declaration_reuse.recomputed[0].reason,
+            DeclarationFactReuseMiss::SubjectChanged
+        );
+        assert!(failed.declaration_facts.is_empty());
+    }
+
+    #[test]
+    fn declaration_fact_witness_and_profile_are_required_for_reuse() {
+        let program = crate::validation::tests::valid_program();
+        let first = program.validate_with_verified_facts(&declaration_request("0.19", Vec::new()));
+        let mut tampered = first.declaration_facts.clone();
+        tampered[0].verifier_identity.push_str("/tampered");
+        let bad_witness =
+            program.validate_with_verified_facts(&declaration_request("0.19", tampered));
+        assert_eq!(
+            bad_witness.declaration_reuse.recomputed[0].reason,
+            DeclarationFactReuseMiss::InvalidWitness
+        );
+
+        let changed_profile = program
+            .validate_with_verified_facts(&declaration_request("0.20", first.declaration_facts));
+        assert_eq!(
+            changed_profile.declaration_reuse.recomputed[0].reason,
+            DeclarationFactReuseMiss::LanguageProfileChanged
+        );
+    }
+
+    #[test]
+    fn duplicate_function_identity_remains_a_fresh_global_error() {
+        let program = crate::validation::tests::valid_program();
+        let first = program.validate_with_verified_facts(&declaration_request("0.19", Vec::new()));
+        let mut duplicate = program.clone();
+        duplicate.functions.push(duplicate.functions[0].clone());
+        let result = duplicate
+            .validate_with_verified_facts(&declaration_request("0.19", first.declaration_facts));
+        assert!(!result.report.valid);
+        assert!(result
+            .report
+            .errors
+            .iter()
+            .any(|error| error.code == "MNCS005"));
+        assert_eq!(result.declaration_reuse.reused.len(), 1);
     }
 }

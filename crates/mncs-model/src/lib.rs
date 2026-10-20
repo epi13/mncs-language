@@ -156,6 +156,7 @@ pub use graph::{
     ImpactRisk, InvalidationReason, InvalidationReport, SemanticGraph, SemanticImpact,
     SEMANTIC_IMPACT_CLASSIFICATION_SCHEMA_VERSION, SEMANTIC_IMPACT_SCHEMA_VERSION,
 };
+pub(crate) use identity::assumption_id;
 pub use identity::{
     binding_id, binding_id_for, contract_id, finite_type_id, finite_variant_id, function_id,
     generic_param_id, instantiation_id, module_id, parameter_id, program_id, record_field_id,
@@ -237,11 +238,14 @@ pub use value_contract::{
     first_aggregate_mismatch, order_fields_by_name, FieldOrderError, FieldOrderProblem,
 };
 pub use verification_facts::{
+    DeclarationFactInvalidator, DeclarationFactRecomputation, DeclarationFactReuseMiss,
+    DeclarationFactReuseObservation, DeclarationVerificationFact, DeclarationVerificationWarning,
     VerificationDependencyRole, VerificationFact, VerificationFactDependency,
     VerificationFactInvalidator, VerificationFactRecomputation, VerificationFactRequest,
     VerificationFactResult, VerificationFactReuseMiss, VerificationFactReuseObservation,
-    VerificationFactValidation, VERIFICATION_FACT_POLICY_ID, VERIFICATION_FACT_SCHEMA_VERSION,
-    VERIFICATION_FACT_VERIFIER_ID,
+    VerificationFactValidation, DECLARATION_FACT_POLICY_ID, DECLARATION_FACT_REUSE_SCHEMA_VERSION,
+    DECLARATION_FACT_SCHEMA_VERSION, DECLARATION_FACT_VERIFIER_ID, VERIFICATION_FACT_POLICY_ID,
+    VERIFICATION_FACT_SCHEMA_VERSION, VERIFICATION_FACT_VERIFIER_ID,
 };
 pub use verifier::{
     AlignmentVerifierInput, CapabilityVerifierInput, DeterministicVerifier, EvidenceAuthorityClass,

@@ -9,10 +9,11 @@ use mncs_model::{
     BodyCyclePolicy, BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator, BodyType,
     BodyValue, BoundedIterationCompletion, CompilationStatus, CompilationStudyRequest,
     CompilationStudyResult, CompilerArtifactRef, CompilerNodeProfile,
-    CompilerPassExecutionObservation, ContractClause, ContractKind, Effect, FailureMode,
-    FiniteType, FiniteVariant, FloatType, Function, FunctionBody, IntegerType, Intent,
-    IterationDomain, MachineIntentSpec, MachinePreference, Program, RecordField, RecordType,
-    Requirement, ResolutionProvenance, SemanticBinding, SemanticBindingKind, SemanticBindingTable,
+    CompilerPassExecutionObservation, ContractClause, ContractKind,
+    DeclarationFactReuseObservation, DeclarationVerificationFact, Effect, FailureMode, FiniteType,
+    FiniteVariant, FloatType, Function, FunctionBody, IntegerType, Intent, IterationDomain,
+    MachineIntentSpec, MachinePreference, Program, RecordField, RecordType, Requirement,
+    ResolutionProvenance, SemanticBinding, SemanticBindingKind, SemanticBindingTable,
     SemanticGraph, SemanticId, SemanticIdentities, SemanticNamespace, SemanticReference,
     SemanticScope, TransformationEdge, TransformationStatus, ValidationReport, Value,
     VerificationFact, VerificationFactRequest, VerificationFactReuseObservation,
@@ -59,6 +60,12 @@ pub struct SourceFrontEndResult {
     pub verification_facts: Vec<VerificationFact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verification_fact_reuse: Option<VerificationFactReuseObservation>,
+    /// Successful Language-owned declaration checks made reusable under the
+    /// exact declaration, assumption, verifier, policy, and profile guards.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declaration_verification_facts: Vec<DeclarationVerificationFact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub declaration_fact_reuse: Option<DeclarationFactReuseObservation>,
     /// Compact, versioned semantic binding substrate used by elaboration,
     /// tooling, and downstream identity/evidence consumers.
     pub binding_table: Option<SemanticBindingTable>,
@@ -248,13 +255,20 @@ fn source_scoped_fact_request(
     request.subject_language_profiles.clear();
     request.source_location_identities.clear();
     for function in &program.functions {
-        let Some(body) = &function.body else {
-            continue;
-        };
         let home = function.identity_namespace(&program.module);
+        let declaration_subject = function_id(home, &function.name);
         let (source_identity, source_profile) = source_context
             .get(home)
             .expect("every linked function resolves to its source artifact and profile");
+        request
+            .subject_language_profiles
+            .insert(declaration_subject.clone(), source_profile.clone());
+        request
+            .source_location_identities
+            .insert(declaration_subject, source_identity.clone());
+        let Some(body) = &function.body else {
+            continue;
+        };
         let subject = body.identity(home, &function.name);
         request
             .subject_language_profiles
@@ -362,6 +376,8 @@ impl ReferenceCompiler {
         let mut validation = None;
         let mut verification_facts = Vec::new();
         let mut verification_fact_reuse = None;
+        let mut declaration_verification_facts = Vec::new();
+        let mut declaration_fact_reuse = None;
         let mut semantic_graph = None;
         let mut identities = None;
         let mut name_resolutions = NameResolutionIndex::default();
@@ -401,6 +417,8 @@ impl ReferenceCompiler {
                                 elaborated.validate_with_verified_facts(&scoped_request);
                             verification_facts = fact_result.facts;
                             verification_fact_reuse = Some(fact_result.reuse);
+                            declaration_verification_facts = fact_result.declaration_facts;
+                            declaration_fact_reuse = Some(fact_result.declaration_reuse);
                             fact_result.report
                         } else {
                             elaborated.validate()
@@ -493,6 +511,8 @@ impl ReferenceCompiler {
             validation,
             verification_facts,
             verification_fact_reuse,
+            declaration_verification_facts,
+            declaration_fact_reuse,
             binding_table,
             name_resolutions,
             module_resolutions,

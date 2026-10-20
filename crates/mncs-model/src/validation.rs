@@ -3,12 +3,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::verification_facts::{
-    VerificationFact, VerificationFactRecomputation, VerificationFactRequest,
-    VerificationFactReuseMiss, VerificationFactReuseObservation, VerificationFactValidation,
-    VERIFICATION_FACT_SCHEMA_VERSION,
+    DeclarationFactRecomputation, DeclarationFactReuseMiss, DeclarationFactReuseObservation,
+    DeclarationVerificationFact, DeclarationVerificationWarning, VerificationFact,
+    VerificationFactRecomputation, VerificationFactRequest, VerificationFactReuseMiss,
+    VerificationFactReuseObservation, VerificationFactValidation,
+    DECLARATION_FACT_REUSE_SCHEMA_VERSION, VERIFICATION_FACT_SCHEMA_VERSION,
 };
 use crate::{
-    finite_type_id, finite_variant_id, function_id, Program, Value, SUPPORTED_SCHEMA_VERSION,
+    finite_type_id, finite_variant_id, function_id, Function, Program, Value,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -59,13 +62,24 @@ impl Program {
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
         let mut facts = Vec::new();
+        let mut declaration_facts = Vec::new();
         let mut reused = Vec::new();
         let mut recomputed = Vec::new();
+        let mut declaration_reused = Vec::new();
+        let mut declaration_recomputed = Vec::new();
         let mut prior_by_subject = BTreeMap::<_, Vec<&VerificationFact>>::new();
+        let mut prior_declarations_by_subject =
+            BTreeMap::<_, Vec<&DeclarationVerificationFact>>::new();
         let fact_identities = request.map(|_| self.semantic_identities());
         if let Some(request) = request {
             for fact in &request.prior_facts {
                 prior_by_subject
+                    .entry(&fact.subject)
+                    .or_default()
+                    .push(fact);
+            }
+            for fact in &request.prior_declaration_facts {
+                prior_declarations_by_subject
                     .entry(&fact.subject)
                     .or_default()
                     .push(fact);
@@ -179,6 +193,7 @@ impl Program {
         let mut function_identities = BTreeSet::new();
         for (function_index, function) in self.functions.iter().enumerate() {
             let function_path = format!("functions[{function_index}]");
+            let errors_before_identity = errors.len();
             if function.name.trim().is_empty() {
                 errors.push(diagnostic(
                     "MNCS004",
@@ -195,110 +210,131 @@ impl Program {
                     format!("duplicate function identity for {:?}", function.name),
                 ));
             }
-
-            validate_named_values(&function.inputs, &function_path, "inputs", &mut errors);
-            validate_named_values(&function.outputs, &function_path, "outputs", &mut errors);
-
-            let contract_ids = collect_unique_ids(
-                function.contracts.iter().map(|item| item.id.as_str()),
-                &format!("{function_path}.contracts"),
-                "MNCS006",
-                &mut errors,
-            );
-
-            let declared_capabilities: BTreeSet<&str> =
-                function.capabilities.iter().map(String::as_str).collect();
-            if declared_capabilities.len() != function.capabilities.len() {
-                errors.push(diagnostic(
-                    "MNCS007",
-                    format!("{function_path}.capabilities"),
-                    "capability declarations must be unique",
-                ));
-            }
-
-            for (effect_index, effect) in function.effects.iter().enumerate() {
-                let effect_path = format!("{function_path}.effects[{effect_index}]");
-                if effect.kind.trim().is_empty() || effect.target.trim().is_empty() {
-                    errors.push(diagnostic(
-                        "MNCS008",
-                        effect_path.clone(),
-                        "effect kind and target must not be empty",
-                    ));
+            let declaration_identity_valid = errors.len() == errors_before_identity;
+            let declaration_subject =
+                function_id(function.identity_namespace(&self.module), &function.name);
+            let mut declaration_errors = Vec::new();
+            let mut declaration_warnings = Vec::new();
+            let mut has_declaration_basis = false;
+            if let Some(request) = request {
+                if declaration_identity_valid {
+                    let basis = self.declaration_fact_basis_with_identities(
+                        function,
+                        fact_identities
+                            .as_ref()
+                            .expect("request has semantic identities"),
+                    );
+                    if let Some(basis) = basis {
+                        let declaration_profile = request
+                            .subject_language_profiles
+                            .get(&basis.subject)
+                            .map(String::as_str)
+                            .unwrap_or(&request.language_profile);
+                        let declaration_location = request
+                            .source_location_identities
+                            .get(&basis.subject)
+                            .cloned();
+                        let current = DeclarationVerificationFact::from_basis(
+                            basis.clone(),
+                            declaration_profile,
+                            Vec::new(),
+                            declaration_location.clone(),
+                        );
+                        let prior = prior_declarations_by_subject
+                            .get(&current.subject)
+                            .cloned()
+                            .unwrap_or_default();
+                        let reuse = match prior.as_slice() {
+                            [] => Err(DeclarationFactReuseMiss::Missing),
+                            [_first, _second, ..] => {
+                                Err(DeclarationFactReuseMiss::DuplicatePriorFacts)
+                            }
+                            [fact] => fact.current_basis_matches(&current),
+                        };
+                        match reuse {
+                            Ok(()) => {
+                                crate::record_counter("declaration_fact_reuse");
+                                declaration_reused.push(current.subject.clone());
+                                let mut refreshed = prior[0].clone();
+                                refreshed.source_location_identity = declaration_location.clone();
+                                declaration_warnings.extend(prior[0].warnings.iter().map(
+                                    |warning| crate::Diagnostic {
+                                        code: warning.code.clone(),
+                                        path: format!("{function_path}{}", warning.relative_path),
+                                        message: warning.message.clone(),
+                                    },
+                                ));
+                                declaration_facts.push(refreshed);
+                            }
+                            Err(reason) => {
+                                declaration_recomputed.push(DeclarationFactRecomputation {
+                                    subject: current.subject.clone(),
+                                    reason,
+                                });
+                                crate::record_counter("function_declaration_verification");
+                                validate_function_declaration(
+                                    function,
+                                    &function_path,
+                                    &assumption_ids,
+                                    &mut declaration_errors,
+                                    &mut declaration_warnings,
+                                );
+                                if declaration_errors.is_empty() {
+                                    let verified_warnings = declaration_warnings
+                                        .iter()
+                                        .map(|warning| DeclarationVerificationWarning {
+                                            code: warning.code.clone(),
+                                            relative_path: warning
+                                                .path
+                                                .strip_prefix(&function_path)
+                                                .unwrap_or(&warning.path)
+                                                .to_owned(),
+                                            message: warning.message.clone(),
+                                        })
+                                        .collect();
+                                    declaration_facts.push(
+                                        DeclarationVerificationFact::from_basis(
+                                            basis,
+                                            declaration_profile,
+                                            verified_warnings,
+                                            declaration_location.clone(),
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                        has_declaration_basis = true;
+                    }
                 }
-                if effect.capability.trim().is_empty() {
-                    errors.push(diagnostic(
-                        "MNCS009",
-                        format!("{effect_path}.capability"),
-                        "every effect must name its authorizing capability",
-                    ));
-                } else if !declared_capabilities.contains(effect.capability.as_str()) {
-                    errors.push(diagnostic(
-                        "MNCS010",
-                        format!("{effect_path}.capability"),
-                        format!(
-                            "effect requires undeclared capability {:?}",
-                            effect.capability
-                        ),
-                    ));
+                if !declaration_identity_valid || !has_declaration_basis {
+                    if declaration_identity_valid {
+                        declaration_recomputed.push(DeclarationFactRecomputation {
+                            subject: declaration_subject.clone(),
+                            reason: DeclarationFactReuseMiss::DependenciesChanged,
+                        });
+                    }
+                    crate::record_counter("function_declaration_verification");
+                    validate_function_declaration(
+                        function,
+                        &function_path,
+                        &assumption_ids,
+                        &mut declaration_errors,
+                        &mut declaration_warnings,
+                    );
                 }
+            } else {
+                crate::record_counter("function_declaration_verification");
+                validate_function_declaration(
+                    function,
+                    &function_path,
+                    &assumption_ids,
+                    &mut declaration_errors,
+                    &mut declaration_warnings,
+                );
             }
+            errors.extend(declaration_errors);
+            warnings.extend(declaration_warnings);
 
-            for (index, assumption) in function.assumptions.iter().enumerate() {
-                if !assumption_ids.contains(assumption.as_str()) {
-                    errors.push(diagnostic(
-                        "MNCS011",
-                        format!("{function_path}.assumptions[{index}]"),
-                        format!("unknown assumption reference {assumption:?}"),
-                    ));
-                }
-            }
-
-            let mut evidence_by_property: BTreeMap<&str, usize> = BTreeMap::new();
-            for (evidence_index, evidence) in function.evidence.iter().enumerate() {
-                let evidence_path = format!("{function_path}.evidence[{evidence_index}]");
-                // Structural-decrease admission evidence (RFC 0047) is
-                // intrinsic: its anchor is the re-derived projection chain,
-                // not a user-declared contract, so it never needs a
-                // contract entry. Every other property keeps the linkage.
-                let intrinsic = evidence.property == crate::STRUCTURAL_DECREASE_PROPERTY;
-                if !intrinsic && !contract_ids.contains(evidence.property.as_str()) {
-                    errors.push(diagnostic(
-                        "MNCS012",
-                        format!("{evidence_path}.property"),
-                        format!(
-                            "evidence references unknown contract property {:?}",
-                            evidence.property
-                        ),
-                    ));
-                }
-                if evidence.verifier.trim().is_empty() {
-                    errors.push(diagnostic(
-                        "MNCS013",
-                        format!("{evidence_path}.verifier"),
-                        "evidence must identify a verifier",
-                    ));
-                }
-                *evidence_by_property
-                    .entry(evidence.property.as_str())
-                    .or_default() += 1;
-            }
-
-            for contract in &function.contracts {
-                if !evidence_by_property.contains_key(contract.id.as_str()) {
-                    warnings.push(diagnostic(
-                        "MNCS101",
-                        format!("{function_path}.contracts.{}", contract.id),
-                        "contract has no evidence claim",
-                    ));
-                }
-            }
-            if function.contracts.is_empty() {
-                warnings.push(diagnostic(
-                    "MNCS102",
-                    format!("{function_path}.contracts"),
-                    "function declares no behavioral contract",
-                ));
-            }
             if let Some(body) = &function.body {
                 let Some(request) = request else {
                     crate::record_counter("function_body_verification");
@@ -385,17 +421,138 @@ impl Program {
             },
         };
         facts.sort_by(|left, right| left.subject.cmp(&right.subject));
+        declaration_facts.sort_by(|left, right| left.subject.cmp(&right.subject));
         reused.sort();
         recomputed.sort_by(|left, right| left.subject.cmp(&right.subject));
+        declaration_reused.sort();
+        declaration_recomputed.sort_by(|left, right| left.subject.cmp(&right.subject));
         VerificationFactValidation {
             report,
             facts,
+            declaration_facts,
             reuse: VerificationFactReuseObservation {
                 schema_version: VERIFICATION_FACT_SCHEMA_VERSION.to_owned(),
                 reused,
                 recomputed,
             },
+            declaration_reuse: DeclarationFactReuseObservation {
+                schema_version: DECLARATION_FACT_REUSE_SCHEMA_VERSION.to_owned(),
+                reused: declaration_reused,
+                recomputed: declaration_recomputed,
+            },
         }
+    }
+}
+
+fn validate_function_declaration(
+    function: &Function,
+    function_path: &str,
+    assumption_ids: &BTreeSet<&str>,
+    errors: &mut Vec<Diagnostic>,
+    warnings: &mut Vec<Diagnostic>,
+) {
+    validate_named_values(&function.inputs, function_path, "inputs", errors);
+    validate_named_values(&function.outputs, function_path, "outputs", errors);
+
+    let contract_ids = collect_unique_ids(
+        function.contracts.iter().map(|item| item.id.as_str()),
+        &format!("{function_path}.contracts"),
+        "MNCS006",
+        errors,
+    );
+
+    let declared_capabilities: BTreeSet<&str> =
+        function.capabilities.iter().map(String::as_str).collect();
+    if declared_capabilities.len() != function.capabilities.len() {
+        errors.push(diagnostic(
+            "MNCS007",
+            format!("{function_path}.capabilities"),
+            "capability declarations must be unique",
+        ));
+    }
+
+    for (effect_index, effect) in function.effects.iter().enumerate() {
+        let effect_path = format!("{function_path}.effects[{effect_index}]");
+        if effect.kind.trim().is_empty() || effect.target.trim().is_empty() {
+            errors.push(diagnostic(
+                "MNCS008",
+                effect_path.clone(),
+                "effect kind and target must not be empty",
+            ));
+        }
+        if effect.capability.trim().is_empty() {
+            errors.push(diagnostic(
+                "MNCS009",
+                format!("{effect_path}.capability"),
+                "every effect must name its authorizing capability",
+            ));
+        } else if !declared_capabilities.contains(effect.capability.as_str()) {
+            errors.push(diagnostic(
+                "MNCS010",
+                format!("{effect_path}.capability"),
+                format!(
+                    "effect requires undeclared capability {:?}",
+                    effect.capability
+                ),
+            ));
+        }
+    }
+
+    for (index, assumption) in function.assumptions.iter().enumerate() {
+        if !assumption_ids.contains(assumption.as_str()) {
+            errors.push(diagnostic(
+                "MNCS011",
+                format!("{function_path}.assumptions[{index}]"),
+                format!("unknown assumption reference {assumption:?}"),
+            ));
+        }
+    }
+
+    let mut evidence_by_property: BTreeMap<&str, usize> = BTreeMap::new();
+    for (evidence_index, evidence) in function.evidence.iter().enumerate() {
+        let evidence_path = format!("{function_path}.evidence[{evidence_index}]");
+        // Structural-decrease admission evidence (RFC 0047) is intrinsic: its
+        // anchor is the re-derived projection chain, not a user-declared
+        // contract, so it never needs a contract entry. Every other property
+        // keeps the linkage.
+        let intrinsic = evidence.property == crate::STRUCTURAL_DECREASE_PROPERTY;
+        if !intrinsic && !contract_ids.contains(evidence.property.as_str()) {
+            errors.push(diagnostic(
+                "MNCS012",
+                format!("{evidence_path}.property"),
+                format!(
+                    "evidence references unknown contract property {:?}",
+                    evidence.property
+                ),
+            ));
+        }
+        if evidence.verifier.trim().is_empty() {
+            errors.push(diagnostic(
+                "MNCS013",
+                format!("{evidence_path}.verifier"),
+                "evidence must identify a verifier",
+            ));
+        }
+        *evidence_by_property
+            .entry(evidence.property.as_str())
+            .or_default() += 1;
+    }
+
+    for contract in &function.contracts {
+        if !evidence_by_property.contains_key(contract.id.as_str()) {
+            warnings.push(diagnostic(
+                "MNCS101",
+                format!("{function_path}.contracts.{}", contract.id),
+                "contract has no evidence claim",
+            ));
+        }
+    }
+    if function.contracts.is_empty() {
+        warnings.push(diagnostic(
+            "MNCS102",
+            format!("{function_path}.contracts"),
+            "function declares no behavioral contract",
+        ));
     }
 }
 
