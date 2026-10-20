@@ -10,6 +10,7 @@ pub mod inventory;
 pub mod proof_admission;
 mod resolution;
 pub mod source_map;
+pub mod source_parse_cache;
 
 pub use frontend::{
     elaborate_program, elaborate_program_with_resolutions, elaborate_program_with_resolver,
@@ -36,6 +37,10 @@ pub use resolution::{
 pub use source_map::{
     ExecutionSourceBlock, ExecutionSourceFunction, ExecutionSourceMap, ExecutionSourceOperation,
     EXECUTION_SOURCE_MAP_SCHEMA_VERSION,
+};
+pub use source_parse_cache::{
+    SourceParseCache, SourceParseCacheObservation, SOURCE_PARSE_CACHE_OBSERVATION_SCHEMA_VERSION,
+    SOURCE_PARSE_CACHE_SCHEMA_VERSION, SOURCE_PARSE_POLICY_IDENTITY,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
