@@ -1050,6 +1050,14 @@ fn elaborate_import_closure(
                 use_decl.module.span,
             )]);
         }
+        // Keep source-profile provenance under the import spelling as well
+        // as the declaration namespace. A versioned module may be imported
+        // through its unversioned request name, which is also the key used
+        // for its ModuleResolution record.
+        module_profiles.insert(
+            dependency_name.clone(),
+            dependency_ast.language_version.text.clone(),
+        );
         // A deeper import failure already carries its own `MNE172` chain;
         // re-wrap it at this edge so the root compile records every import
         // hop (root -> .. -> direct dependency -> failing leaf) instead of

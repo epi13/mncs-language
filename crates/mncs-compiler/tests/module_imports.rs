@@ -1576,7 +1576,7 @@ fn projection_from_a_non_record_value_is_rejected() {
 fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_locations() {
     let resolver = MapResolver::default().with(
         "lib.cached",
-        "mncs 0.18;\nmodule lib.cached;\nfn pass(value: u64) -> (result: u64) { return value; }\n",
+        "mncs 0.18;\nmodule lib.cached.v1;\nfn pass(value: u64) -> (result: u64) { return value; }\n",
     );
     let compiler = ReferenceCompiler::default();
     let request = |prior_facts| VerificationFactRequest {
@@ -1599,7 +1599,7 @@ fn linked_frontend_reuses_language_facts_with_per_module_profiles_and_fresh_loca
         first
             .module_resolutions
             .iter()
-            .find(|module| module.declared_module == "lib.cached")
+            .find(|module| module.declared_module == "lib.cached.v1")
             .map(|module| module.source_profile.as_str()),
         Some("0.18")
     );
