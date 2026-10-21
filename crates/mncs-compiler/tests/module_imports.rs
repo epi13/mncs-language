@@ -2470,6 +2470,208 @@ fn local(value: u64) -> (result: u64) { return value; }
 }
 
 #[test]
+fn linked_frontend_invalidates_transitive_generic_callers_across_modules() {
+    let leaf_source = r#"mncs 0.19;
+module lib.fact_generic_leaf;
+fn helper(value: u64) -> (result: u64) { return value; }
+fn decode<N: Nat>(values: [u64; N]) -> (result: u64) {
+    return helper(values[0]);
+}
+fn independent(value: u64) -> (result: u64) { return value; }
+"#;
+    let bridge_source = r#"mncs 0.19;
+module lib.fact_generic_bridge;
+use lib.fact_generic_leaf as leaf;
+fn forward<N: Nat>(values: [u64; N]) -> (result: u64) {
+    return leaf.decode<N>(values);
+}
+fn independent(value: u64) -> (result: u64) { return value; }
+"#;
+    let segment_source = r#"mncs 0.19;
+module lib.fact_generic_segment;
+use lib.fact_generic_leaf as direct_leaf;
+use lib.fact_generic_bridge as bridge;
+fn scan<N: Nat>(values: [u64; N]) -> (result: u64) {
+    return bridge.forward<N>(values);
+}
+fn independent(value: u64) -> (result: u64) { return value; }
+"#;
+    let root_source = r#"mncs 0.19;
+module app.fact_generic_chain;
+use lib.fact_generic_leaf as direct_leaf;
+use lib.fact_generic_segment as segment;
+fn entry(values: [u64; 2]) -> (result: u64) { return segment.scan<2>(values); }
+fn unrelated(value: u64) -> (result: u64) { return direct_leaf.independent(value); }
+"#;
+    let resolver = MapResolver::default()
+        .with("lib.fact_generic_leaf", leaf_source)
+        .with("lib.fact_generic_bridge", bridge_source)
+        .with("lib.fact_generic_segment", segment_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
+        language_profile: "0.19".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
+        source_location_identities: BTreeMap::new(),
+    };
+
+    let first = compiler.front_end_with_verified_facts(
+        resolver.envelope("root", root_source.to_owned()),
+        &resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    let entry_fact = first
+        .verification_facts
+        .iter()
+        .find(|fact| {
+            fact.subject
+                .as_str()
+                .ends_with("app.fact_generic_chain::entry")
+        })
+        .expect("root generic caller fact");
+    assert!(entry_fact.dependencies.iter().any(|row| {
+        row.role == VerificationDependencyRole::CallableImplementation
+            && row
+                .identity
+                .as_str()
+                .contains("lib.fact_generic_bridge::forward__spec_")
+    }));
+    assert!(entry_fact.dependencies.iter().any(|row| {
+        row.role == VerificationDependencyRole::CallableImplementation
+            && row
+                .identity
+                .as_str()
+                .contains("lib.fact_generic_leaf::decode__spec_")
+    }));
+    assert!(entry_fact.dependencies.iter().any(|row| {
+        row.role == VerificationDependencyRole::CallableImplementation
+            && row
+                .identity
+                .as_str()
+                .contains("lib.fact_generic_segment::scan__spec_")
+    }));
+    let forward_fact = first
+        .verification_facts
+        .iter()
+        .find(|fact| {
+            fact.subject
+                .as_str()
+                .ends_with("lib.fact_generic_bridge::forward")
+        })
+        .expect("generic bridge template fact");
+    let scan_fact = first
+        .verification_facts
+        .iter()
+        .find(|fact| {
+            fact.subject
+                .as_str()
+                .ends_with("lib.fact_generic_segment::scan")
+        })
+        .expect("generic segment template fact");
+    let decode_fact = first
+        .verification_facts
+        .iter()
+        .find(|fact| {
+            fact.subject
+                .as_str()
+                .ends_with("lib.fact_generic_leaf::decode")
+        })
+        .expect("generic leaf template fact");
+    for dependency in [
+        "lib.fact_generic_leaf::decode",
+        "lib.fact_generic_leaf::helper",
+    ] {
+        assert!(
+            forward_fact.dependencies.iter().any(|row| {
+                row.role == VerificationDependencyRole::CallableImplementation
+                    && row.identity.as_str().ends_with(dependency)
+            }),
+            "generic bridge fact must include transitive implementation {dependency}: {:?}",
+            forward_fact.dependencies
+        );
+    }
+    for dependency in [
+        "lib.fact_generic_bridge::forward",
+        "lib.fact_generic_leaf::decode",
+        "lib.fact_generic_leaf::helper",
+    ] {
+        assert!(
+            scan_fact.dependencies.iter().any(|row| {
+                row.role == VerificationDependencyRole::CallableImplementation
+                    && row.identity.as_str().ends_with(dependency)
+            }),
+            "generic segment fact must include transitive implementation {dependency}: {:?}",
+            scan_fact.dependencies
+        );
+    }
+    assert!(decode_fact.dependencies.iter().any(|row| {
+        row.role == VerificationDependencyRole::CallableImplementation
+            && row
+                .identity
+                .as_str()
+                .ends_with("lib.fact_generic_leaf::helper")
+    }));
+
+    let changed_leaf = leaf_source.replace(
+        "fn helper(value: u64) -> (result: u64) { return value; }",
+        "fn helper(value: u64) -> (result: u64) { return value + 1; }",
+    );
+    assert_ne!(changed_leaf, leaf_source);
+    let changed_resolver = MapResolver::default()
+        .with("lib.fact_generic_leaf", &changed_leaf)
+        .with("lib.fact_generic_bridge", bridge_source)
+        .with("lib.fact_generic_segment", segment_source);
+    let changed = compiler.front_end_with_verified_facts(
+        changed_resolver.envelope("root", root_source.to_owned()),
+        &changed_resolver,
+        &[],
+        &request(
+            first.verification_facts,
+            first.declaration_verification_facts,
+        ),
+    );
+    assert!(changed.is_valid(), "{:?}", changed.diagnostics);
+
+    let reuse = changed
+        .verification_fact_reuse
+        .as_ref()
+        .expect("Language fact reuse observation");
+    for dependency in [
+        "lib.fact_generic_leaf::helper",
+        "lib.fact_generic_leaf::decode",
+        "lib.fact_generic_bridge::forward",
+        "lib.fact_generic_segment::scan",
+        "app.fact_generic_chain::entry",
+    ] {
+        assert!(
+            reuse
+                .recomputed
+                .iter()
+                .any(|row| row.subject.as_str().ends_with(dependency)),
+            "changed generic dependency must reverify {dependency}: {reuse:?}"
+        );
+    }
+    for independent in [
+        "lib.fact_generic_leaf::independent",
+        "lib.fact_generic_bridge::independent",
+        "lib.fact_generic_segment::independent",
+        "app.fact_generic_chain::unrelated",
+    ] {
+        assert!(
+            reuse
+                .reused
+                .iter()
+                .any(|subject| subject.as_str().ends_with(independent)),
+            "independent body {independent} should remain reusable: {reuse:?}"
+        );
+    }
+}
+
+#[test]
 fn linked_frontend_invalidates_imported_signature_consumers_and_reuses_independent_facts() {
     let library_source = r#"mncs 0.10;
 module lib.interface_facts;
