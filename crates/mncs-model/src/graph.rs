@@ -278,7 +278,11 @@ fn classify_impact_roots(
                 kinds.insert(ImpactChangeKind::CanonicalFixture);
                 domains.insert(GuaranteeDomain::Semantic);
             }
-            Some(IdentityKind::MachineIntent | IdentityKind::Realization | IdentityKind::Transformation) => {
+            Some(
+                IdentityKind::MachineIntent
+                | IdentityKind::Realization
+                | IdentityKind::Transformation,
+            ) => {
                 kinds.insert(ImpactChangeKind::BackendLowering);
                 domains.extend([
                     GuaranteeDomain::Compiler,
@@ -287,10 +291,7 @@ fn classify_impact_roots(
             }
             Some(_) | None => {
                 kinds.insert(ImpactChangeKind::Unknown);
-                domains.extend([
-                    GuaranteeDomain::Compiler,
-                    GuaranteeDomain::Integration,
-                ]);
+                domains.extend([GuaranteeDomain::Compiler, GuaranteeDomain::Integration]);
             }
         }
     }
@@ -478,12 +479,8 @@ impl SemanticGraph {
         if roots.iter().any(|root| !known_roots.contains(root)) {
             limitations.push("one or more requested roots are not current graph nodes".to_owned());
         }
-        let (guarantee_domains, change_kinds) = classify_impact_roots(
-            &roots,
-            &known_roots,
-            &node_index,
-            truncated,
-        );
+        let (guarantee_domains, change_kinds) =
+            classify_impact_roots(&roots, &known_roots, &node_index, truncated);
         let graph_identity = self
             .canonical_json()
             .map(|json| sha256_hex(json.as_bytes()))
@@ -1266,15 +1263,11 @@ mod tests {
         let namespace = callee.identity_namespace(&program.module);
         let effect_key = serde_json::to_string(&crate::canonical::canonical_effect(&effect))
             .expect("canonical effect");
-        let expected_effect = crate::identity::effect_id(
-            namespace,
-            &callee.name,
-            &effect_key,
-            0,
-        );
-        assert!(graph.edges.iter().any(|edge| {
-            edge.kind == EdgeKind::PerformsEffect && edge.to == expected_effect
-        }));
+        let expected_effect = crate::identity::effect_id(namespace, &callee.name, &effect_key, 0);
+        assert!(graph
+            .edges
+            .iter()
+            .any(|edge| { edge.kind == EdgeKind::PerformsEffect && edge.to == expected_effect }));
     }
 
     #[test]

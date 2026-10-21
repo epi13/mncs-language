@@ -236,12 +236,7 @@ pub(crate) fn evidence_manifest_with_identities(
         for claim in &function.evidence {
             let occurrence = occurrence_for_claim(function, claim);
             evidence.push(record_for_claim(
-                program,
-                identities,
-                function,
-                claim,
-                occurrence,
-                freshness,
+                program, identities, function, claim, occurrence, freshness,
             ));
         }
     }

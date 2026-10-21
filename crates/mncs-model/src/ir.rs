@@ -588,8 +588,7 @@ impl Program {
         crate::record_counter("hir_build");
         let started = prelude_started;
         let phase_started = Instant::now();
-        let identities =
-            self.semantic_identities_with_program_fingerprint(&canonical.fingerprint);
+        let identities = self.semantic_identities_with_program_fingerprint(&canonical.fingerprint);
         trace_timing("ir-prelude-semantic-identities", phase_started);
 
         let phase_started = Instant::now();

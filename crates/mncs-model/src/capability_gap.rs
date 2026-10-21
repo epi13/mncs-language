@@ -363,9 +363,8 @@ mod tests {
 
     #[test]
     fn process_environment_value_fixture_round_trips() {
-        let raw = include_str!(
-            "../../../examples/capability-gaps/process-environment-value-1447.json"
-        );
+        let raw =
+            include_str!("../../../examples/capability-gaps/process-environment-value-1447.json");
         let gap: CapabilityGap = serde_json::from_str(raw).expect("fixture parses");
         assert!(gap.verify_identity().is_ok());
         assert_eq!(gap.gap_id, "MNCS-LANG-ENV-VALUE-1447");

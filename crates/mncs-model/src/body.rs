@@ -3949,10 +3949,7 @@ fn resolve_sequence_element(program: &Program, function: &Function, element: Bod
             BodyType::GenericParam { name: n }
         }
         BodyType::Named(n) => {
-            let module = function
-                .home_module
-                .as_deref()
-                .unwrap_or(&program.module);
+            let module = function.home_module.as_deref().unwrap_or(&program.module);
             match BodyType::from_program_in_module(program, &n, module) {
                 resolved @ (BodyType::Record { .. } | BodyType::Finite { .. }) => resolved,
                 _ => BodyType::Named(n),
@@ -3976,10 +3973,7 @@ fn body_type_for_function_value(
             name: gp.name.clone(),
         };
     }
-    let module = function
-        .home_module
-        .as_deref()
-        .unwrap_or(&program.module);
+    let module = function.home_module.as_deref().unwrap_or(&program.module);
     if value_type.trim_start().starts_with('[') {
         // Program-aware resolution first (handles concrete nominal elements
         // and concrete bounds); generic-aware spelling parse second (handles

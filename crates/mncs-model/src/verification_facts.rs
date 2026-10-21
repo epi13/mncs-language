@@ -261,6 +261,54 @@ pub(crate) struct DeclarationFactBasis {
     pub policy_identity: String,
 }
 
+#[derive(Clone, Copy)]
+enum NominalTypeDefinition<'a> {
+    Record(&'a RecordType),
+    Finite(&'a FiniteType),
+}
+
+impl NominalTypeDefinition<'_> {
+    fn identity(&self) -> &SemanticId {
+        match self {
+            Self::Record(record_type) => &record_type.identity,
+            Self::Finite(finite_type) => &finite_type.identity,
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Self::Record(record_type) => &record_type.name,
+            Self::Finite(finite_type) => &finite_type.name,
+        }
+    }
+}
+
+/// Per-snapshot nominal declarations indexed for record-fact dependency
+/// resolution. The three indexes preserve all candidates so ambiguous names
+/// remain unavailable for reuse instead of being resolved by first match.
+pub(crate) struct VerificationNominalTypeIndex<'a> {
+    by_identity: BTreeMap<SemanticId, Vec<NominalTypeDefinition<'a>>>,
+    by_module_and_name: BTreeMap<(Option<String>, String), Vec<NominalTypeDefinition<'a>>>,
+    by_name: BTreeMap<String, Vec<NominalTypeDefinition<'a>>>,
+}
+
+impl<'a> VerificationNominalTypeIndex<'a> {
+    fn insert(&mut self, definition: NominalTypeDefinition<'a>) {
+        let identity = definition.identity().clone();
+        let module = identity.declaring_module();
+        let name = definition.name().to_owned();
+        self.by_identity
+            .entry(identity)
+            .or_default()
+            .push(definition);
+        self.by_module_and_name
+            .entry((module, name.clone()))
+            .or_default()
+            .push(definition);
+        self.by_name.entry(name).or_default().push(definition);
+    }
+}
+
 impl Program {
     pub(crate) fn verification_function_index(&self) -> BTreeMap<SemanticId, &Function> {
         let mut index = BTreeMap::new();
@@ -286,6 +334,21 @@ impl Program {
                     .or_default()
                     .push((ordinal, specialization));
             }
+        }
+        index
+    }
+
+    pub(crate) fn verification_nominal_type_index(&self) -> VerificationNominalTypeIndex<'_> {
+        let mut index = VerificationNominalTypeIndex {
+            by_identity: BTreeMap::new(),
+            by_module_and_name: BTreeMap::new(),
+            by_name: BTreeMap::new(),
+        };
+        for record_type in &self.record_types {
+            index.insert(NominalTypeDefinition::Record(record_type));
+        }
+        for finite_type in &self.finite_types {
+            index.insert(NominalTypeDefinition::Finite(finite_type));
         }
         index
     }
@@ -343,6 +406,7 @@ impl Program {
     pub(crate) fn record_type_declaration_fact_basis(
         &self,
         record_type: &RecordType,
+        nominal_type_index: &VerificationNominalTypeIndex<'_>,
     ) -> Option<DeclarationFactBasis> {
         let mut dependencies = BTreeSet::new();
         let mut visited_types = BTreeSet::from([record_type.identity.clone()]);
@@ -350,6 +414,7 @@ impl Program {
             self.add_record_field_type_dependencies(
                 record_type,
                 &field.field_type,
+                nominal_type_index,
                 &mut dependencies,
                 &mut visited_types,
             )?;
@@ -367,6 +432,7 @@ impl Program {
         &self,
         owner: &RecordType,
         field_type: &str,
+        nominal_type_index: &VerificationNominalTypeIndex<'_>,
         dependencies: &mut BTreeSet<VerificationFactDependency>,
         visited_types: &mut BTreeSet<SemanticId>,
     ) -> Option<()> {
@@ -379,87 +445,82 @@ impl Program {
                 return self.add_record_field_type_dependencies(
                     owner,
                     element.trim(),
+                    nominal_type_index,
                     dependencies,
                     visited_types,
                 );
             }
         }
 
-        let exact_records = self
-            .record_types
-            .iter()
-            .filter(|candidate| candidate.identity.as_str() == field_type)
-            .collect::<Vec<_>>();
-        let exact_finite_types = self
-            .finite_types
-            .iter()
-            .filter(|candidate| candidate.identity.as_str() == field_type)
-            .collect::<Vec<_>>();
-        if exact_records.len() + exact_finite_types.len() > 1 {
-            return None;
-        }
-        if let Some(candidate) = exact_records.first() {
-            self.add_record_type_dependency_closure(candidate, dependencies, visited_types)?;
-            return Some(());
-        }
-        if let Some(candidate) = exact_finite_types.first() {
-            dependencies.insert(VerificationFactDependency {
-                role: VerificationDependencyRole::NominalType,
-                identity: candidate.identity.clone(),
-                fingerprint: crate::sha256_hex(&serde_json::to_vec(candidate).ok()?),
-            });
-            return Some(());
+        if let Some(candidates) = nominal_type_index
+            .by_identity
+            .get(&SemanticId(field_type.to_owned()))
+        {
+            if candidates.len() > 1 {
+                return None;
+            }
+            if let Some(candidate) = candidates.first().copied() {
+                self.add_nominal_type_dependency(
+                    candidate,
+                    nominal_type_index,
+                    dependencies,
+                    visited_types,
+                )?;
+                return Some(());
+            }
         }
 
-        let owner_module = owner.identity.declaring_module();
-        let local_records = self
-            .record_types
-            .iter()
-            .filter(|candidate| {
-                candidate.name == field_type
-                    && candidate.identity.declaring_module() == owner_module
-            })
-            .collect::<Vec<_>>();
-        let local_finite_types = self
-            .finite_types
-            .iter()
-            .filter(|candidate| {
-                candidate.name == field_type
-                    && candidate.identity.declaring_module() == owner_module
-            })
-            .collect::<Vec<_>>();
-        let (records, finite_types) = if local_records.is_empty() && local_finite_types.is_empty() {
-            (
-                self.record_types
-                    .iter()
-                    .filter(|candidate| candidate.name == field_type)
-                    .collect::<Vec<_>>(),
-                self.finite_types
-                    .iter()
-                    .filter(|candidate| candidate.name == field_type)
-                    .collect::<Vec<_>>(),
-            )
-        } else {
-            (local_records, local_finite_types)
-        };
-        if records.len() + finite_types.len() > 1 {
-            return None;
-        }
-        if let Some(candidate) = records.first() {
-            self.add_record_type_dependency_closure(candidate, dependencies, visited_types)?;
-        } else if let Some(candidate) = finite_types.first() {
-            dependencies.insert(VerificationFactDependency {
-                role: VerificationDependencyRole::NominalType,
-                identity: candidate.identity.clone(),
-                fingerprint: crate::sha256_hex(&serde_json::to_vec(candidate).ok()?),
-            });
+        let local_key = (owner.identity.declaring_module(), field_type.to_owned());
+        let candidates = nominal_type_index
+            .by_module_and_name
+            .get(&local_key)
+            .filter(|candidates| !candidates.is_empty())
+            .or_else(|| nominal_type_index.by_name.get(field_type));
+        if let Some(candidates) = candidates {
+            if candidates.len() > 1 {
+                return None;
+            }
+            if let Some(candidate) = candidates.first().copied() {
+                self.add_nominal_type_dependency(
+                    candidate,
+                    nominal_type_index,
+                    dependencies,
+                    visited_types,
+                )?;
+            }
         }
         Some(())
+    }
+
+    fn add_nominal_type_dependency(
+        &self,
+        candidate: NominalTypeDefinition<'_>,
+        nominal_type_index: &VerificationNominalTypeIndex<'_>,
+        dependencies: &mut BTreeSet<VerificationFactDependency>,
+        visited_types: &mut BTreeSet<SemanticId>,
+    ) -> Option<()> {
+        match candidate {
+            NominalTypeDefinition::Record(record_type) => self.add_record_type_dependency_closure(
+                record_type,
+                nominal_type_index,
+                dependencies,
+                visited_types,
+            ),
+            NominalTypeDefinition::Finite(finite_type) => {
+                dependencies.insert(VerificationFactDependency {
+                    role: VerificationDependencyRole::NominalType,
+                    identity: finite_type.identity.clone(),
+                    fingerprint: crate::sha256_hex(&serde_json::to_vec(finite_type).ok()?),
+                });
+                Some(())
+            }
+        }
     }
 
     fn add_record_type_dependency_closure(
         &self,
         record_type: &RecordType,
+        nominal_type_index: &VerificationNominalTypeIndex<'_>,
         dependencies: &mut BTreeSet<VerificationFactDependency>,
         visited_types: &mut BTreeSet<SemanticId>,
     ) -> Option<()> {
@@ -475,6 +536,7 @@ impl Program {
             self.add_record_field_type_dependencies(
                 record_type,
                 &field.field_type,
+                nominal_type_index,
                 dependencies,
                 visited_types,
             )?;
@@ -2477,6 +2539,101 @@ mod tests {
             .record_type_declaration_facts
             .iter()
             .all(|fact| fact.subject != money_identity));
+    }
+
+    #[test]
+    fn record_type_dependency_index_preserves_resolution_with_many_unrelated_types() {
+        let mut program = crate::validation::tests::valid_program();
+        let module = program.module.clone();
+        let local_currency = record_type_id(&module, "Currency", &[("code", "i64")]);
+        let foreign_currency = record_type_id("Finance", "Currency", &[("code", "u64")]);
+        let wallet_identity = record_type_id(&module, "Wallet", &[("currency", "Currency")]);
+        program.record_types.extend([
+            RecordType {
+                identity: local_currency.clone(),
+                name: "Currency".to_owned(),
+                fields: vec![RecordField {
+                    name: "code".to_owned(),
+                    field_type: "i64".to_owned(),
+                }],
+            },
+            RecordType {
+                identity: foreign_currency.clone(),
+                name: "Currency".to_owned(),
+                fields: vec![RecordField {
+                    name: "code".to_owned(),
+                    field_type: "u64".to_owned(),
+                }],
+            },
+            RecordType {
+                identity: wallet_identity.clone(),
+                name: "Wallet".to_owned(),
+                fields: vec![RecordField {
+                    name: "currency".to_owned(),
+                    field_type: "Currency".to_owned(),
+                }],
+            },
+        ]);
+        for ordinal in 0..2048 {
+            let name = format!("Unrelated{ordinal}");
+            program.record_types.push(RecordType {
+                identity: record_type_id("Unrelated", &name, &[("value", "i64")]),
+                name,
+                fields: vec![RecordField {
+                    name: "value".to_owned(),
+                    field_type: "i64".to_owned(),
+                }],
+            });
+        }
+
+        let index = program.verification_nominal_type_index();
+        let local_key = (Some(module.clone()), "Currency".to_owned());
+        assert_eq!(
+            index.by_module_and_name.get(&local_key).map(Vec::len),
+            Some(1),
+            "lookup considers the matching module/name bucket instead of scanning unrelated declarations"
+        );
+        assert_eq!(
+            index.by_name.get("Currency").map(Vec::len),
+            Some(2),
+            "the global fallback retains all candidates so ambiguity remains visible"
+        );
+
+        let wallet = program
+            .record_types
+            .iter()
+            .find(|record_type| record_type.identity == wallet_identity)
+            .unwrap();
+        let basis = program
+            .record_type_declaration_fact_basis(wallet, &index)
+            .unwrap();
+        assert!(basis.dependencies.iter().any(|dependency| {
+            dependency.role == VerificationDependencyRole::NominalType
+                && dependency.identity == local_currency
+        }));
+        assert!(!basis.dependencies.iter().any(|dependency| {
+            dependency.role == VerificationDependencyRole::NominalType
+                && dependency.identity == foreign_currency
+        }));
+
+        let mut ambiguous = program;
+        ambiguous.finite_types.push(FiniteType {
+            identity: finite_type_id(&module, "Currency"),
+            name: "Currency".to_owned(),
+            variants: Vec::new(),
+        });
+        let ambiguous_index = ambiguous.verification_nominal_type_index();
+        let wallet = ambiguous
+            .record_types
+            .iter()
+            .find(|record_type| record_type.identity == wallet_identity)
+            .unwrap();
+        assert!(
+            ambiguous
+                .record_type_declaration_fact_basis(wallet, &ambiguous_index)
+                .is_none(),
+            "a local record/finite collision must remain unresolved for fact reuse"
+        );
     }
 
     #[test]

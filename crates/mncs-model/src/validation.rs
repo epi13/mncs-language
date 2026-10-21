@@ -81,6 +81,7 @@ impl Program {
         let fact_identities = request.map(|_| self.semantic_identities());
         let fact_function_index = request.map(|_| self.verification_function_index());
         let fact_specialization_index = request.map(|_| self.verification_specialization_index());
+        let fact_nominal_type_index = request.map(|_| self.verification_nominal_type_index());
         if let Some(request) = request {
             for fact in &request.prior_facts {
                 prior_by_subject
@@ -293,8 +294,12 @@ impl Program {
             let mut current_fact = None;
             let mut skip_field_validation = false;
             if record_identity_valid {
-                if let Some(request) = request {
-                    if let Some(basis) = self.record_type_declaration_fact_basis(record_type) {
+                if let (Some(request), Some(nominal_type_index)) =
+                    (request, fact_nominal_type_index.as_ref())
+                {
+                    if let Some(basis) =
+                        self.record_type_declaration_fact_basis(record_type, nominal_type_index)
+                    {
                         let language_profile = request
                             .subject_language_profiles
                             .get(&basis.subject)
