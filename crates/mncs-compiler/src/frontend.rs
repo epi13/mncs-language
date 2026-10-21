@@ -1081,10 +1081,10 @@ impl ModuleResolver for RecordingResolver<'_> {
     }
 }
 
-#[derive(Debug)]
-struct ImportedModule<'a> {
+#[derive(Debug, Clone)]
+struct ImportedModule {
     requested_name: String,
-    program: &'a Program,
+    program: Program,
     declarations: DeclarationSpans,
 }
 
@@ -1303,7 +1303,7 @@ fn link_module_with_closure_and_source_map(
         match elaborated.get(&name) {
             Some(program) => imported.push(ImportedModule {
                 requested_name: name.clone(),
-                program,
+                program: program.clone(),
                 declarations: declaration_spans.get(&name).cloned().unwrap_or_default(),
             }),
             None => diagnostics.push(elaboration_diagnostic(
@@ -1340,7 +1340,7 @@ fn link_module_with_closure_and_source_map(
 /// other name conflict is an error.
 fn merge_imported_declarations(
     ast: &AbstractSyntaxTree,
-    imported: &[ImportedModule<'_>],
+    imported: &[ImportedModule],
     diagnostics: &mut Vec<SourceDiagnostic>,
 ) -> MergedContext {
     let mut context = MergedContext::default();
