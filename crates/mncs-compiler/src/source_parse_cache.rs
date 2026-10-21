@@ -10,6 +10,7 @@ use mncs_syntax::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::io::{self, Write};
 
 pub const SOURCE_PARSE_CACHE_SCHEMA_VERSION: &str = "mncs.language-source-parse-cache/1";
 /// Bump this identity whenever parser behavior changes without a syntax
@@ -66,6 +67,19 @@ struct SourceParseCacheEntry {
     output: ParseOutput,
 }
 
+#[derive(Serialize)]
+struct SourceParseCacheEntryRef<'a> {
+    key: &'a str,
+    source_identity: &'a str,
+    parser_policy_identity: &'a str,
+    profile_registry_identity: &'a str,
+    lexical_schema_version: &'a str,
+    cst_schema_version: &'a str,
+    ast_schema_version: &'a str,
+    output_digest: &'a str,
+    output: &'a ParseOutput,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceParseCacheObservation {
     pub schema_version: String,
@@ -108,7 +122,6 @@ impl SourceParseCache {
             self.entry_sizes.clear();
             self.schema_version = SOURCE_PARSE_CACHE_SCHEMA_VERSION.to_owned();
         }
-        self.ensure_entry_sizes();
         observation.evicted_entry_count += self.trim_bounded();
 
         let profile_registry_identity = profile_registry_identity();
@@ -150,9 +163,24 @@ impl SourceParseCache {
         mncs_model::record_counter("source_parse");
         let output = mncs_syntax::parse(envelope);
         if envelope.identity_is_valid() && output_matches_envelope(&output, envelope) {
-            let output_bytes = match serde_json::to_vec(&output) {
-                Ok(bytes) => bytes,
-                Err(_) => return output,
+            let output_digest = match serialized_sha256_with_limit(&output, MAX_CACHE_BYTES) {
+                Some((digest, _)) => digest,
+                None => return output,
+            };
+            let entry_view = SourceParseCacheEntryRef {
+                key: &key,
+                source_identity: &envelope.identity,
+                parser_policy_identity: SOURCE_PARSE_POLICY_IDENTITY,
+                profile_registry_identity: &profile_registry_identity,
+                lexical_schema_version: LEXICAL_SCHEMA_VERSION,
+                cst_schema_version: CST_SCHEMA_VERSION,
+                ast_schema_version: AST_SCHEMA_VERSION,
+                output_digest: &output_digest,
+                output: &output,
+            };
+            let entry_bytes = match serialized_entry_size_limited(&entry_view, MAX_CACHE_BYTES) {
+                Some(size) => size,
+                None => return output,
             };
             let entry = SourceParseCacheEntry {
                 key,
@@ -162,10 +190,10 @@ impl SourceParseCache {
                 lexical_schema_version: LEXICAL_SCHEMA_VERSION.to_owned(),
                 cst_schema_version: CST_SCHEMA_VERSION.to_owned(),
                 ast_schema_version: AST_SCHEMA_VERSION.to_owned(),
-                output_digest: sha256_hex(&output_bytes),
+                output_digest,
                 output: output.clone(),
             };
-            if self.push_bounded(entry, observation) {
+            if self.push_bounded(entry, entry_bytes, observation) {
                 observation.published_entry_count += 1;
             }
         }
@@ -175,13 +203,10 @@ impl SourceParseCache {
     fn push_bounded(
         &mut self,
         entry: SourceParseCacheEntry,
+        entry_bytes: usize,
         observation: &mut SourceParseCacheObservation,
     ) -> bool {
         self.ensure_entry_sizes();
-        let entry_bytes = match serialized_entry_size(&entry) {
-            Some(size) => size,
-            None => return false,
-        };
         if entry_bytes > MAX_CACHE_BYTES {
             return false;
         }
@@ -199,22 +224,34 @@ impl SourceParseCache {
         self.entry_sizes = self
             .entries
             .iter()
-            .map(|entry| serialized_entry_size(entry).unwrap_or(usize::MAX))
+            .map(|entry| serialized_entry_size(entry).unwrap_or(MAX_CACHE_BYTES + 1))
             .collect();
     }
 
     fn trim_bounded(&mut self) -> usize {
+        let mut removed = 0;
+        if self.entries.len() > MAX_CACHE_ENTRIES {
+            let entry_count = self.entries.len();
+            let excess = entry_count - MAX_CACHE_ENTRIES;
+            self.entries.drain(..excess);
+            if self.entry_sizes.len() == entry_count {
+                self.entry_sizes.drain(..excess);
+            } else {
+                self.entry_sizes.clear();
+            }
+            removed += excess;
+        }
         self.ensure_entry_sizes();
         let mut total = self
             .entry_sizes
             .iter()
-            .fold(0usize, |sum, size| sum.saturating_add(*size));
-        let mut removed = 0;
-        while self.entries.len() > MAX_CACHE_ENTRIES || total > MAX_CACHE_BYTES {
+            .map(|size| *size as u64)
+            .sum::<u64>();
+        while self.entries.len() > MAX_CACHE_ENTRIES || total > MAX_CACHE_BYTES as u64 {
             if self.entries.is_empty() {
                 break;
             }
-            total = total.saturating_sub(self.entry_sizes.remove(0));
+            total -= self.entry_sizes.remove(0) as u64;
             self.entries.remove(0);
             removed += 1;
         }
@@ -223,7 +260,80 @@ impl SourceParseCache {
 }
 
 fn serialized_entry_size(entry: &SourceParseCacheEntry) -> Option<usize> {
-    serde_json::to_vec(entry).ok().map(|bytes| bytes.len())
+    serialized_entry_size_limited(entry, MAX_CACHE_BYTES)
+}
+
+fn serialized_entry_size_limited<T: Serialize>(entry: &T, maximum_bytes: usize) -> Option<usize> {
+    let mut counter = SerializedSizeCounter {
+        bytes: 0,
+        maximum_bytes,
+    };
+    serde_json::to_writer(&mut counter, entry).ok()?;
+    Some(counter.bytes)
+}
+
+struct SerializedSizeCounter {
+    bytes: usize,
+    maximum_bytes: usize,
+}
+
+impl Write for SerializedSizeCounter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > self.maximum_bytes.saturating_sub(self.bytes) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "serialized source parse entry exceeds the cache byte limit",
+            ));
+        }
+        self.bytes += bytes.len();
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn serialized_sha256<T: Serialize>(value: &T) -> Option<String> {
+    serialized_sha256_with_limit(value, usize::MAX).map(|(digest, _)| digest)
+}
+
+fn serialized_sha256_with_limit<T: Serialize>(
+    value: &T,
+    maximum_bytes: usize,
+) -> Option<(String, usize)> {
+    let mut writer = Sha256AndSizeWriter {
+        digest: Sha256::new(),
+        bytes: 0,
+        maximum_bytes,
+    };
+    serde_json::to_writer(&mut writer, value).ok()?;
+    let digest = writer.digest.finalize();
+    Some((hex_digest(&digest), writer.bytes))
+}
+
+struct Sha256AndSizeWriter {
+    digest: Sha256,
+    bytes: usize,
+    maximum_bytes: usize,
+}
+
+impl Write for Sha256AndSizeWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > self.maximum_bytes.saturating_sub(self.bytes) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "serialized source parse output exceeds the cache byte limit",
+            ));
+        }
+        self.digest.update(bytes);
+        self.bytes += bytes.len();
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 fn cache_schema_version() -> String {
@@ -277,9 +387,7 @@ fn entry_matches(
     {
         return false;
     }
-    serde_json::to_vec(&entry.output)
-        .ok()
-        .is_some_and(|bytes| sha256_hex(&bytes) == entry.output_digest)
+    serialized_sha256(&entry.output).is_some_and(|digest| digest == entry.output_digest)
 }
 
 fn output_matches_envelope(output: &ParseOutput, envelope: &SourceEnvelope) -> bool {
@@ -295,6 +403,10 @@ fn output_matches_envelope(output: &ParseOutput, envelope: &SourceEnvelope) -> b
 
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
+    hex_digest(&digest)
+}
+
+fn hex_digest(digest: &[u8]) -> String {
     let mut text = String::with_capacity(64);
     for byte in digest {
         use std::fmt::Write as _;
@@ -305,7 +417,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{SourceParseCache, SourceParseCacheObservation};
+    use super::{
+        serialized_entry_size_limited, serialized_sha256, serialized_sha256_with_limit, sha256_hex,
+        SourceParseCache, SourceParseCacheEntry, SourceParseCacheEntryRef,
+        SourceParseCacheObservation, MAX_CACHE_ENTRIES,
+    };
     use mncs_syntax::{SourceArtifactKind, SourceEnvelope};
 
     #[test]
@@ -383,5 +499,94 @@ mod tests {
         assert_eq!(tamper_observation.rejected_entry_count, 1);
         assert!(tamper_observation.reused_source_identities.is_empty());
         assert_eq!(reparsed.diagnostics, invalid_output.diagnostics);
+    }
+
+    #[test]
+    fn restored_cache_trims_oldest_entries_before_lookup() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "cache.restore_bound",
+            "mncs 0.19; module cache.restore_bound; fn value() -> (result: u64) { return 9; }",
+        );
+        let mut cache = SourceParseCache::default();
+        let mut initial_observation = SourceParseCacheObservation::default();
+        let _ = cache.parse(&envelope, &mut initial_observation);
+        let valid_entry = cache.entries[0].clone();
+        for index in 0..MAX_CACHE_ENTRIES {
+            let mut older_entry = valid_entry.clone();
+            older_entry.key = format!("stale-entry-{index}");
+            cache.entries.insert(0, older_entry);
+        }
+        assert_eq!(cache.entries.len(), MAX_CACHE_ENTRIES + 1);
+
+        let bytes = serde_json::to_vec(&cache).expect("cache serializes");
+        let mut restored: SourceParseCache =
+            serde_json::from_slice(&bytes).expect("cache restores");
+        let mut observation = SourceParseCacheObservation::default();
+        let output = restored.parse(&envelope, &mut observation);
+
+        assert!(output.ast.is_some());
+        assert_eq!(observation.evicted_entry_count, 1);
+        assert_eq!(observation.reused_source_identities, [envelope.identity]);
+        assert!(observation.parsed_source_identities.is_empty());
+        assert_eq!(restored.entries.len(), MAX_CACHE_ENTRIES);
+    }
+
+    #[test]
+    fn cache_entry_size_accounting_stops_at_its_byte_limit() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "cache.size_limit",
+            "mncs 0.19; module cache.size_limit; fn value() -> (result: u64) { return 9; }",
+        );
+        let mut cache = SourceParseCache::default();
+        let mut observation = SourceParseCacheObservation::default();
+        let _ = cache.parse(&envelope, &mut observation);
+        let entry: &SourceParseCacheEntry = &cache.entries[0];
+        let bytes = serde_json::to_vec(entry).expect("entry serializes for test fixture");
+        let exact_size = bytes.len();
+        let entry_ref = SourceParseCacheEntryRef {
+            key: &entry.key,
+            source_identity: &entry.source_identity,
+            parser_policy_identity: &entry.parser_policy_identity,
+            profile_registry_identity: &entry.profile_registry_identity,
+            lexical_schema_version: &entry.lexical_schema_version,
+            cst_schema_version: &entry.cst_schema_version,
+            ast_schema_version: &entry.ast_schema_version,
+            output_digest: &entry.output_digest,
+            output: &entry.output,
+        };
+
+        assert_eq!(
+            serialized_entry_size_limited(&entry_ref, exact_size),
+            Some(exact_size)
+        );
+        assert_eq!(serialized_entry_size_limited(entry, exact_size - 1), None);
+    }
+
+    #[test]
+    fn streamed_output_digest_matches_serialized_json_digest() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "cache.stream_digest",
+            "mncs 0.19; module cache.stream_digest; fn value() -> (result: u64) { return 9; }",
+        );
+        let mut cache = SourceParseCache::default();
+        let mut observation = SourceParseCacheObservation::default();
+        let _ = cache.parse(&envelope, &mut observation);
+        let output = &cache.entries[0].output;
+        let bytes = serde_json::to_vec(output).expect("parse output serializes");
+
+        let expected_digest = sha256_hex(&bytes);
+        let exact_output_size = bytes.len();
+        assert_eq!(serialized_sha256(output), Some(expected_digest.clone()));
+        assert_eq!(
+            serialized_sha256_with_limit(output, exact_output_size),
+            Some((expected_digest, exact_output_size))
+        );
+        assert_eq!(
+            serialized_sha256_with_limit(output, exact_output_size - 1),
+            None
+        );
     }
 }

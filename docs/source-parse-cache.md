@@ -15,10 +15,15 @@ that exact snapshot. A changed parser policy or damaged output digest causes a
 fresh parse.
 
 The caller-owned cache is bounded to 256 entries and 32 MiB. Least-recently
-used entries are evicted first. `SourceFrontEndResult::source_parse_cache_reuse`
-reports exact source identities reused, parsed, rejected, evicted, and
-published during that frontend call. These observations describe parser work;
-they do not claim semantic verification or executable artifact reuse.
+used entries are evicted first, including when a restored cache exceeds the
+entry limit. Cache-size accounting and parse-output integrity checks stream
+their serialized bytes, so they do not allocate a second serialized copy of
+each parse result. Per-entry accounting stops at the 32 MiB cache limit; an
+oversized parse result is returned normally but is not retained in the cache.
+`SourceFrontEndResult::source_parse_cache_reuse` reports exact source
+identities reused, parsed, rejected, evicted, and published during that
+frontend call. These observations describe parser work; they do not claim
+semantic verification or executable artifact reuse.
 
 The parser policy identity is explicit so a behavior change can invalidate
 saved parse results even when serialized AST schemas remain compatible. The
