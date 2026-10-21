@@ -649,7 +649,7 @@ impl Program {
         // keeps labels, diagnostics, and user data from creating false edges.
         // Assumption identities are still conservatively found in the body
         // representation because their current payload is string-addressed.
-        let mut body_strings = strings_in_json(&serde_json::to_value(body).ok()?);
+        let mut used_assumptions = body_assumption_references(body);
         let calls = body_call_references(body);
         let mut relevant_specializations =
             select_relevant_specializations(&declaration, &calls, specialization_index);
@@ -687,7 +687,7 @@ impl Program {
             let Some(candidate_body) = candidate.body.as_ref() else {
                 continue;
             };
-            body_strings.extend(strings_in_json(&serde_json::to_value(candidate_body).ok()?));
+            used_assumptions.extend(body_assumption_references(candidate_body));
             nominal_types.extend(body_nominal_type_references(
                 self,
                 candidate,
@@ -743,7 +743,6 @@ impl Program {
             }
         }
 
-        let mut used_assumptions = body_strings;
         used_assumptions.extend(function.assumptions.iter().cloned());
         for candidate in &reachable_functions {
             used_assumptions.extend(candidate.assumptions.iter().cloned());
@@ -1374,28 +1373,12 @@ fn select_relevant_specializations<'a>(
         .collect()
 }
 
-fn strings_in_json(value: &serde_json::Value) -> BTreeSet<String> {
-    fn collect(value: &serde_json::Value, strings: &mut BTreeSet<String>) {
-        match value {
-            serde_json::Value::String(value) => {
-                strings.insert(value.clone());
-            }
-            serde_json::Value::Array(values) => {
-                for value in values {
-                    collect(value, strings);
-                }
-            }
-            serde_json::Value::Object(values) => {
-                for value in values.values() {
-                    collect(value, strings);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut strings = BTreeSet::new();
-    collect(value, &mut strings);
-    strings
+fn body_assumption_references(body: &FunctionBody) -> BTreeSet<String> {
+    body.blocks
+        .iter()
+        .flat_map(|block| block.operations.iter())
+        .flat_map(|operation| operation.assumptions.iter().cloned())
+        .collect()
 }
 
 #[cfg(test)]
@@ -1760,6 +1743,42 @@ mod tests {
     }
 
     #[test]
+    fn unrelated_body_text_does_not_create_an_assumption_dependency() {
+        let assumption_name = "one";
+        let mut program = crate::body::tests::executable_program();
+        program.assumptions.push(crate::Assumption {
+            id: assumption_name.to_owned(),
+            statement: "The unrelated body text has no assumption meaning.".to_owned(),
+            supplied_by: "test fixture".to_owned(),
+            confidence: crate::AssumptionConfidence::External,
+        });
+
+        let identities = program.semantic_identities();
+        let basis = program
+            .body_fact_basis_with_identities(&program.functions[0], &identities)
+            .unwrap();
+        let identity = assumption_id(&program.module, assumption_name);
+        assert!(!basis.dependencies.iter().any(|dependency| {
+            dependency.role == VerificationDependencyRole::Assumption
+                && dependency.identity == identity
+        }));
+
+        let function = &mut program.functions[0];
+        function.assumptions.push(assumption_name.to_owned());
+        function.body.as_mut().unwrap().blocks[0].operations[0]
+            .assumptions
+            .push(assumption_name.to_owned());
+        let identities = program.semantic_identities();
+        let basis = program
+            .body_fact_basis_with_identities(&program.functions[0], &identities)
+            .unwrap();
+        assert!(basis.dependencies.iter().any(|dependency| {
+            dependency.role == VerificationDependencyRole::Assumption
+                && dependency.identity == identity
+        }));
+    }
+
+    #[test]
     fn generic_specialization_dependency_uses_the_resolved_call_selector() {
         let mut program = call_program();
         let generic_function = function_id(&program.module, "generic_callee");
@@ -1967,6 +1986,107 @@ mod tests {
             dependency.role == VerificationDependencyRole::CallableImplementation
                 && dependency.identity == downstream_identity
         }));
+    }
+
+    #[test]
+    fn changed_generic_specialization_rechecks_callers_and_reuses_independent_bodies() {
+        let mut program = call_program();
+        let generic_identity = function_id(&program.module, "callee");
+        let specialized_identity = function_id(&program.module, "callee__spec_4");
+        let instantiation = SemanticId("mncs:0.2:instantiation:callee:value:4".to_owned());
+        let argument = GenericArg::Value { value: 4 };
+        let canonical_args = argument.canonical_string();
+
+        program.functions[0].generic_params = vec![crate::GenericParam {
+            name: "N".to_owned(),
+            kind: crate::GenericParamKind::Nat,
+        }];
+        let mut specialization = program.functions[2].clone();
+        specialization.name = "callee__spec_4".to_owned();
+        program.functions.push(specialization);
+        program.generic_specializations = vec![GenericSpecializationRecord {
+            generic_function: generic_identity.clone(),
+            specialization_function: specialized_identity.clone(),
+            instantiation: instantiation.clone(),
+            args: vec![argument.clone()],
+            canonical_args,
+            host_spellings: Vec::new(),
+        }];
+
+        let caller = program
+            .functions
+            .iter_mut()
+            .find(|function| function.name == "caller")
+            .unwrap();
+        let BodyOperationKind::Call {
+            function,
+            function_name,
+            generic_args,
+            instantiation: call_instantiation,
+            specialization: call_specialization,
+            ..
+        } = &mut caller.body.as_mut().unwrap().blocks[0].operations[0].kind
+        else {
+            unreachable!("call_program contains a call")
+        };
+        *function = generic_identity;
+        *function_name = "callee".to_owned();
+        *generic_args = vec![argument];
+        *call_instantiation = Some(instantiation);
+        *call_specialization = Some(specialized_identity.clone());
+
+        let first = program.validate_with_verified_facts(&request("0.19", Vec::new()));
+        assert!(first.report.valid, "{:?}", first.report.errors);
+        let caller_subject = program.functions[1]
+            .body
+            .as_ref()
+            .unwrap()
+            .identity(&program.module, "caller");
+        let specialized_subject = program.functions[3]
+            .body
+            .as_ref()
+            .unwrap()
+            .identity(&program.module, "callee__spec_4");
+        let independent_subject = program.functions[2]
+            .body
+            .as_ref()
+            .unwrap()
+            .identity(&program.module, "independent");
+        let caller_fact = first
+            .facts
+            .iter()
+            .find(|fact| fact.subject == caller_subject)
+            .expect("caller body fact");
+        assert!(caller_fact.dependencies.iter().any(|dependency| {
+            dependency.role == VerificationDependencyRole::GenericSpecialization
+                && dependency.identity
+                    == specialization_id(&function_id(&program.module, "callee"), "value:4")
+        }));
+
+        let mut changed = program;
+        changed.functions[3].body.as_mut().unwrap().entry = "missing".to_owned();
+        let result = changed.validate_with_verified_facts(&request("0.19", first.facts));
+        assert!(!result.report.valid);
+        assert!(result
+            .report
+            .errors
+            .iter()
+            .any(|error| error.code == "MNB006"));
+        let recomputed = result
+            .reuse
+            .recomputed
+            .iter()
+            .map(|row| (row.subject.clone(), row.reason.clone()))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            recomputed.get(&caller_subject),
+            Some(&VerificationFactReuseMiss::DependenciesChanged)
+        );
+        assert_eq!(
+            recomputed.get(&specialized_subject),
+            Some(&VerificationFactReuseMiss::SubjectChanged)
+        );
+        assert_eq!(result.reuse.reused, vec![independent_subject]);
     }
 
     #[test]
