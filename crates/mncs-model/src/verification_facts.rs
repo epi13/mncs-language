@@ -606,6 +606,7 @@ impl Program {
         Some(())
     }
 
+    #[cfg(test)]
     pub(crate) fn body_fact_basis_with_identities(
         &self,
         function: &Function,
