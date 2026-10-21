@@ -58,9 +58,11 @@ use mncs_model::{
     CompilerImplementationIdentity, CompilerNodeProfile, CompilerPassExecutionObservation,
     CompilerPassIdentity, CompilerStage, CompilerStageContract, CrossHostInvariants,
     ObligationStatus, ObservationModelRef, PassPipelineIdentity, Program, RelationClaim,
-    SemanticId, StageAvailability, StageIntegration, TargetContractRef, TargetLoweringPlan,
-    TransformationEdge, TransformationStatus, COMPILATION_STUDY_OBSERVATION_INTERPRETATION,
-    COMPILATION_STUDY_RESULT_CONTRACT_ID, COMPILER_ARTIFACT_SCHEMA_VERSION, SSA_SCHEMA_VERSION,
+    SemanticId, SsaFunctionFactRequest, SsaFunctionFactReuseObservation,
+    SsaFunctionVerificationFact, StageAvailability, StageIntegration, TargetContractRef,
+    TargetLoweringPlan, TransformationEdge, TransformationStatus,
+    COMPILATION_STUDY_OBSERVATION_INTERPRETATION, COMPILATION_STUDY_RESULT_CONTRACT_ID,
+    COMPILER_ARTIFACT_SCHEMA_VERSION, SSA_SCHEMA_VERSION,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -68,6 +70,12 @@ use sha2::{Digest, Sha256};
 pub const REFERENCE_LANGUAGE_PROFILE: &str = "mncs:language-profile:research-0.1";
 pub const REFERENCE_COMPILER_NAME: &str = "mncs-reference-compiler";
 pub const REFERENCE_PIPELINE_NAME: &str = "mncs-source-semantic-hir-ssa";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SsaFunctionFactWork {
+    pub facts: Vec<SsaFunctionVerificationFact>,
+    pub reuse: SsaFunctionFactReuseObservation,
+}
 
 fn trace_timing(stage: &str, started: Instant) {
     mncs_model::record_stage(stage, started.elapsed());
@@ -223,7 +231,39 @@ impl ReferenceCompiler {
     }
 
     pub fn compile(&self, request: CompilationRequest, program: &Program) -> CompilationResult {
-        self.compile_inner(request, program, &[], &[])
+        let mut ssa_fact_work = None;
+        self.compile_inner(
+            request,
+            program,
+            &[],
+            &[],
+            &SsaFunctionFactRequest::default(),
+            &mut ssa_fact_work,
+        )
+    }
+
+    /// Compile while reusing Language-issued SSA function facts. Semantic
+    /// Program validation, HIR construction, and backend checks still run on
+    /// the current input; only per-function structural SSA validation can be
+    /// skipped, and only after Language rechecks each fact's guards.
+    pub fn compile_with_ssa_facts(
+        &self,
+        request: CompilationRequest,
+        program: &Program,
+        prior_facts: &[SsaFunctionVerificationFact],
+    ) -> (CompilationResult, Option<SsaFunctionFactWork>) {
+        let mut ssa_fact_work = None;
+        let result = self.compile_inner(
+            request,
+            program,
+            &[],
+            &[],
+            &SsaFunctionFactRequest {
+                prior_facts: prior_facts.to_vec(),
+            },
+            &mut ssa_fact_work,
+        );
+        (result, ssa_fact_work)
     }
 
     /// Compile with admitted tranche-0.2 proofs carried through HIR, SSA,
@@ -239,7 +279,15 @@ impl ReferenceCompiler {
         inputs: &[CompilerProofInput],
         library_roots: &[std::path::PathBuf],
     ) -> CompilationResult {
-        self.compile_inner(request, program, inputs, library_roots)
+        let mut ssa_fact_work = None;
+        self.compile_inner(
+            request,
+            program,
+            inputs,
+            library_roots,
+            &SsaFunctionFactRequest::default(),
+            &mut ssa_fact_work,
+        )
     }
 
     fn compile_inner(
@@ -248,6 +296,8 @@ impl ReferenceCompiler {
         program: &Program,
         proof_inputs: &[CompilerProofInput],
         library_roots: &[std::path::PathBuf],
+        ssa_fact_request: &SsaFunctionFactRequest,
+        ssa_fact_work: &mut Option<SsaFunctionFactWork>,
     ) -> CompilationResult {
         let started = Instant::now();
         let mut diagnostics = request.validate();
@@ -354,17 +404,25 @@ impl ReferenceCompiler {
 
         let ssa = match prelowered_ssa {
             Some(ssa) => ssa,
-            None => match program.lower_to_ssa_from_ir(&hir) {
-                Ok(ssa) => ssa,
-                Err(error) => {
-                    diagnostics.push(CompilerDiagnostic::new(
-                        "CMP205",
-                        CompilerDiagnosticKind::InternalCompilerDefect,
-                        format!("validated semantic input failed SSA lowering: {error}"),
-                    ));
-                    return failed_result(&request, diagnostics);
+            None => {
+                match program.lower_to_ssa_from_ir_with_verified_facts(&hir, ssa_fact_request) {
+                    Ok(lowered) => {
+                        *ssa_fact_work = Some(SsaFunctionFactWork {
+                            facts: lowered.facts,
+                            reuse: lowered.reuse,
+                        });
+                        lowered.module
+                    }
+                    Err(error) => {
+                        diagnostics.push(CompilerDiagnostic::new(
+                            "CMP205",
+                            CompilerDiagnosticKind::InternalCompilerDefect,
+                            format!("validated semantic input failed SSA lowering: {error}"),
+                        ));
+                        return failed_result(&request, diagnostics);
+                    }
                 }
-            },
+            }
         };
         let ssa_fingerprint = ssa.fingerprint().expect("SSA is serializable");
         let ssa_ref = CompilerArtifactRef::new(
