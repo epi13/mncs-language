@@ -5,8 +5,8 @@
 //! parser policy, source-profile registry, and syntax artifact schemas.
 
 use mncs_syntax::{
-    AST_SCHEMA_VERSION, CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION, ParseOutput, SourceEnvelope,
-    source_profile_registry_snapshot,
+    source_profile_registry_snapshot, ParseOutput, SourceEnvelope, AST_SCHEMA_VERSION,
+    CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -21,19 +21,34 @@ pub const SOURCE_PARSE_CACHE_OBSERVATION_SCHEMA_VERSION: &str =
 const MAX_CACHE_ENTRIES: usize = 256;
 const MAX_CACHE_BYTES: usize = 32 * 1024 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceParseCache {
     #[serde(default = "cache_schema_version")]
     schema_version: String,
     #[serde(default)]
     entries: Vec<SourceParseCacheEntry>,
+    /// Serialized entry sizes are derived bookkeeping. Rebuild them once when
+    /// a caller restores the durable cache, then maintain them alongside LRU
+    /// insertions and removals instead of serializing every entry on each
+    /// source lookup.
+    #[serde(skip)]
+    entry_sizes: Vec<usize>,
 }
+
+impl PartialEq for SourceParseCache {
+    fn eq(&self, other: &Self) -> bool {
+        self.schema_version == other.schema_version && self.entries == other.entries
+    }
+}
+
+impl Eq for SourceParseCache {}
 
 impl Default for SourceParseCache {
     fn default() -> Self {
         Self {
             schema_version: cache_schema_version(),
             entries: Vec::new(),
+            entry_sizes: Vec::new(),
         }
     }
 }
@@ -90,8 +105,10 @@ impl SourceParseCache {
         if self.schema_version != SOURCE_PARSE_CACHE_SCHEMA_VERSION {
             observation.rejected_entry_count += self.entries.len();
             self.entries.clear();
+            self.entry_sizes.clear();
             self.schema_version = SOURCE_PARSE_CACHE_SCHEMA_VERSION.to_owned();
         }
+        self.ensure_entry_sizes();
         observation.evicted_entry_count += self.trim_bounded();
 
         let profile_registry_identity = profile_registry_identity();
@@ -108,8 +125,10 @@ impl SourceParseCache {
                 let entry = &self.entries[index];
                 if entry_matches(entry, envelope, &key, &profile_registry_identity) {
                     let entry = self.entries.remove(index);
+                    let entry_size = self.entry_sizes.remove(index);
                     let output = entry.output.clone();
                     self.entries.push(entry);
+                    self.entry_sizes.push(entry_size);
                     observation
                         .reused_source_identities
                         .push(envelope.identity.clone());
@@ -120,6 +139,7 @@ impl SourceParseCache {
                 observation.rejected_entry_count += matching.len();
                 for index in matching.into_iter().rev() {
                     self.entries.remove(index);
+                    self.entry_sizes.remove(index);
                 }
             }
         }
@@ -157,30 +177,36 @@ impl SourceParseCache {
         entry: SourceParseCacheEntry,
         observation: &mut SourceParseCacheObservation,
     ) -> bool {
-        let entry_bytes = match serde_json::to_vec(&entry) {
-            Ok(bytes) => bytes.len(),
-            Err(_) => return false,
+        self.ensure_entry_sizes();
+        let entry_bytes = match serialized_entry_size(&entry) {
+            Some(size) => size,
+            None => return false,
         };
         if entry_bytes > MAX_CACHE_BYTES {
             return false;
         }
         let key = entry.key.clone();
         self.entries.push(entry);
+        self.entry_sizes.push(entry_bytes);
         observation.evicted_entry_count += self.trim_bounded();
         self.entries.iter().any(|entry| entry.key == key)
     }
 
-    fn trim_bounded(&mut self) -> usize {
-        let mut sizes = self
+    fn ensure_entry_sizes(&mut self) {
+        if self.entry_sizes.len() == self.entries.len() {
+            return;
+        }
+        self.entry_sizes = self
             .entries
             .iter()
-            .map(|entry| {
-                serde_json::to_vec(entry)
-                    .map(|bytes| bytes.len())
-                    .unwrap_or(usize::MAX)
-            })
-            .collect::<Vec<_>>();
-        let mut total = sizes
+            .map(|entry| serialized_entry_size(entry).unwrap_or(usize::MAX))
+            .collect();
+    }
+
+    fn trim_bounded(&mut self) -> usize {
+        self.ensure_entry_sizes();
+        let mut total = self
+            .entry_sizes
             .iter()
             .fold(0usize, |sum, size| sum.saturating_add(*size));
         let mut removed = 0;
@@ -188,12 +214,16 @@ impl SourceParseCache {
             if self.entries.is_empty() {
                 break;
             }
-            total = total.saturating_sub(sizes.remove(0));
+            total = total.saturating_sub(self.entry_sizes.remove(0));
             self.entries.remove(0);
             removed += 1;
         }
         removed
     }
+}
+
+fn serialized_entry_size(entry: &SourceParseCacheEntry) -> Option<usize> {
+    serde_json::to_vec(entry).ok().map(|bytes| bytes.len())
 }
 
 fn cache_schema_version() -> String {
