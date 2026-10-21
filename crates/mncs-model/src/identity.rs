@@ -172,24 +172,24 @@ impl Program {
         for function in &self.functions {
             let namespace = function.identity_namespace(&self.module);
             let function_identity = function_id(namespace, &function.name);
+            let function_json = canonical_function(function).to_string();
+            let function_fingerprint = fingerprint_json(&function_json);
             objects.push(IdentityRecord {
                 identity: function_identity.clone(),
                 kind: IdentityKind::Function,
-                fingerprint: fingerprint_json(&canonical_function(function).to_string()),
+                fingerprint: function_fingerprint.clone(),
             });
             if function.is_test {
                 let declaration_identity = test_declaration_id(namespace, &function.name);
                 objects.push(IdentityRecord {
                     identity: declaration_identity,
                     kind: IdentityKind::Test,
-                    fingerprint: fingerprint_json(&canonical_function(function).to_string()),
+                    fingerprint: function_fingerprint.clone(),
                 });
-                let function_fingerprint =
-                    fingerprint_json(&canonical_function(function).to_string());
                 objects.push(IdentityRecord {
                     identity: test_case_id(namespace, &function.name, &function_fingerprint),
                     kind: IdentityKind::TestCase,
-                    fingerprint: function_fingerprint,
+                    fingerprint: function_fingerprint.clone(),
                 });
             }
             if let Some(body) = &function.body {
@@ -267,12 +267,13 @@ impl Program {
                     for operation in &block.operations {
                         let operation_identity =
                             operation_id(namespace, &function.name, &block.id, &operation.id);
+                        let operation_json =
+                            serde_json::to_string(operation).expect("body operation");
+                        let operation_fingerprint = fingerprint_json(&operation_json);
                         objects.push(IdentityRecord {
                             identity: operation_identity.clone(),
                             kind: IdentityKind::Operation,
-                            fingerprint: fingerprint_json(
-                                &serde_json::to_string(operation).expect("body operation"),
-                            ),
+                            fingerprint: operation_fingerprint.clone(),
                         });
                         for result in &operation.results {
                             objects.push(IdentityRecord {
@@ -428,10 +429,7 @@ impl Program {
                             objects.push(IdentityRecord {
                                 identity,
                                 kind: IdentityKind::Obligation,
-                                fingerprint: fingerprint_json(
-                                    &serde_json::to_string(operation)
-                                        .expect("generated obligation"),
-                                ),
+                                fingerprint: operation_fingerprint.clone(),
                             });
                         }
                         if let crate::BodyOperationKind::RuntimeCheck { obligation, .. } =
@@ -501,9 +499,7 @@ impl Program {
                                     &operation.id,
                                 ),
                                 kind: IdentityKind::RuntimeCheck,
-                                fingerprint: fingerprint_json(
-                                    &serde_json::to_string(operation).expect("runtime check"),
-                                ),
+                                fingerprint: operation_fingerprint,
                             });
                         }
                     }
