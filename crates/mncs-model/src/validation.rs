@@ -39,9 +39,19 @@ pub struct Diagnostic {
     pub message: String,
 }
 
+/// Canonical semantic artifacts produced together with frontend validation.
+/// The graph is present only when the current Program passed validation.
+pub struct FrontendSemanticValidation {
+    pub report: ValidationReport,
+    pub verification: Option<VerificationFactValidation>,
+    pub canonical: crate::CanonicalForm,
+    pub identities: crate::SemanticIdentities,
+    pub graph: Option<crate::SemanticGraph>,
+}
+
 impl Program {
     pub fn validate(&self) -> ValidationReport {
-        self.validate_internal(None).report
+        self.validate_internal(None, None).report
     }
 
     /// Validate the current program while reusing only Language-issued,
@@ -51,12 +61,44 @@ impl Program {
         &self,
         request: &VerificationFactRequest,
     ) -> VerificationFactValidation {
-        self.validate_internal(Some(request))
+        let identities = self.semantic_identities();
+        self.validate_internal(Some(request), Some(&identities))
+    }
+
+    /// Validate one immutable frontend snapshot and return the canonical and
+    /// identity artifacts derived from that same snapshot. When validation
+    /// succeeds, the semantic graph is built from those identities without
+    /// running a second full validation pass.
+    pub fn validate_for_frontend(
+        &self,
+        request: Option<&VerificationFactRequest>,
+    ) -> FrontendSemanticValidation {
+        let canonical = self
+            .canonical_form()
+            .expect("an elaborated program has a canonical form");
+        let identities = self.semantic_identities_with_program_fingerprint(&canonical.fingerprint);
+        let verification =
+            request.map(|request| self.validate_internal(Some(request), Some(&identities)));
+        let report = match &verification {
+            Some(result) => result.report.clone(),
+            None => self.validate_internal(None, None).report,
+        };
+        let graph = report
+            .valid
+            .then(|| crate::graph::semantic_graph_with_identities(self, &identities));
+        FrontendSemanticValidation {
+            report,
+            verification,
+            canonical,
+            identities,
+            graph,
+        }
     }
 
     fn validate_internal(
         &self,
         request: Option<&VerificationFactRequest>,
+        fact_identities: Option<&crate::SemanticIdentities>,
     ) -> VerificationFactValidation {
         crate::record_counter("semantic_validation");
         let mut errors = Vec::new();
@@ -78,10 +120,9 @@ impl Program {
             BTreeMap::<_, Vec<&DeclarationVerificationFact>>::new();
         let mut prior_record_type_declarations_by_subject =
             BTreeMap::<_, Vec<&DeclarationVerificationFact>>::new();
-        let fact_identities = request.map(|_| self.semantic_identities());
         let fact_function_index = request.map(|_| self.verification_function_index());
         let fact_specialization_index = request.map(|_| self.verification_specialization_index());
-        let fact_dependency_index = fact_identities.as_ref().map(|identities| {
+        let fact_dependency_index = fact_identities.map(|identities| {
             self.verification_fact_dependency_index(
                 identities,
                 fact_function_index
@@ -426,9 +467,7 @@ impl Program {
                 if declaration_identity_valid {
                     let basis = self.declaration_fact_basis_with_dependency_index(
                         function,
-                        fact_identities
-                            .as_ref()
-                            .expect("request has semantic identities"),
+                        fact_identities.expect("request has semantic identities"),
                         fact_dependency_index
                             .as_ref()
                             .expect("request has semantic dependency index"),
@@ -552,9 +591,7 @@ impl Program {
                 };
                 let Some(basis) = self.body_fact_basis_with_dependency_index(
                     function,
-                    fact_identities
-                        .as_ref()
-                        .expect("request has semantic identities"),
+                    fact_identities.expect("request has semantic identities"),
                     fact_dependency_index
                         .as_ref()
                         .expect("request has semantic dependency index"),
@@ -903,6 +940,32 @@ pub(crate) mod tests {
                 body: None,
             }],
         }
+    }
+
+    #[test]
+    fn frontend_validation_reuses_one_canonical_identity_and_graph_snapshot() {
+        let program = valid_program();
+        let request = VerificationFactRequest {
+            language_profile: "0.18".to_owned(),
+            subject_language_profiles: BTreeMap::new(),
+            prior_facts: Vec::new(),
+            prior_declaration_facts: Vec::new(),
+            prior_record_type_declaration_facts: Vec::new(),
+            source_location_identities: BTreeMap::new(),
+        };
+
+        let frontend = program.validate_for_frontend(Some(&request));
+        assert!(frontend.report.valid, "{:#?}", frontend.report.errors);
+        assert!(frontend.verification.is_some());
+        assert_eq!(frontend.canonical, program.canonical_form().unwrap());
+        assert_eq!(frontend.identities, program.semantic_identities());
+        assert_eq!(frontend.graph, Some(program.semantic_graph().unwrap()));
+
+        let mut invalid = program.clone();
+        invalid.functions[0].capabilities.clear();
+        let rejected = invalid.validate_for_frontend(None);
+        assert!(!rejected.report.valid);
+        assert!(rejected.graph.is_none());
     }
 
     #[test]

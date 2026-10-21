@@ -238,7 +238,9 @@ pub use translation::{
     TranslationCounterexample, TranslationJudgement, TranslationValidationResult,
     TRANSLATION_VALIDATION_CONTRACT_ID, TRANSLATION_VALIDATION_SCHEMA_VERSION,
 };
-pub use validation::{Diagnostic, ValidationReport, ValidationSummary};
+pub use validation::{
+    Diagnostic, FrontendSemanticValidation, ValidationReport, ValidationSummary,
+};
 pub use value_contract::{
     first_aggregate_mismatch, order_fields_by_name, FieldOrderError, FieldOrderProblem,
 };
