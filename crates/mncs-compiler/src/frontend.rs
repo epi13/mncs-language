@@ -1080,9 +1080,9 @@ impl ModuleResolver for RecordingResolver<'_> {
 }
 
 #[derive(Debug, Clone)]
-struct ImportedModule<'program> {
+struct ImportedModule {
     requested_name: String,
-    program: &'program Program,
+    program: Program,
     declarations: DeclarationSpans,
 }
 
@@ -1301,7 +1301,7 @@ fn link_module_with_closure_and_source_map(
         match elaborated.get(&name) {
             Some(program) => imported.push(ImportedModule {
                 requested_name: name.clone(),
-                program,
+                program: program.clone(),
                 declarations: declaration_spans.get(&name).cloned().unwrap_or_default(),
             }),
             None => diagnostics.push(elaboration_diagnostic(
@@ -1338,7 +1338,7 @@ fn link_module_with_closure_and_source_map(
 /// other name conflict is an error.
 fn merge_imported_declarations(
     ast: &AbstractSyntaxTree,
-    imported: &[ImportedModule<'_>],
+    imported: &[ImportedModule],
     diagnostics: &mut Vec<SourceDiagnostic>,
 ) -> MergedContext {
     let mut context = MergedContext::default();
@@ -1676,7 +1676,7 @@ fn merge_imported_declarations(
     context
 }
 
-fn namespace_routes(ast: &AbstractSyntaxTree, module: &ImportedModule<'_>) -> Vec<String> {
+fn namespace_routes(ast: &AbstractSyntaxTree, module: &ImportedModule) -> Vec<String> {
     let mut routes = vec![module.program.module.clone()];
     for use_decl in ast
         .uses
@@ -1736,7 +1736,7 @@ fn decode_identity_component(encoded: &str) -> String {
 /// Builds the call-checking signature for a function declared in another
 /// module. Identities stay anchored to the declaring module: a function that
 /// itself arrived through linking keeps its original home namespace.
-fn signature_from_function(module: &ImportedModule<'_>, function: &Function) -> FunctionSignature {
+fn signature_from_function(module: &ImportedModule, function: &Function) -> FunctionSignature {
     let body_type = |name: &str| body_type_from_name(module, name, &function.generic_params);
     let mut inputs: Vec<BodyType> = function
         .inputs
@@ -1801,7 +1801,7 @@ fn signature_from_function(module: &ImportedModule<'_>, function: &Function) -> 
 /// dependency programs are valid by the time merging happens, so unknown
 /// names cannot occur here.
 fn body_type_from_name(
-    module: &ImportedModule<'_>,
+    module: &ImportedModule,
     name: &str,
     generic_params: &[mncs_model::GenericParam],
 ) -> BodyType {
@@ -1894,7 +1894,7 @@ fn body_type_from_name(
     BodyType::from_semantic_name(name)
 }
 
-fn canonicalize_function_types(function: &mut Function, module: &ImportedModule<'_>) {
+fn canonicalize_function_types(function: &mut Function, module: &ImportedModule) {
     for value in function
         .inputs
         .iter_mut()
