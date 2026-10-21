@@ -291,6 +291,31 @@ impl ReferenceCompiler {
         (result, ssa_fact_work)
     }
 
+    /// Compile while reusing both caller-provided SSA verification facts and
+    /// complete SSA function artifacts. The artifact cache is independently
+    /// guarded by Language against the current HIR input and its dependencies.
+    pub fn compile_with_ssa_facts_and_artifact_cache(
+        &self,
+        request: CompilationRequest,
+        program: &Program,
+        prior_facts: &[SsaFunctionVerificationFact],
+        cache: &mut SsaFunctionArtifactCache,
+    ) -> (CompilationResult, Option<SsaFunctionFactWork>) {
+        let mut ssa_fact_work = None;
+        let result = self.compile_inner(
+            request,
+            program,
+            &[],
+            &[],
+            &SsaFunctionFactRequest {
+                prior_facts: prior_facts.to_vec(),
+            },
+            &mut ssa_fact_work,
+            Some(cache),
+        );
+        (result, ssa_fact_work)
+    }
+
     /// Compile with admitted tranche-0.2 proofs carried through HIR, SSA,
     /// and lowering evidence (see [`proof_admission::lower_with_proofs`]).
     /// Each input names an artifact file's bytes plus an optional operation;
@@ -1508,8 +1533,12 @@ mod tests {
         let serialized = serde_json::to_vec(&cache).expect("SSA cache serializes");
         let mut cache: SsaFunctionArtifactCache =
             serde_json::from_slice(&serialized).expect("SSA cache restores in a fresh process");
-        let (warm, warm_work) =
-            compiler.compile_with_ssa_artifact_cache(request, &program, &mut cache);
+        let (warm, warm_work) = compiler.compile_with_ssa_facts_and_artifact_cache(
+            request,
+            &program,
+            &cold_work.facts,
+            &mut cache,
+        );
         assert_eq!(
             warm.status,
             CompilationStatus::CompletedWithUnresolvedObligations,
