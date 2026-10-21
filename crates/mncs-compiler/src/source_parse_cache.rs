@@ -1,23 +1,25 @@
-//! Bounded, Language-owned reuse of exact source parse results.
+//! Bounded, Language-owned reuse of source parse results.
 //!
 //! The cache is caller-owned so a build service can persist it between
-//! processes. Entries are reusable only for the same sealed source envelope,
-//! parser policy, source-profile registry, and syntax artifact schemas.
+//! processes. Entries are reusable for the same parser inputs, parser policy,
+//! source-profile registry, and syntax artifact schemas. Source-envelope
+//! identity is rebound on reuse because origin, relationships, provenance,
+//! and logical names do not affect parsing and source spans remain byte based.
 
 use mncs_syntax::{
-    source_profile_registry_snapshot, ParseOutput, SourceEnvelope, AST_SCHEMA_VERSION,
-    CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION,
+    source_profile_registry_snapshot, ParseOutput, SourceArtifactKind, SourceEnvelope,
+    AST_SCHEMA_VERSION, CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::{self, Write};
 
-pub const SOURCE_PARSE_CACHE_SCHEMA_VERSION: &str = "mncs.language-source-parse-cache/1";
+pub const SOURCE_PARSE_CACHE_SCHEMA_VERSION: &str = "mncs.language-source-parse-cache/2";
 /// Bump this identity whenever parser behavior changes without a syntax
 /// artifact schema change.
 pub const SOURCE_PARSE_POLICY_IDENTITY: &str = "mncs-language-source-parser/1";
 pub const SOURCE_PARSE_CACHE_OBSERVATION_SCHEMA_VERSION: &str =
-    "mncs.language-source-parse-cache-observation/1";
+    "mncs.language-source-parse-cache-observation/2";
 
 const MAX_CACHE_ENTRIES: usize = 256;
 const MAX_CACHE_BYTES: usize = 32 * 1024 * 1024;
@@ -125,7 +127,7 @@ impl SourceParseCache {
         observation.evicted_entry_count += self.trim_bounded();
 
         let profile_registry_identity = profile_registry_identity();
-        let key = cache_key(&envelope.identity, &profile_registry_identity);
+        let key = cache_key(envelope, &profile_registry_identity);
         if envelope.identity_is_valid() {
             let matching = self
                 .entries
@@ -139,7 +141,8 @@ impl SourceParseCache {
                 if entry_matches(entry, envelope, &key, &profile_registry_identity) {
                     let entry = self.entries.remove(index);
                     let entry_size = self.entry_sizes.remove(index);
-                    let output = entry.output.clone();
+                    let mut output = entry.output.clone();
+                    rebind_source_identity(&mut output, &envelope.identity);
                     self.entries.push(entry);
                     self.entry_sizes.push(entry_size);
                     observation
@@ -346,13 +349,16 @@ fn profile_registry_identity() -> String {
     sha256_hex(&bytes)
 }
 
-fn cache_key(source_identity: &str, profile_registry_identity: &str) -> String {
+fn cache_key(envelope: &SourceEnvelope, profile_registry_identity: &str) -> String {
     #[derive(Serialize)]
     struct Key<'a> {
         cache_schema_version: &'a str,
         parser_policy_identity: &'a str,
         profile_registry_identity: &'a str,
-        source_identity: &'a str,
+        source_envelope_schema_version: &'a str,
+        language_profile: &'a str,
+        artifact_kind: SourceArtifactKind,
+        source_text_sha256: String,
         lexical_schema_version: &'a str,
         cst_schema_version: &'a str,
         ast_schema_version: &'a str,
@@ -361,7 +367,10 @@ fn cache_key(source_identity: &str, profile_registry_identity: &str) -> String {
         cache_schema_version: SOURCE_PARSE_CACHE_SCHEMA_VERSION,
         parser_policy_identity: SOURCE_PARSE_POLICY_IDENTITY,
         profile_registry_identity,
-        source_identity,
+        source_envelope_schema_version: &envelope.schema_version,
+        language_profile: &envelope.language_version,
+        artifact_kind: envelope.artifact_kind,
+        source_text_sha256: sha256_hex(envelope.text.as_bytes()),
         lexical_schema_version: LEXICAL_SCHEMA_VERSION,
         cst_schema_version: CST_SCHEMA_VERSION,
         ast_schema_version: AST_SCHEMA_VERSION,
@@ -377,28 +386,44 @@ fn entry_matches(
     profile_registry_identity: &str,
 ) -> bool {
     if entry.key != key
-        || entry.source_identity != envelope.identity
         || entry.parser_policy_identity != SOURCE_PARSE_POLICY_IDENTITY
         || entry.profile_registry_identity != profile_registry_identity
         || entry.lexical_schema_version != LEXICAL_SCHEMA_VERSION
         || entry.cst_schema_version != CST_SCHEMA_VERSION
         || entry.ast_schema_version != AST_SCHEMA_VERSION
-        || !output_matches_envelope(&entry.output, envelope)
+        || !output_matches_entry(&entry.output, &entry.source_identity, envelope)
     {
         return false;
     }
     serialized_sha256(&entry.output).is_some_and(|digest| digest == entry.output_digest)
 }
 
-fn output_matches_envelope(output: &ParseOutput, envelope: &SourceEnvelope) -> bool {
+fn output_matches_entry(
+    output: &ParseOutput,
+    cached_source_identity: &str,
+    envelope: &SourceEnvelope,
+) -> bool {
     output.lexical.schema_version == LEXICAL_SCHEMA_VERSION
-        && output.lexical.source_identity == envelope.identity
+        && output.lexical.source_identity == cached_source_identity
         && output.cst.schema_version == CST_SCHEMA_VERSION
-        && output.cst.source_identity == envelope.identity
+        && output.cst.source_identity == cached_source_identity
         && output.cst.source_length == envelope.text.len()
         && output.ast.as_ref().is_none_or(|ast| {
-            ast.schema_version == AST_SCHEMA_VERSION && ast.source_identity == envelope.identity
+            ast.schema_version == AST_SCHEMA_VERSION
+                && ast.source_identity == cached_source_identity
         })
+}
+
+fn output_matches_envelope(output: &ParseOutput, envelope: &SourceEnvelope) -> bool {
+    output_matches_entry(output, &envelope.identity, envelope)
+}
+
+fn rebind_source_identity(output: &mut ParseOutput, source_identity: &str) {
+    output.lexical.source_identity = source_identity.to_owned();
+    output.cst.source_identity = source_identity.to_owned();
+    if let Some(ast) = output.ast.as_mut() {
+        ast.source_identity = source_identity.to_owned();
+    }
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -422,7 +447,10 @@ mod tests {
         SourceParseCache, SourceParseCacheEntry, SourceParseCacheEntryRef,
         SourceParseCacheObservation, MAX_CACHE_ENTRIES,
     };
-    use mncs_syntax::{SourceArtifactKind, SourceEnvelope};
+    use mncs_syntax::{
+        SourceArtifactKind, SourceEnvelope, SourceOrigin, SourceOriginKind, SourceProvenance,
+        SourceRelationship, SourceRelationshipKind,
+    };
 
     #[test]
     fn parse_cache_reuses_exact_snapshots_after_serialized_process_restart() {
@@ -451,6 +479,57 @@ mod tests {
             [envelope.identity]
         );
         assert!(second_observation.parsed_source_identities.is_empty());
+    }
+
+    #[test]
+    fn parse_cache_reuses_same_parser_input_across_source_envelope_identities() {
+        let text = "mncs 0.19; module cache.alias; fn value() -> (result: u64) { return 9; }";
+        let original = SourceEnvelope::inline(SourceArtifactKind::Program, "cache.alias.a", text);
+        let alias = SourceEnvelope::new(
+            SourceArtifactKind::Program,
+            "cache.alias.b",
+            SourceOrigin {
+                kind: SourceOriginKind::Generated,
+                locator: Some("generated://cache.alias.b".to_owned()),
+            },
+            text,
+        )
+        .with_relationships(vec![SourceRelationship {
+            kind: SourceRelationshipKind::DependsOn,
+            target_identity: "mncs:source:dependency:cache.alias".to_owned(),
+        }])
+        .with_provenance(SourceProvenance {
+            producer_identity: Some("mncs-language-test/1".to_owned()),
+            derived_from: vec!["mncs:source:original:cache.alias".to_owned()],
+        });
+        assert_ne!(original.identity, alias.identity);
+
+        let mut cache = SourceParseCache::default();
+        let mut original_observation = SourceParseCacheObservation::default();
+        let original_output = cache.parse(&original, &mut original_observation);
+        let mut alias_observation = SourceParseCacheObservation::default();
+        let alias_output = cache.parse(&alias, &mut alias_observation);
+
+        assert_eq!(
+            alias_observation.reused_source_identities,
+            [alias.identity.clone()]
+        );
+        assert!(alias_observation.parsed_source_identities.is_empty());
+        assert_eq!(alias_output.lexical.source_identity, alias.identity);
+        assert_eq!(alias_output.cst.source_identity, alias.identity);
+        assert_eq!(
+            alias_output
+                .ast
+                .as_ref()
+                .map(|ast| ast.source_identity.as_str()),
+            Some(alias.identity.as_str())
+        );
+        assert_eq!(alias_output.lexical.tokens, original_output.lexical.tokens);
+        assert_eq!(alias_output.cst.root, original_output.cst.root);
+        assert_eq!(
+            alias_output.ast.as_ref().map(|ast| &ast.functions),
+            original_output.ast.as_ref().map(|ast| &ast.functions)
+        );
     }
 
     #[test]

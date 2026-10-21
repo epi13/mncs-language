@@ -1,17 +1,21 @@
 # Language source parse cache
 
-`mncs.language-source-parse-cache/1` lets an embedding build service retain
+`mncs.language-source-parse-cache/2` lets an embedding build service retain
 complete parse outputs between Language frontend calls. The cache belongs to
 the caller and can be serialized across process restarts; Language remains
 responsible for deciding whether a saved parse can be reused.
 
-An entry matches only when the sealed source envelope identity, parser policy
-identity, lexical/CST/AST schema versions, and source-profile registry
-fingerprint all match. The source envelope identity covers the exact source
-text and its source metadata, so cached spans and diagnostics remain attached
-to the same snapshot. A changed source is parsed again. Invalid source may be
-cached only after a complete parse and returns its saved diagnostics only for
-that exact snapshot. A changed parser policy or damaged output digest causes a
+An entry matches only when the parser inputs match: source text, declared
+language profile, source-envelope schema, artifact kind, parser policy,
+lexical/CST/AST schema versions, and source-profile registry fingerprint.
+Envelope identity also includes provenance, relationships, origin, and logical
+name, none of which affect parsing. When those fields change while parser
+inputs remain the same, Language reuses the parse and rewrites the source
+identity on the returned lexical, CST, and AST artifacts. Byte-based spans
+remain exact because the source text is unchanged. A changed source or parser
+input is parsed again. Invalid syntax can be reused only for identical parser
+inputs and returns the same diagnostic codes and spans under the current
+source identity. A changed parser policy or damaged output digest causes a
 fresh parse.
 
 The caller-owned cache is bounded to 256 entries and 32 MiB. Least-recently
