@@ -31,6 +31,18 @@ pub const SSA_FUNCTION_VERIFICATION_FACT_VERIFIER_ID: &str =
     "mncs-language-ssa-function-validator/1";
 pub const SSA_FUNCTION_VERIFICATION_FACT_POLICY_ID: &str = "mncs-language-ssa-function-policy/1";
 pub const SSA_FUNCTION_VERIFICATION_LANGUAGE_PROFILE: &str = "mncs-language-ssa-profile/0.5";
+pub const SSA_FUNCTION_ARTIFACT_CACHE_SCHEMA_VERSION: &str =
+    "mncs.language-ssa-function-artifact-cache/1";
+pub const SSA_FUNCTION_ARTIFACT_CACHE_OBSERVATION_SCHEMA_VERSION: &str =
+    "mncs.language-ssa-function-artifact-cache-observation/1";
+/// Bump when the transformation from a verified HIR function to its SSA
+/// function changes without changing the SSA artifact schema.
+pub const SSA_FUNCTION_LOWERER_IDENTITY: &str = "mncs-language-ssa-function-lowerer/1";
+pub const SSA_FUNCTION_LOWERING_POLICY_IDENTITY: &str =
+    "mncs-language-ssa-function-lowering-policy/1";
+
+const MAX_SSA_FUNCTION_ARTIFACT_CACHE_ENTRIES: usize = 256;
+const MAX_SSA_FUNCTION_ARTIFACT_CACHE_BYTES: usize = 32 * 1024 * 1024;
 
 fn trace_timing(stage: &str, started: Instant) {
     crate::record_stage(stage, started.elapsed());
@@ -494,11 +506,95 @@ pub struct SsaFunctionFactValidation {
     pub reuse: SsaFunctionFactReuseObservation,
 }
 
+/// A bounded caller-owned cache of complete, previously verified SSA
+/// functions. Entries remain advisory: the current HIR lowering inputs,
+/// lowerer policy, function dependencies, artifact digest, and Language
+/// verification witness must all match before a function is reused.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsaFunctionArtifactCache {
+    #[serde(default = "ssa_function_artifact_cache_schema")]
+    schema_version: String,
+    #[serde(default)]
+    entries: Vec<SsaFunctionArtifactCacheEntry>,
+}
+
+impl Default for SsaFunctionArtifactCache {
+    fn default() -> Self {
+        Self {
+            schema_version: ssa_function_artifact_cache_schema(),
+            entries: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct SsaFunctionArtifactCacheEntry {
+    schema_version: String,
+    lowerer_identity: String,
+    lowering_policy_identity: String,
+    input_fingerprint: String,
+    artifact_fingerprint: String,
+    function: SsaFunction,
+    trace_entries: Vec<SsaTraceEntry>,
+    transformations: Vec<TransformationRecord>,
+    verification_fact: SsaFunctionVerificationFact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SsaFunctionArtifactReuseMiss {
+    Missing,
+    DuplicateCacheEntries,
+    UnsupportedSchema,
+    LowererChanged,
+    LoweringPolicyChanged,
+    InputChanged,
+    ArtifactIntegrityFailed,
+    VerificationEvidenceChanged,
+    DependenciesChanged,
+    VerifierChanged,
+    PolicyChanged,
+    LanguageProfileChanged,
+    SsaSchemaChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsaFunctionArtifactRecomputation {
+    pub subject: SemanticId,
+    pub reason: SsaFunctionArtifactReuseMiss,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsaFunctionArtifactReuseObservation {
+    pub schema_version: String,
+    /// Complete SSA function bodies actually taken from the validated cache.
+    pub reused: Vec<SemanticId>,
+    /// Complete SSA functions lowered during this call and the reason.
+    pub recomputed: Vec<SsaFunctionArtifactRecomputation>,
+    pub rejected_entry_count: usize,
+    pub evicted_entry_count: usize,
+    pub published_entry_count: usize,
+}
+
+impl Default for SsaFunctionArtifactReuseObservation {
+    fn default() -> Self {
+        Self {
+            schema_version: SSA_FUNCTION_ARTIFACT_CACHE_OBSERVATION_SCHEMA_VERSION.to_owned(),
+            reused: Vec::new(),
+            recomputed: Vec::new(),
+            rejected_entry_count: 0,
+            evicted_entry_count: 0,
+            published_entry_count: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SsaLoweringFactResult {
     pub module: SsaModule,
     pub facts: Vec<SsaFunctionVerificationFact>,
     pub reuse: SsaFunctionFactReuseObservation,
+    pub artifact_reuse: SsaFunctionArtifactReuseObservation,
 }
 
 #[derive(Debug, Error)]
@@ -515,6 +611,217 @@ pub enum SsaError {
     Invalid(SsaValidationReport),
     #[error("proof relationship refused by current SSA state: {0}")]
     ProofTransport(String),
+}
+
+impl SsaFunctionArtifactCache {
+    fn prepare(&mut self, observation: &mut SsaFunctionArtifactReuseObservation) {
+        if self.schema_version != SSA_FUNCTION_ARTIFACT_CACHE_SCHEMA_VERSION {
+            observation.rejected_entry_count += self.entries.len();
+            self.entries.clear();
+            self.schema_version = SSA_FUNCTION_ARTIFACT_CACHE_SCHEMA_VERSION.to_owned();
+        }
+        observation.evicted_entry_count += self.trim_bounded();
+    }
+
+    fn lookup(
+        &self,
+        subject: &SemanticId,
+        input_fingerprint: &str,
+        semantic_function_ids: &BTreeSet<SemanticId>,
+        obligation_ids: &BTreeSet<SemanticId>,
+    ) -> Result<SsaFunctionArtifactCacheEntry, SsaFunctionArtifactReuseMiss> {
+        let mut matching = self
+            .entries
+            .iter()
+            .filter(|entry| entry.verification_fact.subject == *subject);
+        let Some(entry) = matching.next() else {
+            return Err(SsaFunctionArtifactReuseMiss::Missing);
+        };
+        if matching.next().is_some() {
+            return Err(SsaFunctionArtifactReuseMiss::DuplicateCacheEntries);
+        }
+        if entry.schema_version != SSA_FUNCTION_ARTIFACT_CACHE_SCHEMA_VERSION {
+            return Err(SsaFunctionArtifactReuseMiss::UnsupportedSchema);
+        }
+        if entry.lowerer_identity != SSA_FUNCTION_LOWERER_IDENTITY {
+            return Err(SsaFunctionArtifactReuseMiss::LowererChanged);
+        }
+        if entry.lowering_policy_identity != SSA_FUNCTION_LOWERING_POLICY_IDENTITY {
+            return Err(SsaFunctionArtifactReuseMiss::LoweringPolicyChanged);
+        }
+        if entry.input_fingerprint != input_fingerprint {
+            return Err(SsaFunctionArtifactReuseMiss::InputChanged);
+        }
+        if entry.function.semantic_identity != *subject
+            || entry.function.identity != ssa_identity("function", subject, 0)
+            || ssa_function_artifact_cache_fingerprint(
+                &entry.input_fingerprint,
+                &entry.function,
+                &entry.trace_entries,
+                &entry.transformations,
+                &entry.verification_fact,
+            )
+            .as_deref()
+                != Some(entry.artifact_fingerprint.as_str())
+        {
+            return Err(SsaFunctionArtifactReuseMiss::ArtifactIntegrityFailed);
+        }
+        let (subject_fingerprint, dependencies) =
+            ssa_function_fact_basis(&entry.function, semantic_function_ids, obligation_ids);
+        let Some(reason) = ssa_function_fact_reuse_miss(
+            &entry.verification_fact,
+            subject_fingerprint.as_deref(),
+            &dependencies,
+        ) else {
+            return Ok(entry.clone());
+        };
+        Err(match reason {
+            SsaFunctionFactReuseMiss::DependenciesChanged => {
+                SsaFunctionArtifactReuseMiss::DependenciesChanged
+            }
+            SsaFunctionFactReuseMiss::VerifierChanged => {
+                SsaFunctionArtifactReuseMiss::VerifierChanged
+            }
+            SsaFunctionFactReuseMiss::PolicyChanged => SsaFunctionArtifactReuseMiss::PolicyChanged,
+            SsaFunctionFactReuseMiss::LanguageProfileChanged => {
+                SsaFunctionArtifactReuseMiss::LanguageProfileChanged
+            }
+            SsaFunctionFactReuseMiss::SsaSchemaChanged => {
+                SsaFunctionArtifactReuseMiss::SsaSchemaChanged
+            }
+            _ => SsaFunctionArtifactReuseMiss::VerificationEvidenceChanged,
+        })
+    }
+
+    fn validation_facts(&self) -> Vec<SsaFunctionVerificationFact> {
+        self.entries
+            .iter()
+            .filter(|entry| {
+                entry.schema_version == SSA_FUNCTION_ARTIFACT_CACHE_SCHEMA_VERSION
+                    && entry.lowerer_identity == SSA_FUNCTION_LOWERER_IDENTITY
+                    && entry.lowering_policy_identity == SSA_FUNCTION_LOWERING_POLICY_IDENTITY
+                    && entry.function.semantic_identity == entry.verification_fact.subject
+                    && entry.function.identity
+                        == ssa_identity("function", &entry.verification_fact.subject, 0)
+                    && ssa_function_artifact_cache_fingerprint(
+                        &entry.input_fingerprint,
+                        &entry.function,
+                        &entry.trace_entries,
+                        &entry.transformations,
+                        &entry.verification_fact,
+                    )
+                    .as_deref()
+                        == Some(entry.artifact_fingerprint.as_str())
+                    && ssa_function_fact_witness_identity(&entry.verification_fact).as_deref()
+                        == Some(
+                            entry
+                                .verification_fact
+                                .verification_witness_identity
+                                .as_str(),
+                        )
+            })
+            .map(|entry| entry.verification_fact.clone())
+            .collect()
+    }
+
+    fn publish_program_artifacts(
+        &mut self,
+        program: &Program,
+        ir: &HighLevelIr,
+        module: &SsaModule,
+        facts: &[SsaFunctionVerificationFact],
+        observation: &mut SsaFunctionArtifactReuseObservation,
+    ) -> usize {
+        let facts = facts
+            .iter()
+            .map(|fact| (fact.subject.clone(), fact))
+            .collect::<BTreeMap<_, _>>();
+        let mut next = self.clone();
+        let mut published = 0;
+        for function in &program.functions {
+            if !function.generic_params.is_empty() {
+                continue;
+            }
+            let Some(body) = &function.body else {
+                continue;
+            };
+            let subject = function_id(function.identity_namespace(&program.module), &function.name);
+            let Some(hir_function) = ir
+                .functions
+                .iter()
+                .find(|candidate| candidate.semantic_identity == subject)
+            else {
+                continue;
+            };
+            let Some(ssa_function) = module
+                .functions
+                .iter()
+                .find(|candidate| candidate.semantic_identity == subject)
+            else {
+                continue;
+            };
+            let Some(fact) = facts.get(&subject) else {
+                continue;
+            };
+            let Some(input_fingerprint) =
+                ssa_function_lowering_input_fingerprint(program, function, body, hir_function, ir)
+            else {
+                continue;
+            };
+            let (trace_entries, transformations) =
+                function_artifact_provenance(program, function, body, module);
+            let Some(entry) = make_ssa_function_artifact_cache_entry(
+                input_fingerprint,
+                ssa_function.clone(),
+                trace_entries,
+                transformations,
+                (*fact).clone(),
+            ) else {
+                observation.rejected_entry_count += 1;
+                continue;
+            };
+            next.entries
+                .retain(|previous| previous.verification_fact.subject != subject);
+            next.entries.push(entry);
+            published += 1;
+        }
+        next.schema_version = SSA_FUNCTION_ARTIFACT_CACHE_SCHEMA_VERSION.to_owned();
+        *self = next;
+        published
+    }
+
+    fn trim_bounded(&mut self) -> usize {
+        let mut removed = 0;
+        while self.entries.len() > MAX_SSA_FUNCTION_ARTIFACT_CACHE_ENTRIES {
+            self.entries.remove(0);
+            removed += 1;
+        }
+        let mut sizes = self
+            .entries
+            .iter()
+            .map(|entry| {
+                serde_json::to_vec(entry)
+                    .map(|bytes| bytes.len())
+                    .unwrap_or(usize::MAX)
+            })
+            .collect::<Vec<_>>();
+        let mut total = sizes
+            .iter()
+            .fold(0u64, |total, size| total.saturating_add(*size as u64));
+        while total > MAX_SSA_FUNCTION_ARTIFACT_CACHE_BYTES as u64 {
+            if self.entries.is_empty() {
+                break;
+            }
+            total -= sizes.remove(0) as u64;
+            self.entries.remove(0);
+            removed += 1;
+        }
+        removed
+    }
+}
+
+fn ssa_function_artifact_cache_schema() -> String {
+    SSA_FUNCTION_ARTIFACT_CACHE_SCHEMA_VERSION.to_owned()
 }
 
 impl SsaModule {
@@ -1179,7 +1486,7 @@ impl Program {
         trace_timing("ssa-validate", started);
         let ir = self.lower_to_ir()?;
         trace_timing("ssa-ir", started);
-        self.lower_to_ssa_from_ir_inner(&ir, started, &SsaFunctionFactRequest::default())
+        self.lower_to_ssa_from_ir_inner(&ir, started, &SsaFunctionFactRequest::default(), None)
             .map(|result| result.module)
     }
 
@@ -1198,6 +1505,38 @@ impl Program {
         &self,
         ir: &HighLevelIr,
         request: &SsaFunctionFactRequest,
+    ) -> Result<SsaLoweringFactResult, SsaError> {
+        self.lower_to_ssa_from_ir_with_reuse(ir, request, None)
+    }
+
+    /// Lower SSA while reusing complete Language-verified function artifacts
+    /// from a caller-owned cache. The current program, HIR, module invariants,
+    /// dependency availability, and lowering boundary are still checked.
+    pub fn lower_to_ssa_from_ir_with_artifact_cache(
+        &self,
+        ir: &HighLevelIr,
+        cache: &mut SsaFunctionArtifactCache,
+    ) -> Result<SsaLoweringFactResult, SsaError> {
+        self.lower_to_ssa_from_ir_with_reuse(ir, &SsaFunctionFactRequest::default(), Some(cache))
+    }
+
+    /// Lower SSA using both caller-supplied validation facts and complete
+    /// cached function artifacts. Freshly lowered units are still checked
+    /// against any supplied facts before the cache is extended.
+    pub fn lower_to_ssa_from_ir_with_verified_facts_and_artifact_cache(
+        &self,
+        ir: &HighLevelIr,
+        request: &SsaFunctionFactRequest,
+        cache: &mut SsaFunctionArtifactCache,
+    ) -> Result<SsaLoweringFactResult, SsaError> {
+        self.lower_to_ssa_from_ir_with_reuse(ir, request, Some(cache))
+    }
+
+    fn lower_to_ssa_from_ir_with_reuse(
+        &self,
+        ir: &HighLevelIr,
+        request: &SsaFunctionFactRequest,
+        cache: Option<&mut SsaFunctionArtifactCache>,
     ) -> Result<SsaLoweringFactResult, SsaError> {
         crate::record_counter("ssa_build");
         let started = Instant::now();
@@ -1223,7 +1562,7 @@ impl Program {
         }
         trace_timing("ssa-validate", started);
         trace_timing("ssa-ir-reused", started);
-        self.lower_to_ssa_from_ir_inner(ir, started, request)
+        self.lower_to_ssa_from_ir_inner(ir, started, request, cache)
     }
 
     /// Lower SSA from already-lowered HIR and attach admitted tranche-0.2
@@ -1249,6 +1588,7 @@ impl Program {
         ir: &HighLevelIr,
         started: Instant,
         request: &SsaFunctionFactRequest,
+        mut artifact_cache: Option<&mut SsaFunctionArtifactCache>,
     ) -> Result<SsaLoweringFactResult, SsaError> {
         let semantic_identity = crate::identity::program_id(&self.module);
         let mut functions = Vec::new();
@@ -1256,6 +1596,20 @@ impl Program {
         let mut transformations = Vec::new();
         let mut semantic_functions = self.functions.iter().collect::<Vec<_>>();
         semantic_functions.sort_by(|left, right| left.name.cmp(&right.name));
+        let current_function_ids = semantic_functions
+            .iter()
+            .filter(|function| function.generic_params.is_empty())
+            .map(|function| function_id(function.identity_namespace(&self.module), &function.name))
+            .collect::<BTreeSet<_>>();
+        let obligation_ids = ir
+            .obligations
+            .iter()
+            .map(|obligation| obligation.identity.clone())
+            .collect::<BTreeSet<_>>();
+        let mut artifact_reuse = SsaFunctionArtifactReuseObservation::default();
+        if let Some(cache) = artifact_cache.as_deref_mut() {
+            cache.prepare(&mut artifact_reuse);
+        }
         for function in semantic_functions {
             if !function.generic_params.is_empty() {
                 // Generic templates are not directly lowered; their specializations are concrete functions.
@@ -1276,21 +1630,49 @@ impl Program {
                     "reusable HIR is missing executable function {semantic_function}"
                 )));
             };
-            let (lowered, entries, records) = lower_body(self, function, body, hir_function, ir);
-            functions.push(lowered);
-            transformations.extend(records);
-            for entry in entries {
-                trace_entries
-                    .entry(entry.semantic_identity.clone())
-                    .and_modify(|existing| {
-                        existing.hir_identities.extend(entry.hir_identities.clone());
-                        existing.ssa_identities.extend(entry.ssa_identities.clone());
-                        existing.hir_identities.sort();
-                        existing.hir_identities.dedup();
-                        existing.ssa_identities.sort();
-                        existing.ssa_identities.dedup();
-                    })
-                    .or_insert(entry);
+            let input_fingerprint = if artifact_cache.is_some() {
+                Some(
+                    ssa_function_lowering_input_fingerprint(self, function, body, hir_function, ir)
+                        .ok_or_else(|| {
+                            SsaError::IrIntegrity(
+                                "function lowering inputs could not be fingerprinted".to_owned(),
+                            )
+                        })?,
+                )
+            } else {
+                None
+            };
+            let cache_match = match (artifact_cache.as_deref(), input_fingerprint.as_deref()) {
+                (Some(cache), Some(input_fingerprint)) => cache.lookup(
+                    &semantic_function,
+                    input_fingerprint,
+                    &current_function_ids,
+                    &obligation_ids,
+                ),
+                _ => Err(SsaFunctionArtifactReuseMiss::Missing),
+            };
+            match cache_match {
+                Ok(entry) => {
+                    functions.push(entry.function.clone());
+                    transformations.extend(entry.transformations.clone());
+                    merge_trace_entries(&mut trace_entries, entry.trace_entries.clone());
+                    artifact_reuse.reused.push(semantic_function.clone());
+                }
+                Err(reason) => {
+                    let (lowered, entries, records) =
+                        lower_body(self, function, body, hir_function, ir);
+                    functions.push(lowered);
+                    transformations.extend(records);
+                    merge_trace_entries(&mut trace_entries, entries);
+                    if artifact_cache.is_some() {
+                        artifact_reuse
+                            .recomputed
+                            .push(SsaFunctionArtifactRecomputation {
+                                subject: semantic_function,
+                                reason,
+                            });
+                    }
+                }
             }
         }
         trace_timing("ssa-functions", started);
@@ -1333,13 +1715,39 @@ impl Program {
             generic_specializations: ir.generic_specializations.clone(),
             proof_relationships: Vec::new(),
         };
-        let validation = module.validate_with_verified_facts(request);
+        let mut validation_request = request.clone();
+        if let Some(cache) = artifact_cache.as_deref() {
+            let prior_subjects = validation_request
+                .prior_facts
+                .iter()
+                .map(|fact| fact.subject.clone())
+                .collect::<BTreeSet<_>>();
+            validation_request.prior_facts.extend(
+                cache
+                    .validation_facts()
+                    .into_iter()
+                    .filter(|fact| !prior_subjects.contains(&fact.subject)),
+            );
+        }
+        let validation = module.validate_with_verified_facts(&validation_request);
         trace_timing("ssa-total", started);
         if validation.report.valid {
+            if let Some(cache) = artifact_cache.as_deref_mut() {
+                let published = cache.publish_program_artifacts(
+                    self,
+                    ir,
+                    &module,
+                    &validation.facts,
+                    &mut artifact_reuse,
+                );
+                artifact_reuse.published_entry_count += published;
+                artifact_reuse.evicted_entry_count += cache.trim_bounded();
+            }
             Ok(SsaLoweringFactResult {
                 module,
                 facts: validation.facts,
                 reuse: validation.reuse,
+                artifact_reuse,
             })
         } else {
             Err(SsaError::Invalid(validation.report))
@@ -1383,6 +1791,145 @@ fn declaration_function(
             failure_target: None,
         }],
         failure: function.failure.clone(),
+    }
+}
+
+fn ssa_function_lowering_input_fingerprint(
+    program: &Program,
+    function: &Function,
+    body: &crate::FunctionBody,
+    hir_function: &crate::IrFunction,
+    ir: &HighLevelIr,
+) -> Option<String> {
+    let home = function.identity_namespace(&program.module);
+    let block_trace_inputs = body
+        .blocks
+        .iter()
+        .map(|block| {
+            let identity = body.block_identity(home, &function.name, &block.id);
+            (
+                identity.clone(),
+                ir.trace_for(&identity)
+                    .map(|entry| entry.ir_identities.clone())
+                    .unwrap_or_default(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let material = (
+        SSA_FUNCTION_ARTIFACT_CACHE_SCHEMA_VERSION,
+        SSA_FUNCTION_LOWERER_IDENTITY,
+        SSA_FUNCTION_LOWERING_POLICY_IDENTITY,
+        SSA_SCHEMA_VERSION,
+        ir.schema_version.as_str(),
+        program.module.as_str(),
+        function,
+        body,
+        hir_function,
+        block_trace_inputs,
+    );
+    serde_json::to_vec(&material)
+        .ok()
+        .map(|bytes| format!("sha256:{}", sha256_hex(&bytes)))
+}
+
+fn function_artifact_provenance(
+    program: &Program,
+    function: &Function,
+    body: &crate::FunctionBody,
+    module: &SsaModule,
+) -> (Vec<SsaTraceEntry>, Vec<TransformationRecord>) {
+    let home = function.identity_namespace(&program.module);
+    let mut trace_identities = BTreeSet::new();
+    let mut operation_identities = BTreeSet::new();
+    for block in &body.blocks {
+        trace_identities.insert(body.block_identity(home, &function.name, &block.id));
+        for operation in &block.operations {
+            let identity = operation.identity(home, &function.name, &block.id);
+            trace_identities.insert(identity.clone());
+            operation_identities.insert(identity);
+        }
+    }
+    let trace_entries = module
+        .trace
+        .entries
+        .iter()
+        .filter(|entry| trace_identities.contains(&entry.semantic_identity))
+        .cloned()
+        .collect();
+    let transformations = module
+        .transformations
+        .iter()
+        .filter(|record| operation_identities.contains(&record.operation))
+        .cloned()
+        .collect();
+    (trace_entries, transformations)
+}
+
+fn make_ssa_function_artifact_cache_entry(
+    input_fingerprint: String,
+    function: SsaFunction,
+    trace_entries: Vec<SsaTraceEntry>,
+    transformations: Vec<TransformationRecord>,
+    verification_fact: SsaFunctionVerificationFact,
+) -> Option<SsaFunctionArtifactCacheEntry> {
+    let artifact_fingerprint = ssa_function_artifact_cache_fingerprint(
+        &input_fingerprint,
+        &function,
+        &trace_entries,
+        &transformations,
+        &verification_fact,
+    )?;
+    Some(SsaFunctionArtifactCacheEntry {
+        schema_version: SSA_FUNCTION_ARTIFACT_CACHE_SCHEMA_VERSION.to_owned(),
+        lowerer_identity: SSA_FUNCTION_LOWERER_IDENTITY.to_owned(),
+        lowering_policy_identity: SSA_FUNCTION_LOWERING_POLICY_IDENTITY.to_owned(),
+        input_fingerprint,
+        artifact_fingerprint,
+        function,
+        trace_entries,
+        transformations,
+        verification_fact,
+    })
+}
+
+fn ssa_function_artifact_cache_fingerprint(
+    input_fingerprint: &str,
+    function: &SsaFunction,
+    trace_entries: &[SsaTraceEntry],
+    transformations: &[TransformationRecord],
+    verification_fact: &SsaFunctionVerificationFact,
+) -> Option<String> {
+    let material = (
+        SSA_FUNCTION_ARTIFACT_CACHE_SCHEMA_VERSION,
+        SSA_FUNCTION_LOWERER_IDENTITY,
+        SSA_FUNCTION_LOWERING_POLICY_IDENTITY,
+        input_fingerprint,
+        function,
+        trace_entries,
+        transformations,
+        verification_fact,
+    );
+    serde_json::to_vec(&material)
+        .ok()
+        .map(|bytes| format!("sha256:{}", sha256_hex(&bytes)))
+}
+
+fn merge_trace_entries(
+    target: &mut BTreeMap<SemanticId, SsaTraceEntry>,
+    entries: impl IntoIterator<Item = SsaTraceEntry>,
+) {
+    for entry in entries {
+        target
+            .entry(entry.semantic_identity.clone())
+            .and_modify(|existing| {
+                existing.hir_identities.extend(entry.hir_identities.clone());
+                existing.ssa_identities.extend(entry.ssa_identities.clone());
+                existing.hir_identities.sort();
+                existing.hir_identities.dedup();
+                existing.ssa_identities.sort();
+                existing.ssa_identities.dedup();
+            })
+            .or_insert(entry);
     }
 }
 
@@ -2877,8 +3424,8 @@ fn diagnostic(code: &str, path: &str, message: &str) -> SsaDiagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::MicroVerifier;
     use crate::body::tests::executable_program;
+    use crate::MicroVerifier;
 
     #[test]
     fn executable_body_lowers_to_deterministic_valid_ssa_with_trace() {
@@ -2888,13 +3435,11 @@ mod tests {
         assert_eq!(first, second);
         assert!(first.validate().valid, "{:#?}", first.validate().errors);
         assert_eq!(first.schema_version, SSA_SCHEMA_VERSION);
-        assert!(
-            first
-                .trace
-                .entries
-                .iter()
-                .any(|entry| entry.ssa_identities.len() == 1)
-        );
+        assert!(first
+            .trace
+            .entries
+            .iter()
+            .any(|entry| entry.ssa_identities.len() == 1));
         assert_eq!(first.fingerprint().unwrap(), second.fingerprint().unwrap());
     }
 
@@ -2950,12 +3495,10 @@ mod tests {
         };
         let allowed = ssa.attempt_no_overflow_elision(&operation, &obligation, &[evidence.clone()]);
         assert!(allowed.permitted);
-        assert!(
-            allowed
-                .record
-                .backend_promises_permitted
-                .contains(&"no-overflow".to_owned())
-        );
+        assert!(allowed
+            .record
+            .backend_promises_permitted
+            .contains(&"no-overflow".to_owned()));
         evidence.freshness = EvidenceFreshness::Stale;
         let stale = ssa.attempt_no_overflow_elision(&operation, &obligation, &[evidence]);
         assert!(!stale.permitted);
@@ -3013,13 +3556,11 @@ mod tests {
             body_edit.reuse.recomputed[0].reason,
             SsaFunctionFactReuseMiss::SubjectChanged
         );
-        assert!(
-            body_edit
-                .report
-                .errors
-                .iter()
-                .any(|error| error.code == "SSA006")
-        );
+        assert!(body_edit
+            .report
+            .errors
+            .iter()
+            .any(|error| error.code == "SSA006"));
         assert!(body_edit.facts.is_empty());
 
         let referenced_obligation = cold.module.functions[0]
@@ -3044,13 +3585,11 @@ mod tests {
             dependency_edit.reuse.recomputed[0].reason,
             SsaFunctionFactReuseMiss::DependenciesChanged
         );
-        assert!(
-            dependency_edit
-                .report
-                .errors
-                .iter()
-                .any(|error| error.code == "SSA011")
-        );
+        assert!(dependency_edit
+            .report
+            .errors
+            .iter()
+            .any(|error| error.code == "SSA011"));
         assert!(dependency_edit.facts.is_empty());
 
         let mut forged_witness = cold.facts[0].clone();
@@ -3075,14 +3614,104 @@ mod tests {
                 prior_facts: cold.facts.clone(),
             });
         assert!(duplicate_check.reuse.reused.is_empty());
-        assert!(
-            duplicate_check
-                .reuse
-                .recomputed
-                .iter()
-                .all(|row| { row.reason == SsaFunctionFactReuseMiss::DuplicateSubjectFunctions })
-        );
+        assert!(duplicate_check
+            .reuse
+            .recomputed
+            .iter()
+            .all(|row| { row.reason == SsaFunctionFactReuseMiss::DuplicateSubjectFunctions }));
         assert!(duplicate_check.facts.is_empty());
+    }
+
+    #[test]
+    fn language_ssa_artifact_cache_reuses_unchanged_functions_after_restart() {
+        let mut program = executable_program();
+        let mut independent = program.functions[0].clone();
+        independent.name = "independent".to_owned();
+        program.functions.push(independent);
+
+        let hir = program.lower_to_ir().expect("HIR");
+        let mut cache = SsaFunctionArtifactCache::default();
+        let cold = program
+            .lower_to_ssa_from_ir_with_artifact_cache(&hir, &mut cache)
+            .expect("cold SSA lowering");
+        assert!(cold.artifact_reuse.reused.is_empty());
+        assert_eq!(cold.artifact_reuse.recomputed.len(), 2);
+        assert!(cold
+            .artifact_reuse
+            .recomputed
+            .iter()
+            .all(|entry| { entry.reason == SsaFunctionArtifactReuseMiss::Missing }));
+        assert_eq!(cold.artifact_reuse.published_entry_count, 2);
+        assert!(cold.module.validate().valid);
+
+        // A fresh process restores the Language-owned cache and can reuse the
+        // complete SSA function bodies without running their lowering loop.
+        let serialized = serde_json::to_vec(&cache).expect("artifact cache serializes");
+        let mut cache: SsaFunctionArtifactCache =
+            serde_json::from_slice(&serialized).expect("artifact cache restores");
+        let warm = program
+            .lower_to_ssa_from_ir_with_artifact_cache(&hir, &mut cache)
+            .expect("warm SSA lowering");
+        assert_eq!(warm.module, cold.module);
+        assert_eq!(warm.artifact_reuse.recomputed.len(), 0);
+        assert_eq!(warm.artifact_reuse.reused.len(), 2);
+        assert_eq!(warm.reuse.reused.len(), 2);
+        assert!(warm.reuse.recomputed.is_empty());
+
+        let mut tampered_cache = cache.clone();
+        tampered_cache.entries[0].artifact_fingerprint = "sha256:invalid".to_owned();
+        let tampered = program
+            .lower_to_ssa_from_ir_with_artifact_cache(&hir, &mut tampered_cache)
+            .expect("tampered cache falls back to fresh lowering");
+        assert_eq!(tampered.module, cold.module);
+        assert_eq!(tampered.artifact_reuse.reused.len(), 1);
+        assert_eq!(tampered.artifact_reuse.recomputed.len(), 1);
+        assert_eq!(
+            tampered.artifact_reuse.recomputed[0].reason,
+            SsaFunctionArtifactReuseMiss::ArtifactIntegrityFailed
+        );
+        assert_eq!(tampered.artifact_reuse.published_entry_count, 2);
+
+        let cached_before_failure = serde_json::to_vec(&cache).expect("cache serializes");
+        let mut invalid_program = program.clone();
+        invalid_program.schema_version = "mncs.invalid/0".to_owned();
+        assert!(invalid_program
+            .lower_to_ssa_from_ir_with_artifact_cache(&hir, &mut cache)
+            .is_err());
+        assert_eq!(
+            serde_json::to_vec(&cache).expect("cache serializes"),
+            cached_before_failure,
+            "failed verification cannot publish partial cache entries"
+        );
+
+        let mut changed = program;
+        let operation =
+            &mut changed.functions[0].body.as_mut().expect("body").blocks[0].operations[0];
+        match &mut operation.kind {
+            BodyOperationKind::Constant { value, .. } => *value = 2,
+            other => panic!("expected a constant operation, got {other:?}"),
+        }
+        let changed_hir = changed.lower_to_ir().expect("changed HIR");
+        let incremental = changed
+            .lower_to_ssa_from_ir_with_artifact_cache(&changed_hir, &mut cache)
+            .expect("incremental SSA lowering");
+        assert!(incremental.module.validate().valid);
+        assert_ne!(
+            incremental.module.hir_fingerprint,
+            warm.module.hir_fingerprint
+        );
+        assert_eq!(incremental.artifact_reuse.reused.len(), 1);
+        assert!(incremental.artifact_reuse.reused[0]
+            .as_str()
+            .ends_with("::independent"));
+        assert_eq!(incremental.artifact_reuse.recomputed.len(), 1);
+        assert_eq!(
+            incremental.artifact_reuse.recomputed[0].reason,
+            SsaFunctionArtifactReuseMiss::InputChanged
+        );
+        assert_eq!(incremental.reuse.reused.len(), 1);
+        assert_eq!(incremental.reuse.recomputed.len(), 1);
+        assert_eq!(incremental.artifact_reuse.published_entry_count, 2);
     }
 
     #[test]

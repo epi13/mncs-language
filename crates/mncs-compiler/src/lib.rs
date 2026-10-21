@@ -58,11 +58,11 @@ use mncs_model::{
     CompilerImplementationIdentity, CompilerNodeProfile, CompilerPassExecutionObservation,
     CompilerPassIdentity, CompilerStage, CompilerStageContract, CrossHostInvariants,
     ObligationStatus, ObservationModelRef, PassPipelineIdentity, Program, RelationClaim,
-    SemanticId, SsaFunctionFactRequest, SsaFunctionFactReuseObservation,
-    SsaFunctionVerificationFact, StageAvailability, StageIntegration, TargetContractRef,
-    TargetLoweringPlan, TransformationEdge, TransformationStatus,
-    COMPILATION_STUDY_OBSERVATION_INTERPRETATION, COMPILATION_STUDY_RESULT_CONTRACT_ID,
-    COMPILER_ARTIFACT_SCHEMA_VERSION, SSA_SCHEMA_VERSION,
+    SemanticId, SsaFunctionArtifactCache, SsaFunctionArtifactReuseObservation,
+    SsaFunctionFactRequest, SsaFunctionFactReuseObservation, SsaFunctionVerificationFact,
+    StageAvailability, StageIntegration, TargetContractRef, TargetLoweringPlan, TransformationEdge,
+    TransformationStatus, COMPILATION_STUDY_OBSERVATION_INTERPRETATION,
+    COMPILATION_STUDY_RESULT_CONTRACT_ID, COMPILER_ARTIFACT_SCHEMA_VERSION, SSA_SCHEMA_VERSION,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -75,6 +75,7 @@ pub const REFERENCE_PIPELINE_NAME: &str = "mncs-source-semantic-hir-ssa";
 pub struct SsaFunctionFactWork {
     pub facts: Vec<SsaFunctionVerificationFact>,
     pub reuse: SsaFunctionFactReuseObservation,
+    pub artifact_reuse: SsaFunctionArtifactReuseObservation,
 }
 
 fn trace_timing(stage: &str, started: Instant) {
@@ -239,6 +240,7 @@ impl ReferenceCompiler {
             &[],
             &SsaFunctionFactRequest::default(),
             &mut ssa_fact_work,
+            None,
         )
     }
 
@@ -262,6 +264,29 @@ impl ReferenceCompiler {
                 prior_facts: prior_facts.to_vec(),
             },
             &mut ssa_fact_work,
+            None,
+        );
+        (result, ssa_fact_work)
+    }
+
+    /// Compile while reusing complete SSA function artifacts from a
+    /// caller-owned Language cache. Program validation, HIR construction,
+    /// module validation, and backend checks remain current for each call.
+    pub fn compile_with_ssa_artifact_cache(
+        &self,
+        request: CompilationRequest,
+        program: &Program,
+        cache: &mut SsaFunctionArtifactCache,
+    ) -> (CompilationResult, Option<SsaFunctionFactWork>) {
+        let mut ssa_fact_work = None;
+        let result = self.compile_inner(
+            request,
+            program,
+            &[],
+            &[],
+            &SsaFunctionFactRequest::default(),
+            &mut ssa_fact_work,
+            Some(cache),
         );
         (result, ssa_fact_work)
     }
@@ -287,6 +312,7 @@ impl ReferenceCompiler {
             library_roots,
             &SsaFunctionFactRequest::default(),
             &mut ssa_fact_work,
+            None,
         )
     }
 
@@ -298,6 +324,7 @@ impl ReferenceCompiler {
         library_roots: &[std::path::PathBuf],
         ssa_fact_request: &SsaFunctionFactRequest,
         ssa_fact_work: &mut Option<SsaFunctionFactWork>,
+        mut ssa_artifact_cache: Option<&mut SsaFunctionArtifactCache>,
     ) -> CompilationResult {
         let started = Instant::now();
         let mut diagnostics = request.validate();
@@ -405,11 +432,23 @@ impl ReferenceCompiler {
         let ssa = match prelowered_ssa {
             Some(ssa) => ssa,
             None => {
-                match program.lower_to_ssa_from_ir_with_verified_facts(&hir, ssa_fact_request) {
+                let lowered = match ssa_artifact_cache.as_deref_mut() {
+                    Some(cache) => program
+                        .lower_to_ssa_from_ir_with_verified_facts_and_artifact_cache(
+                            &hir,
+                            ssa_fact_request,
+                            cache,
+                        ),
+                    None => {
+                        program.lower_to_ssa_from_ir_with_verified_facts(&hir, ssa_fact_request)
+                    }
+                };
+                match lowered {
                     Ok(lowered) => {
                         *ssa_fact_work = Some(SsaFunctionFactWork {
                             facts: lowered.facts,
                             reuse: lowered.reuse,
+                            artifact_reuse: lowered.artifact_reuse,
                         });
                         lowered.module
                     }
@@ -1441,6 +1480,55 @@ mod tests {
                 "/../../examples/source/cre1-evidence-combine.mncs"
             )),
         )
+    }
+
+    #[test]
+    fn compiler_reuses_language_ssa_artifacts_after_cache_restart() {
+        let compiler = ReferenceCompiler::default();
+        let mut program = program("compiler-ssa-artifact-cache");
+        let mut independent = program.functions[0].clone();
+        independent.name = "independent".to_owned();
+        program.functions.push(independent);
+        let request = compiler.request_for_program(&program, emissions(), None);
+        let mut cache = SsaFunctionArtifactCache::default();
+
+        let (cold, cold_work) =
+            compiler.compile_with_ssa_artifact_cache(request.clone(), &program, &mut cache);
+        assert_eq!(
+            cold.status,
+            CompilationStatus::CompletedWithUnresolvedObligations,
+            "{:#?}",
+            cold.diagnostics
+        );
+        let cold_work = cold_work.expect("cold SSA fact and artifact work");
+        assert!(cold_work.artifact_reuse.reused.is_empty());
+        assert_eq!(cold_work.artifact_reuse.recomputed.len(), 2);
+        assert_eq!(cold_work.artifact_reuse.published_entry_count, 2);
+
+        let serialized = serde_json::to_vec(&cache).expect("SSA cache serializes");
+        let mut cache: SsaFunctionArtifactCache =
+            serde_json::from_slice(&serialized).expect("SSA cache restores in a fresh process");
+        let (warm, warm_work) =
+            compiler.compile_with_ssa_artifact_cache(request, &program, &mut cache);
+        assert_eq!(
+            warm.status,
+            CompilationStatus::CompletedWithUnresolvedObligations,
+            "{:#?}",
+            warm.diagnostics
+        );
+        let warm_work = warm_work.expect("warm SSA fact and artifact work");
+        assert_eq!(warm_work.artifact_reuse.reused.len(), 2);
+        assert!(warm_work.artifact_reuse.recomputed.is_empty());
+        assert_eq!(warm_work.reuse.reused.len(), 2);
+        assert!(warm_work.reuse.recomputed.is_empty());
+        assert_eq!(
+            cold.artifacts
+                .iter()
+                .find(|artifact| artifact.representation == ArtifactRepresentation::Ssa),
+            warm.artifacts
+                .iter()
+                .find(|artifact| artifact.representation == ArtifactRepresentation::Ssa)
+        );
     }
 
     #[test]

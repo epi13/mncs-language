@@ -1,0 +1,136 @@
+{
+  "identity": "ev_language_verified_ssa_artifact_cache_20261021",
+  "owner": "mncs-language",
+  "schema_version": "mncs.language.verified-ssa-artifact-cache-evidence/1",
+  "status": "verified-language-slice",
+  "recorded_at": "2026-10-21T20:45:49Z",
+  "producer": {
+    "repository": "mncs-language",
+    "branch": "campaign/verified-fact-frontend-incremental-20261021",
+    "worktree": "/home/epi13/Documents/Projects/mncs-language/.worktrees/verified-fact-frontend-incremental-20261021",
+    "base_revision": "735908b2de38db99d46e65061860f98df83cf7d3",
+    "implementation_patch_sha256": "ee5c054818789141bcceafc5f25e2194f0500a7fd9243e9be764e8c45da37900",
+    "source_sha256": {
+      "crates/mncs-model/src/ssa.rs": "6c471abd077a7ef4ae08b03966933215037fa9185a9c955ae166a9b451eb81d0",
+      "crates/mncs-model/src/lib.rs": "8cb4357bb31b2cb9091b7dfbbe46b236777cfec396a76d3f292ce37e207be7e7",
+      "crates/mncs-compiler/src/lib.rs": "63a01f9fedd1bf6934d64bfd8323d4bd497cb9c0cb03a2dd51e40523a9b61a5d"
+    }
+  },
+  "implementation": {
+    "contract": "mncs.language-ssa-function-artifact-cache/1",
+    "lowerer_identity": "mncs-language-ssa-function-lowerer/1",
+    "lowering_policy_identity": "mncs-language-ssa-function-lowering-policy/1",
+    "reuse_unit": "complete verified SsaFunction plus its trace and transformation provenance",
+    "admission_guards": [
+      "current per-function HIR lowering input fingerprint",
+      "lowerer and policy identity",
+      "SSA artifact schema",
+      "cached artifact digest",
+      "Language SSA verification witness",
+      "current callable and obligation dependencies",
+      "fresh module-level validation and backend lowering-boundary checks"
+    ],
+    "publication": "cache entries are atomically replaced only after the complete SSA module validates",
+    "bounds": {
+      "entries": 256,
+      "serialized_bytes": 33554432
+    }
+  },
+  "observed_work": {
+    "cold_two_function_build": {
+      "ssa_functions_lowered": 2,
+      "entries_published": 2
+    },
+    "serialized_cache_restore": {
+      "cache_deserialized_into_new_value": true,
+      "ssa_functions_reused": 2,
+      "ssa_functions_relowered": 0,
+      "structural_function_verifications_reused": 2,
+      "recomputed_units": 0
+    },
+    "one_function_body_edit": {
+      "ssa_functions_reused": 1,
+      "ssa_functions_relowered": 1,
+      "changed_unit_reason": "input_changed",
+      "structural_function_verifications_reused": 1,
+      "structural_function_verifications_recomputed": 1,
+      "entries_published": 2
+    },
+    "tampered_artifact_digest": {
+      "changed_unit_relowered": true,
+      "independent_unit_reused": true,
+      "result_matches_cold_module": true
+    },
+    "invalid_program": {
+      "verification_rejected": true,
+      "cache_bytes_unchanged": true
+    },
+    "semantic_equivalence": {
+      "cold_and_warm_ssa_modules_equal": true,
+      "cold_and_warm_ssa_artifact_identity_equal": true,
+      "module_validation_passed": true,
+      "compiler_status_preserved": "completed_with_unresolved_obligations"
+    }
+  },
+  "verification": {
+    "commands": [
+      {
+        "command": "cargo check -p mncs-model",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo check -p mncs-compiler",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo test -p mncs-model language_ssa_artifact_cache_reuses_unchanged_functions_after_restart",
+        "exit_code": 0,
+        "passed": 1,
+        "failed": 0
+      },
+      {
+        "command": "cargo test -p mncs-compiler compiler_reuses_language_ssa_artifacts_after_cache_restart",
+        "exit_code": 0,
+        "passed": 1,
+        "failed": 0
+      },
+      {
+        "command": "cargo test -p mncs-model",
+        "exit_code": 0,
+        "passed": 252,
+        "failed": 0,
+        "test_target_seconds": 5.93
+      },
+      {
+        "command": "cargo test -p mncs-compiler",
+        "exit_code": 0,
+        "passed": 143,
+        "failed": 0,
+        "test_target_seconds": 155.52
+      },
+      {
+        "command": "git diff --check",
+        "exit_code": 0
+      },
+      {
+        "command": "rustfmt --edition 2021 --check --config skip_children=true crates/mncs-model/src/ssa.rs crates/mncs-model/src/lib.rs crates/mncs-compiler/src/lib.rs",
+        "exit_code": 0
+      },
+      {
+        "command": "python3 -m json.tool evidence/verified-ssa-artifact-cache-20261021.json",
+        "exit_code": 0
+      }
+    ],
+    "format_check_scope_note": "A workspace-wide cargo fmt run exposed unrelated baseline formatting in other files; those formatting-only changes were restored. The final check covers all three implementation source files without formatting child modules."
+  },
+  "resource_measurements": {
+    "available_memory_gib_before_builds": 20,
+    "cgroup_memory_measurement_available": false,
+    "peak_rss_measured": false
+  },
+  "limitations": [
+    "The serialized cache round trip uses a new cache value in a test process; the production Compiler application-build cache has not yet been integrated in this slice.",
+    "No native application execution, Forge route, canonical Store publication, or compiler succession is claimed.",
+    "The compiler fixture intentionally retains unresolved overflow obligations in both cold and warm results."
+  ]
+}

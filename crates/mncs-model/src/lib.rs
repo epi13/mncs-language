@@ -213,15 +213,19 @@ pub use representation::{
     RepresentationDecision, RepresentationObservation, SpatialFacts,
 };
 pub use ssa::{
-    SsaBlock, SsaBoundedIteration, SsaDiagnostic, SsaError, SsaFunction, SsaFunctionFactDependency,
-    SsaFunctionFactDependencyRole, SsaFunctionFactInvalidator, SsaFunctionFactRecomputation,
-    SsaFunctionFactRequest, SsaFunctionFactResult, SsaFunctionFactReuseMiss,
-    SsaFunctionFactReuseObservation, SsaFunctionFactValidation, SsaFunctionVerificationFact,
-    SsaInstruction, SsaInstructionKind, SsaLoweringFactResult, SsaModule, SsaTerminator,
-    SsaTraceEntry, SsaTraceMap, SsaTransformationDecision, SsaValidationReport, SsaValue,
-    SSA_FUNCTION_VERIFICATION_FACT_POLICY_ID, SSA_FUNCTION_VERIFICATION_FACT_SCHEMA_VERSION,
-    SSA_FUNCTION_VERIFICATION_FACT_VERIFIER_ID, SSA_FUNCTION_VERIFICATION_LANGUAGE_PROFILE,
-    SSA_SCHEMA_VERSION, SSA_SCHEMA_VERSION_PRE_TYPED,
+    SsaBlock, SsaBoundedIteration, SsaDiagnostic, SsaError, SsaFunction, SsaFunctionArtifactCache,
+    SsaFunctionArtifactRecomputation, SsaFunctionArtifactReuseMiss,
+    SsaFunctionArtifactReuseObservation, SsaFunctionFactDependency, SsaFunctionFactDependencyRole,
+    SsaFunctionFactInvalidator, SsaFunctionFactRecomputation, SsaFunctionFactRequest,
+    SsaFunctionFactResult, SsaFunctionFactReuseMiss, SsaFunctionFactReuseObservation,
+    SsaFunctionFactValidation, SsaFunctionVerificationFact, SsaInstruction, SsaInstructionKind,
+    SsaLoweringFactResult, SsaModule, SsaTerminator, SsaTraceEntry, SsaTraceMap,
+    SsaTransformationDecision, SsaValidationReport, SsaValue,
+    SSA_FUNCTION_ARTIFACT_CACHE_OBSERVATION_SCHEMA_VERSION,
+    SSA_FUNCTION_ARTIFACT_CACHE_SCHEMA_VERSION, SSA_FUNCTION_LOWERER_IDENTITY,
+    SSA_FUNCTION_LOWERING_POLICY_IDENTITY, SSA_FUNCTION_VERIFICATION_FACT_POLICY_ID,
+    SSA_FUNCTION_VERIFICATION_FACT_SCHEMA_VERSION, SSA_FUNCTION_VERIFICATION_FACT_VERIFIER_ID,
+    SSA_FUNCTION_VERIFICATION_LANGUAGE_PROFILE, SSA_SCHEMA_VERSION, SSA_SCHEMA_VERSION_PRE_TYPED,
 };
 pub use ssa_execution::{
     compare_body_and_ssa, execute_ssa, execute_ssa_module, execute_ssa_module_prevalidated,
@@ -238,9 +242,7 @@ pub use translation::{
     TranslationCounterexample, TranslationJudgement, TranslationValidationResult,
     TRANSLATION_VALIDATION_CONTRACT_ID, TRANSLATION_VALIDATION_SCHEMA_VERSION,
 };
-pub use validation::{
-    Diagnostic, FrontendSemanticValidation, ValidationReport, ValidationSummary,
-};
+pub use validation::{Diagnostic, FrontendSemanticValidation, ValidationReport, ValidationSummary};
 pub use value_contract::{
     first_aggregate_mismatch, order_fields_by_name, FieldOrderError, FieldOrderProblem,
 };
