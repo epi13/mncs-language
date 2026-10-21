@@ -16,6 +16,7 @@ use mncs_model::{
     ResolutionProvenance, SemanticBinding, SemanticBindingKind, SemanticBindingTable,
     SemanticGraph, SemanticId, SemanticIdentities, SemanticNamespace, SemanticReference,
     SemanticScope, TransformationEdge, TransformationStatus, ValidationReport, Value,
+    VerificationDependencySummaryCache, VerificationDependencySummaryCacheObservation,
     VerificationFact, VerificationFactRequest, VerificationFactReuseObservation,
     EXECUTABLE_BODY_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSION,
 };
@@ -61,6 +62,11 @@ pub struct SourceFrontEndResult {
     pub verification_facts: Vec<VerificationFact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verification_fact_reuse: Option<VerificationFactReuseObservation>,
+    /// Language-owned structural dependency summaries reused while rebuilding
+    /// the current verification dependency closure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_dependency_summary_cache_reuse:
+        Option<VerificationDependencySummaryCacheObservation>,
     /// Successful Language-owned declaration checks made reusable under the
     /// exact declaration, assumption, verifier, policy, and profile guards.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -367,7 +373,7 @@ impl ReferenceCompiler {
         resolver: &dyn ModuleResolver,
         seeds: &[mncs_model::HostGenericSeedRequest],
     ) -> SourceFrontEndResult {
-        self.front_end_with_resolver_seeds_and_facts(envelope, resolver, seeds, None, None)
+        self.front_end_with_resolver_seeds_and_facts(envelope, resolver, seeds, None, None, None)
     }
 
     /// Runs the normal Language frontend while allowing the Language model to
@@ -381,7 +387,14 @@ impl ReferenceCompiler {
         seeds: &[mncs_model::HostGenericSeedRequest],
         request: &VerificationFactRequest,
     ) -> SourceFrontEndResult {
-        self.front_end_with_resolver_seeds_and_facts(envelope, resolver, seeds, Some(request), None)
+        self.front_end_with_resolver_seeds_and_facts(
+            envelope,
+            resolver,
+            seeds,
+            Some(request),
+            None,
+            None,
+        )
     }
 
     /// Runs the normal Language frontend with verified body facts and a
@@ -402,6 +415,49 @@ impl ReferenceCompiler {
             seeds,
             Some(request),
             Some(parse_cache),
+            None,
+        )
+    }
+
+    /// Runs the Language frontend with verified body facts and a bounded,
+    /// process-local cache for unchanged direct dependency summaries.
+    pub fn front_end_with_verified_facts_and_dependency_summary_cache(
+        &self,
+        envelope: SourceEnvelope,
+        resolver: &dyn ModuleResolver,
+        seeds: &[mncs_model::HostGenericSeedRequest],
+        request: &VerificationFactRequest,
+        dependency_summary_cache: &mut VerificationDependencySummaryCache,
+    ) -> SourceFrontEndResult {
+        self.front_end_with_resolver_seeds_and_facts(
+            envelope,
+            resolver,
+            seeds,
+            Some(request),
+            None,
+            Some(dependency_summary_cache),
+        )
+    }
+
+    /// Runs the Language frontend with its bounded source-parse and direct
+    /// dependency-summary caches. Parse entries remain independently
+    /// serializable; dependency summaries remain process-local and private.
+    pub fn front_end_with_verified_facts_and_caches(
+        &self,
+        envelope: SourceEnvelope,
+        resolver: &dyn ModuleResolver,
+        seeds: &[mncs_model::HostGenericSeedRequest],
+        request: &VerificationFactRequest,
+        parse_cache: &mut SourceParseCache,
+        dependency_summary_cache: &mut VerificationDependencySummaryCache,
+    ) -> SourceFrontEndResult {
+        self.front_end_with_resolver_seeds_and_facts(
+            envelope,
+            resolver,
+            seeds,
+            Some(request),
+            Some(parse_cache),
+            Some(dependency_summary_cache),
         )
     }
 
@@ -412,6 +468,7 @@ impl ReferenceCompiler {
         seeds: &[mncs_model::HostGenericSeedRequest],
         verification_request: Option<&VerificationFactRequest>,
         parse_cache: Option<&mut SourceParseCache>,
+        dependency_summary_cache: Option<&mut VerificationDependencySummaryCache>,
     ) -> SourceFrontEndResult {
         let cache_resolver = parse_cache.map(|cache| SourceParseCacheResolver {
             inner: resolver,
@@ -452,6 +509,7 @@ impl ReferenceCompiler {
         let mut validation = None;
         let mut verification_facts = Vec::new();
         let mut verification_fact_reuse = None;
+        let mut verification_dependency_summary_cache_reuse = None;
         let mut declaration_verification_facts = Vec::new();
         let mut declaration_fact_reuse = None;
         let mut finite_type_declaration_verification_facts = Vec::new();
@@ -496,11 +554,19 @@ impl ReferenceCompiler {
                                 &resolved_modules,
                             )
                         });
-                        let frontend_validation =
-                            elaborated.validate_for_frontend(scoped_request.as_ref());
+                        let frontend_validation = match dependency_summary_cache {
+                            Some(cache) => elaborated
+                                .validate_for_frontend_with_dependency_summary_cache(
+                                    scoped_request.as_ref(),
+                                    cache,
+                                ),
+                            None => elaborated.validate_for_frontend(scoped_request.as_ref()),
+                        };
                         if let Some(fact_result) = frontend_validation.verification {
                             verification_facts = fact_result.facts;
                             verification_fact_reuse = Some(fact_result.reuse);
+                            verification_dependency_summary_cache_reuse =
+                                fact_result.dependency_summary_cache.clone();
                             declaration_verification_facts = fact_result.declaration_facts;
                             declaration_fact_reuse = Some(fact_result.declaration_reuse);
                             finite_type_declaration_verification_facts =
@@ -599,6 +665,7 @@ impl ReferenceCompiler {
             validation,
             verification_facts,
             verification_fact_reuse,
+            verification_dependency_summary_cache_reuse,
             declaration_verification_facts,
             declaration_fact_reuse,
             finite_type_declaration_verification_facts,

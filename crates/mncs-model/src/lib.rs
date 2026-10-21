@@ -249,14 +249,18 @@ pub use value_contract::{
 pub use verification_facts::{
     DeclarationFactInvalidator, DeclarationFactRecomputation, DeclarationFactReuseMiss,
     DeclarationFactReuseObservation, DeclarationVerificationFact, DeclarationVerificationWarning,
-    VerificationDependencyRole, VerificationFact, VerificationFactDependency,
+    VerificationDependencyRole, VerificationDependencySummaryCache,
+    VerificationDependencySummaryCacheObservation, VerificationFact, VerificationFactDependency,
     VerificationFactInvalidator, VerificationFactRecomputation, VerificationFactRequest,
     VerificationFactResult, VerificationFactReuseMiss, VerificationFactReuseObservation,
     VerificationFactValidation, DECLARATION_FACT_POLICY_ID, DECLARATION_FACT_REUSE_SCHEMA_VERSION,
     DECLARATION_FACT_SCHEMA_VERSION, DECLARATION_FACT_VERIFIER_ID, FINITE_TYPE_FACT_POLICY_ID,
     FINITE_TYPE_FACT_VERIFIER_ID, RECORD_TYPE_FACT_POLICY_ID, RECORD_TYPE_FACT_VERIFIER_ID,
-    VERIFICATION_FACT_POLICY_ID, VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION,
-    VERIFICATION_FACT_SCHEMA_VERSION, VERIFICATION_FACT_VERIFIER_ID,
+    VERIFICATION_DEPENDENCY_SUMMARY_CACHE_SCHEMA_VERSION,
+    VERIFICATION_DEPENDENCY_SUMMARY_OBSERVATION_SCHEMA_VERSION,
+    VERIFICATION_DEPENDENCY_SUMMARY_POLICY_IDENTITY, VERIFICATION_FACT_POLICY_ID,
+    VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION, VERIFICATION_FACT_SCHEMA_VERSION,
+    VERIFICATION_FACT_VERIFIER_ID,
 };
 pub use verifier::{
     AlignmentVerifierInput, CapabilityVerifierInput, DeterministicVerifier, EvidenceAuthorityClass,

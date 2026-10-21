@@ -7,7 +7,7 @@
 //! skips a body check. Source locations are carried separately and refreshed
 //! for every source snapshot.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +30,19 @@ pub const FINITE_TYPE_FACT_VERIFIER_ID: &str = "mncs-language-finite-type-valida
 pub const FINITE_TYPE_FACT_POLICY_ID: &str = "mncs-language-finite-type-policy/1";
 pub const RECORD_TYPE_FACT_VERIFIER_ID: &str = "mncs-language-record-type-validator/1";
 pub const RECORD_TYPE_FACT_POLICY_ID: &str = "mncs-language-record-type-policy/1";
+pub const VERIFICATION_DEPENDENCY_SUMMARY_CACHE_SCHEMA_VERSION: &str =
+    "mncs.language-verification-dependency-summary-cache/1";
+pub const VERIFICATION_DEPENDENCY_SUMMARY_OBSERVATION_SCHEMA_VERSION: &str =
+    "mncs.language-verification-dependency-summary-cache-observation/1";
+/// Bump this when the resolved-body dependency extraction rules change.
+pub const VERIFICATION_DEPENDENCY_SUMMARY_POLICY_IDENTITY: &str =
+    "mncs-language-verification-dependency-extractor/1";
+
+const MAX_DEPENDENCY_SUMMARY_CACHE_ENTRIES: usize = 4096;
+const MAX_DEPENDENCY_SUMMARY_CACHE_REFERENCES: usize = 262_144;
+const MAX_DEPENDENCY_SUMMARY_REFERENCES_PER_ENTRY: usize = 8192;
+const MAX_DEPENDENCY_SUMMARY_CACHE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_DEPENDENCY_SUMMARY_CACHE_BYTES_PER_ENTRY: usize = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -162,9 +175,235 @@ pub struct VerificationFactValidation {
     pub finite_type_declaration_facts: Vec<DeclarationVerificationFact>,
     pub record_type_declaration_facts: Vec<DeclarationVerificationFact>,
     pub reuse: VerificationFactReuseObservation,
+    /// Structural dependency extraction reused during this validation pass.
+    /// This is analysis work, separate from the verified body facts above.
+    pub dependency_summary_cache: Option<VerificationDependencySummaryCacheObservation>,
     pub declaration_reuse: DeclarationFactReuseObservation,
     pub finite_type_declaration_reuse: DeclarationFactReuseObservation,
     pub record_type_declaration_reuse: DeclarationFactReuseObservation,
+}
+
+/// Observation of Language's process-local cache for direct body dependencies.
+/// Reuse here avoids rescanning unchanged resolved bodies; it does not skip
+/// verification or authorize reuse of a `VerificationFact`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerificationDependencySummaryCacheObservation {
+    pub schema_version: String,
+    pub reused_function_subjects: Vec<SemanticId>,
+    pub recomputed_function_subjects: Vec<SemanticId>,
+    pub evicted_entry_count: usize,
+}
+
+impl Default for VerificationDependencySummaryCacheObservation {
+    fn default() -> Self {
+        Self {
+            schema_version: VERIFICATION_DEPENDENCY_SUMMARY_OBSERVATION_SCHEMA_VERSION.to_owned(),
+            reused_function_subjects: Vec::new(),
+            recomputed_function_subjects: Vec::new(),
+            evicted_entry_count: 0,
+        }
+    }
+}
+
+/// Caller-owned, bounded, process-local cache for Language's direct semantic
+/// dependency extraction. Its private entries cannot be deserialized from an
+/// untrusted artifact. Every hit is guarded by the current function identity,
+/// callable interface fingerprint, resolved body fingerprint, and extractor
+/// policy identity; dependency fingerprints and verification facts are rebuilt
+/// against the current program.
+#[derive(Debug)]
+pub struct VerificationDependencySummaryCache {
+    entries: BTreeMap<SemanticId, DependencySummaryCacheEntry>,
+    insertion_order: VecDeque<(u64, SemanticId)>,
+    next_generation: u64,
+    total_reference_count: usize,
+    total_byte_count: usize,
+}
+
+impl Default for VerificationDependencySummaryCache {
+    fn default() -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            insertion_order: VecDeque::new(),
+            next_generation: 1,
+            total_reference_count: 0,
+            total_byte_count: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DependencySummaryCacheEntry {
+    generation: u64,
+    body_fingerprint: String,
+    interface_fingerprint: String,
+    policy_identity: String,
+    reference_count: usize,
+    byte_count: usize,
+    summary: CachedBodyDependencySummary,
+}
+
+#[derive(Debug, Clone)]
+struct CachedBodyDependencySummary {
+    calls: BTreeSet<BodyCallReference>,
+    assumptions: BTreeSet<String>,
+    nominal_types: BTreeSet<SemanticId>,
+}
+
+impl CachedBodyDependencySummary {
+    fn reference_count(&self) -> usize {
+        self.calls.len() + self.assumptions.len() + self.nominal_types.len()
+    }
+
+    fn retained_byte_count(&self) -> usize {
+        let call_bytes = self
+            .calls
+            .iter()
+            .map(|call| {
+                std::mem::size_of::<BodyCallReference>()
+                    + call.function.as_str().len()
+                    + call
+                        .instantiation
+                        .as_ref()
+                        .map_or(0, |identity| identity.as_str().len())
+                    + call
+                        .specialization
+                        .as_ref()
+                        .map_or(0, |identity| identity.as_str().len())
+                    + call
+                        .canonical_arguments
+                        .as_ref()
+                        .map_or(0, |arguments| arguments.len())
+            })
+            .sum::<usize>();
+        let assumption_bytes = self
+            .assumptions
+            .iter()
+            .map(|assumption| std::mem::size_of::<String>() + assumption.len())
+            .sum::<usize>();
+        let nominal_type_bytes = self
+            .nominal_types
+            .iter()
+            .map(|identity| std::mem::size_of::<SemanticId>() + identity.as_str().len())
+            .sum::<usize>();
+        call_bytes + assumption_bytes + nominal_type_bytes
+    }
+}
+
+impl VerificationDependencySummaryCache {
+    fn body_summary(
+        &mut self,
+        program: &Program,
+        subject: &SemanticId,
+        function: &Function,
+        body: &FunctionBody,
+        body_fingerprint: Option<&str>,
+        interface_fingerprint: &str,
+        observation: &mut VerificationDependencySummaryCacheObservation,
+    ) -> CachedBodyDependencySummary {
+        if let Some(body_fingerprint) = body_fingerprint {
+            if let Some(entry) = self.entries.get(subject).filter(|entry| {
+                entry.body_fingerprint == body_fingerprint
+                    && entry.interface_fingerprint == interface_fingerprint
+                    && entry.policy_identity == VERIFICATION_DEPENDENCY_SUMMARY_POLICY_IDENTITY
+            }) {
+                observation.reused_function_subjects.push(subject.clone());
+                return entry.summary.clone();
+            }
+        }
+
+        observation
+            .recomputed_function_subjects
+            .push(subject.clone());
+        let mut summary = CachedBodyDependencySummary {
+            calls: body_call_references(body),
+            assumptions: body_assumption_references(body),
+            nominal_types: body_nominal_type_references(program, function, body),
+        };
+        summary
+            .assumptions
+            .extend(function.assumptions.iter().cloned());
+
+        let Some(body_fingerprint) = body_fingerprint else {
+            return summary;
+        };
+        let reference_count = summary.reference_count();
+        let byte_count = summary.retained_byte_count();
+        if reference_count > MAX_DEPENDENCY_SUMMARY_REFERENCES_PER_ENTRY
+            || byte_count > MAX_DEPENDENCY_SUMMARY_CACHE_BYTES_PER_ENTRY
+        {
+            if self.remove(subject) {
+                observation.evicted_entry_count += 1;
+            }
+            return summary;
+        }
+
+        if self.remove(subject) {
+            observation.evicted_entry_count += 1;
+        }
+        if self.next_generation == 0 {
+            observation.evicted_entry_count += self.entries.len();
+            self.entries.clear();
+            self.insertion_order.clear();
+            self.total_reference_count = 0;
+            self.total_byte_count = 0;
+            self.next_generation = 1;
+        }
+        let generation = self.next_generation;
+        self.next_generation = self.next_generation.wrapping_add(1);
+        self.total_reference_count += reference_count;
+        self.total_byte_count += byte_count;
+        self.entries.insert(
+            subject.clone(),
+            DependencySummaryCacheEntry {
+                generation,
+                body_fingerprint: body_fingerprint.to_owned(),
+                interface_fingerprint: interface_fingerprint.to_owned(),
+                policy_identity: VERIFICATION_DEPENDENCY_SUMMARY_POLICY_IDENTITY.to_owned(),
+                reference_count,
+                byte_count,
+                summary: summary.clone(),
+            },
+        );
+        self.insertion_order
+            .push_back((generation, subject.clone()));
+
+        while self.entries.len() > MAX_DEPENDENCY_SUMMARY_CACHE_ENTRIES
+            || self.total_reference_count > MAX_DEPENDENCY_SUMMARY_CACHE_REFERENCES
+            || self.total_byte_count > MAX_DEPENDENCY_SUMMARY_CACHE_BYTES
+        {
+            let Some((old_generation, old_subject)) = self.insertion_order.pop_front() else {
+                break;
+            };
+            let matches_generation = self
+                .entries
+                .get(&old_subject)
+                .is_some_and(|entry| entry.generation == old_generation);
+            if matches_generation && self.remove(&old_subject) {
+                observation.evicted_entry_count += 1;
+            }
+        }
+        if self.insertion_order.len() > MAX_DEPENDENCY_SUMMARY_CACHE_ENTRIES * 2 {
+            self.insertion_order.retain(|(generation, subject)| {
+                self.entries
+                    .get(subject)
+                    .is_some_and(|entry| entry.generation == *generation)
+            });
+        }
+        summary
+    }
+
+    fn remove(&mut self, subject: &SemanticId) -> bool {
+        if let Some(entry) = self.entries.remove(subject) {
+            self.total_reference_count = self
+                .total_reference_count
+                .saturating_sub(entry.reference_count);
+            self.total_byte_count = self.total_byte_count.saturating_sub(entry.byte_count);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -418,12 +657,35 @@ impl Program {
         index
     }
 
-    pub(crate) fn verification_fact_dependency_index<'a>(
+    #[cfg(test)]
+    fn verification_fact_dependency_index<'a>(
         &'a self,
         identities: &SemanticIdentities,
         function_index: &BTreeMap<SemanticId, &'a Function>,
         specialization_index: &BTreeMap<SemanticId, Vec<(usize, &'a GenericSpecializationRecord)>>,
     ) -> VerificationFactDependencyIndex<'a> {
+        self.verification_fact_dependency_index_with_cache(
+            identities,
+            function_index,
+            specialization_index,
+            None,
+        )
+        .0
+    }
+
+    pub(crate) fn verification_fact_dependency_index_with_cache<'a>(
+        &'a self,
+        identities: &SemanticIdentities,
+        function_index: &BTreeMap<SemanticId, &'a Function>,
+        specialization_index: &BTreeMap<SemanticId, Vec<(usize, &'a GenericSpecializationRecord)>>,
+        mut dependency_summary_cache: Option<&mut VerificationDependencySummaryCache>,
+    ) -> (
+        VerificationFactDependencyIndex<'a>,
+        Option<VerificationDependencySummaryCacheObservation>,
+    ) {
+        let cache_enabled = dependency_summary_cache.is_some();
+        let mut dependency_summary_observation =
+            VerificationDependencySummaryCacheObservation::default();
         let mut assumption_fingerprints = BTreeMap::<SemanticId, Vec<String>>::new();
         for identity in &identities.objects {
             if identity.kind == crate::IdentityKind::Assumption {
@@ -466,25 +728,48 @@ impl Program {
                     body_fingerprint_result.as_ref().and_then(|fingerprint| {
                         function_semantic_fingerprint(function, &interface_fingerprint, fingerprint)
                     });
-                let (calls, assumptions, nominal_types, specializations) =
-                    if let Some(body) = function.body.as_ref() {
-                        let calls = body_call_references(body);
-                        let mut assumptions = body_assumption_references(body);
-                        assumptions.extend(function.assumptions.iter().cloned());
-                        (
-                            calls.clone(),
-                            assumptions,
-                            body_nominal_type_references(self, function, body),
-                            select_relevant_specializations(identity, &calls, specialization_index),
-                        )
-                    } else {
-                        (
-                            BTreeSet::new(),
-                            BTreeSet::new(),
-                            BTreeSet::new(),
-                            BTreeMap::new(),
-                        )
+                let (calls, assumptions, nominal_types, specializations) = if let Some(body) =
+                    function.body.as_ref()
+                {
+                    let summary = match dependency_summary_cache.as_deref_mut() {
+                        Some(cache) => cache.body_summary(
+                            self,
+                            identity,
+                            function,
+                            body,
+                            body_fingerprint.as_deref(),
+                            &interface_fingerprint,
+                            &mut dependency_summary_observation,
+                        ),
+                        None => {
+                            let mut assumptions = body_assumption_references(body);
+                            assumptions.extend(function.assumptions.iter().cloned());
+                            CachedBodyDependencySummary {
+                                calls: body_call_references(body),
+                                assumptions,
+                                nominal_types: body_nominal_type_references(self, function, body),
+                            }
+                        }
                     };
+                    let specializations = select_relevant_specializations(
+                        identity,
+                        &summary.calls,
+                        specialization_index,
+                    );
+                    (
+                        summary.calls,
+                        summary.assumptions,
+                        summary.nominal_types,
+                        specializations,
+                    )
+                } else {
+                    (
+                        BTreeSet::new(),
+                        BTreeSet::new(),
+                        BTreeSet::new(),
+                        BTreeMap::new(),
+                    )
+                };
                 let mut effect_and_capability_dependencies = BTreeSet::new();
                 let effect_and_capability_dependencies = self
                     .add_effect_and_capability_dependencies(
@@ -511,11 +796,23 @@ impl Program {
             })
             .collect();
 
-        VerificationFactDependencyIndex {
-            nominal_types: self.verification_nominal_type_index(),
-            assumptions_by_name,
-            functions,
-        }
+        let dependency_summary_cache = cache_enabled.then(|| {
+            dependency_summary_observation
+                .reused_function_subjects
+                .sort();
+            dependency_summary_observation
+                .recomputed_function_subjects
+                .sort();
+            dependency_summary_observation
+        });
+        (
+            VerificationFactDependencyIndex {
+                nominal_types: self.verification_nominal_type_index(),
+                assumptions_by_name,
+                functions,
+            },
+            dependency_summary_cache,
+        )
     }
 
     #[cfg(test)]

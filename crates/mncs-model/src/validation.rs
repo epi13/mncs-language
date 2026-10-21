@@ -4,10 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::verification_facts::{
     DeclarationFactRecomputation, DeclarationFactReuseMiss, DeclarationFactReuseObservation,
-    DeclarationVerificationFact, DeclarationVerificationWarning, VerificationFact,
-    VerificationFactRecomputation, VerificationFactRequest, VerificationFactReuseMiss,
-    VerificationFactReuseObservation, VerificationFactValidation,
-    DECLARATION_FACT_REUSE_SCHEMA_VERSION, VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION,
+    DeclarationVerificationFact, DeclarationVerificationWarning,
+    VerificationDependencySummaryCache, VerificationFact, VerificationFactRecomputation,
+    VerificationFactRequest, VerificationFactReuseMiss, VerificationFactReuseObservation,
+    VerificationFactValidation, DECLARATION_FACT_REUSE_SCHEMA_VERSION,
+    VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION,
 };
 use crate::{
     finite_type_id, finite_variant_id, function_id, Function, Program, Value,
@@ -51,7 +52,7 @@ pub struct FrontendSemanticValidation {
 
 impl Program {
     pub fn validate(&self) -> ValidationReport {
-        self.validate_internal(None, None).report
+        self.validate_internal(None, None, None).report
     }
 
     /// Validate the current program while reusing only Language-issued,
@@ -62,7 +63,22 @@ impl Program {
         request: &VerificationFactRequest,
     ) -> VerificationFactValidation {
         let identities = self.semantic_identities();
-        self.validate_internal(Some(request), Some(&identities))
+        self.validate_internal(Some(request), Some(&identities), None)
+    }
+
+    /// Validate with prior verified facts and reuse Language's bounded,
+    /// process-local direct dependency summaries for unchanged bodies.
+    pub fn validate_with_verified_facts_and_dependency_summary_cache(
+        &self,
+        request: &VerificationFactRequest,
+        dependency_summary_cache: &mut VerificationDependencySummaryCache,
+    ) -> VerificationFactValidation {
+        let identities = self.semantic_identities();
+        self.validate_internal(
+            Some(request),
+            Some(&identities),
+            Some(dependency_summary_cache),
+        )
     }
 
     /// Validate one immutable frontend snapshot and return the canonical and
@@ -73,15 +89,39 @@ impl Program {
         &self,
         request: Option<&VerificationFactRequest>,
     ) -> FrontendSemanticValidation {
+        self.validate_for_frontend_internal(request, None)
+    }
+
+    /// Validate one frontend snapshot while reusing verified facts and the
+    /// current Language process's bounded dependency-summary cache.
+    pub fn validate_for_frontend_with_dependency_summary_cache(
+        &self,
+        request: Option<&VerificationFactRequest>,
+        dependency_summary_cache: &mut VerificationDependencySummaryCache,
+    ) -> FrontendSemanticValidation {
+        self.validate_for_frontend_internal(request, Some(dependency_summary_cache))
+    }
+
+    fn validate_for_frontend_internal(
+        &self,
+        request: Option<&VerificationFactRequest>,
+        dependency_summary_cache: Option<&mut VerificationDependencySummaryCache>,
+    ) -> FrontendSemanticValidation {
         let canonical = self
             .canonical_form()
             .expect("an elaborated program has a canonical form");
         let identities = self.semantic_identities_with_program_fingerprint(&canonical.fingerprint);
-        let verification =
-            request.map(|request| self.validate_internal(Some(request), Some(&identities)));
+        let verification = match request {
+            Some(request) => Some(self.validate_internal(
+                Some(request),
+                Some(&identities),
+                dependency_summary_cache,
+            )),
+            None => None,
+        };
         let report = match &verification {
             Some(result) => result.report.clone(),
-            None => self.validate_internal(None, None).report,
+            None => self.validate_internal(None, None, None).report,
         };
         let graph = report
             .valid
@@ -99,6 +139,7 @@ impl Program {
         &self,
         request: Option<&VerificationFactRequest>,
         fact_identities: Option<&crate::SemanticIdentities>,
+        dependency_summary_cache: Option<&mut VerificationDependencySummaryCache>,
     ) -> VerificationFactValidation {
         crate::record_counter("semantic_validation");
         let mut errors = Vec::new();
@@ -122,17 +163,22 @@ impl Program {
             BTreeMap::<_, Vec<&DeclarationVerificationFact>>::new();
         let fact_function_index = request.map(|_| self.verification_function_index());
         let fact_specialization_index = request.map(|_| self.verification_specialization_index());
-        let fact_dependency_index = fact_identities.map(|identities| {
-            self.verification_fact_dependency_index(
-                identities,
-                fact_function_index
-                    .as_ref()
-                    .expect("request has semantic function index"),
-                fact_specialization_index
-                    .as_ref()
-                    .expect("request has semantic specialization index"),
-            )
-        });
+        let (fact_dependency_index, dependency_summary_cache_observation) = match fact_identities {
+            Some(identities) => {
+                let (index, observation) = self.verification_fact_dependency_index_with_cache(
+                    identities,
+                    fact_function_index
+                        .as_ref()
+                        .expect("request has semantic function index"),
+                    fact_specialization_index
+                        .as_ref()
+                        .expect("request has semantic specialization index"),
+                    dependency_summary_cache,
+                );
+                (Some(index), observation)
+            }
+            None => (None, None),
+        };
         if let Some(request) = request {
             for fact in &request.prior_facts {
                 prior_by_subject
@@ -692,6 +738,7 @@ impl Program {
                 reused,
                 recomputed,
             },
+            dependency_summary_cache: dependency_summary_cache_observation,
             declaration_reuse: DeclarationFactReuseObservation {
                 schema_version: DECLARATION_FACT_REUSE_SCHEMA_VERSION.to_owned(),
                 reused: declaration_reused,

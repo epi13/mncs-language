@@ -6,7 +6,8 @@ use mncs_compiler::{
 };
 use mncs_model::{
     DeclarationFactReuseMiss, DeclarationVerificationFact, VerificationDependencyRole,
-    VerificationFact, VerificationFactRequest, VerificationFactReuseMiss,
+    VerificationDependencySummaryCache, VerificationFact, VerificationFactRequest,
+    VerificationFactReuseMiss,
 };
 use mncs_syntax::{parse, SourceArtifactKind, SourceEnvelope};
 
@@ -1841,6 +1842,92 @@ fn linked_frontend_reuses_unchanged_import_parses_after_cache_restart() {
             .len(),
         2
     );
+}
+
+#[test]
+fn linked_frontend_reuses_exact_language_dependency_summaries_across_body_edits() {
+    let library_source = "mncs 0.19;\nmodule lib.dependency_cache;\nfn imported(value: u64) -> (result: u64) { return value; }\nfn imported_idle(value: u64) -> (result: u64) { return value; }\n";
+    let resolver = MapResolver::default().with("lib.dependency_cache", library_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
+        language_profile: "0.19".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
+        source_location_identities: BTreeMap::new(),
+    };
+    let source = "mncs 0.19;\nmodule app.dependency_cache;\nuse lib.dependency_cache;\nfn entry(value: u64) -> (result: u64) { return lib.dependency_cache.imported(value); }\nfn local(value: u64) -> (result: u64) { return value; }\n";
+    let mut cache = VerificationDependencySummaryCache::default();
+
+    let first = compiler.front_end_with_verified_facts_and_dependency_summary_cache(
+        resolver.envelope("root", source.to_owned()),
+        &resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+        &mut cache,
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    let cold = first
+        .verification_dependency_summary_cache_reuse
+        .as_ref()
+        .expect("Language dependency cache observation");
+    assert_eq!(cold.reused_function_subjects.len(), 0);
+    assert_eq!(cold.recomputed_function_subjects.len(), 4);
+
+    let second = compiler.front_end_with_verified_facts_and_dependency_summary_cache(
+        resolver.envelope("root", format!("// comment-only edit\n{source}")),
+        &resolver,
+        &[],
+        &request(
+            first.verification_facts,
+            first.declaration_verification_facts,
+        ),
+        &mut cache,
+    );
+    assert!(second.is_valid(), "{:?}", second.diagnostics);
+    let warm = second
+        .verification_dependency_summary_cache_reuse
+        .as_ref()
+        .expect("Language dependency cache observation");
+    assert_eq!(warm.reused_function_subjects.len(), 4);
+    assert!(warm.recomputed_function_subjects.is_empty());
+    let warm_facts = second
+        .verification_fact_reuse
+        .as_ref()
+        .expect("verified body fact observation");
+    assert_eq!(warm_facts.reused.len(), 4);
+    assert!(warm_facts.recomputed.is_empty());
+
+    let changed_source = source.replace(
+        "fn local(value: u64) -> (result: u64) { return value; }",
+        "fn local(value: u64) -> (result: u64) { return 1; }",
+    );
+    let changed = compiler.front_end_with_verified_facts_and_dependency_summary_cache(
+        resolver.envelope("root", changed_source),
+        &resolver,
+        &[],
+        &request(
+            second.verification_facts,
+            second.declaration_verification_facts,
+        ),
+        &mut cache,
+    );
+    assert!(changed.is_valid(), "{:?}", changed.diagnostics);
+    let edit = changed
+        .verification_dependency_summary_cache_reuse
+        .as_ref()
+        .expect("Language dependency cache observation");
+    assert_eq!(edit.reused_function_subjects.len(), 3);
+    assert_eq!(edit.recomputed_function_subjects.len(), 1);
+    let edited_subject = edit.recomputed_function_subjects[0].as_str();
+    assert!(edited_subject.contains("local"), "{edited_subject}");
+    let changed_facts = changed
+        .verification_fact_reuse
+        .as_ref()
+        .expect("verified body fact observation");
+    assert_eq!(changed_facts.reused.len(), 3);
+    assert_eq!(changed_facts.recomputed.len(), 1);
 }
 
 #[test]
