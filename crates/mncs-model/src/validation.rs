@@ -81,9 +81,17 @@ impl Program {
         let fact_identities = request.map(|_| self.semantic_identities());
         let fact_function_index = request.map(|_| self.verification_function_index());
         let fact_specialization_index = request.map(|_| self.verification_specialization_index());
-        let fact_dependency_index = fact_identities
-            .as_ref()
-            .map(|identities| self.verification_fact_dependency_index(identities));
+        let fact_dependency_index = fact_identities.as_ref().map(|identities| {
+            self.verification_fact_dependency_index(
+                identities,
+                fact_function_index
+                    .as_ref()
+                    .expect("request has semantic function index"),
+                fact_specialization_index
+                    .as_ref()
+                    .expect("request has semantic specialization index"),
+            )
+        });
         if let Some(request) = request {
             for fact in &request.prior_facts {
                 prior_by_subject
@@ -539,17 +547,11 @@ impl Program {
                     body.validate(self, function, &function_path, &mut errors);
                     continue;
                 };
-                let Some(basis) = self.body_fact_basis_with_function_index(
+                let Some(basis) = self.body_fact_basis_with_dependency_index(
                     function,
                     fact_identities
                         .as_ref()
                         .expect("request has semantic identities"),
-                    fact_function_index
-                        .as_ref()
-                        .expect("request has semantic function index"),
-                    fact_specialization_index
-                        .as_ref()
-                        .expect("request has semantic specialization index"),
                     fact_dependency_index
                         .as_ref()
                         .expect("request has semantic dependency index"),

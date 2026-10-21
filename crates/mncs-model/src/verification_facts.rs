@@ -315,6 +315,25 @@ pub(crate) struct VerificationNominalTypeIndex<'a> {
 pub(crate) struct VerificationFactDependencyIndex<'a> {
     pub(crate) nominal_types: VerificationNominalTypeIndex<'a>,
     assumptions_by_name: BTreeMap<String, Vec<VerificationFactDependency>>,
+    functions: BTreeMap<SemanticId, VerificationFunctionDependencySummary<'a>>,
+}
+
+/// Semantic references extracted once from one function body. A program-wide
+/// fact basis contains the full reachable implementation closure, so deriving
+/// these references while walking every caller's closure repeatedly rescanned
+/// the same bodies. Keeping the direct summary beside the other per-snapshot
+/// indexes makes closure expansion proportional to graph traversal rather
+/// than AST traversal.
+struct VerificationFunctionDependencySummary<'a> {
+    function: &'a Function,
+    body_fingerprint: Option<String>,
+    interface_fingerprint: String,
+    semantic_fingerprint: Option<String>,
+    calls: BTreeSet<BodyCallReference>,
+    assumptions: BTreeSet<String>,
+    nominal_types: BTreeSet<SemanticId>,
+    specializations: BTreeMap<SemanticId, &'a GenericSpecializationRecord>,
+    effect_and_capability_dependencies: Option<BTreeSet<VerificationFactDependency>>,
 }
 
 impl<'a> VerificationNominalTypeIndex<'a> {
@@ -378,10 +397,12 @@ impl Program {
         index
     }
 
-    pub(crate) fn verification_fact_dependency_index(
-        &self,
+    pub(crate) fn verification_fact_dependency_index<'a>(
+        &'a self,
         identities: &SemanticIdentities,
-    ) -> VerificationFactDependencyIndex<'_> {
+        function_index: &BTreeMap<SemanticId, &'a Function>,
+        specialization_index: &BTreeMap<SemanticId, Vec<(usize, &'a GenericSpecializationRecord)>>,
+    ) -> VerificationFactDependencyIndex<'a> {
         let mut assumption_fingerprints = BTreeMap::<SemanticId, Vec<String>>::new();
         for identity in &identities.objects {
             if identity.kind == crate::IdentityKind::Assumption {
@@ -409,9 +430,67 @@ impl Program {
             }
         }
 
+        let functions = function_index
+            .iter()
+            .map(|(identity, function)| {
+                let interface_fingerprint = function.interface_fingerprint();
+                let body_fingerprint_result = match function.body.as_ref() {
+                    Some(body) => body.fingerprint().ok().map(Some),
+                    None => Some(None),
+                };
+                let body_fingerprint = body_fingerprint_result.clone().flatten();
+                let semantic_fingerprint =
+                    body_fingerprint_result.as_ref().and_then(|fingerprint| {
+                        function_semantic_fingerprint(function, &interface_fingerprint, fingerprint)
+                    });
+                let (calls, assumptions, nominal_types, specializations) =
+                    if let Some(body) = function.body.as_ref() {
+                        let calls = body_call_references(body);
+                        let mut assumptions = body_assumption_references(body);
+                        assumptions.extend(function.assumptions.iter().cloned());
+                        (
+                            calls.clone(),
+                            assumptions,
+                            body_nominal_type_references(self, function, body),
+                            select_relevant_specializations(identity, &calls, specialization_index),
+                        )
+                    } else {
+                        (
+                            BTreeSet::new(),
+                            BTreeSet::new(),
+                            BTreeSet::new(),
+                            BTreeMap::new(),
+                        )
+                    };
+                let mut effect_and_capability_dependencies = BTreeSet::new();
+                let effect_and_capability_dependencies = self
+                    .add_effect_and_capability_dependencies(
+                        function,
+                        identities,
+                        &mut effect_and_capability_dependencies,
+                    )
+                    .map(|()| effect_and_capability_dependencies);
+                (
+                    identity.clone(),
+                    VerificationFunctionDependencySummary {
+                        function,
+                        body_fingerprint,
+                        interface_fingerprint,
+                        semantic_fingerprint,
+                        calls,
+                        assumptions,
+                        nominal_types,
+                        specializations,
+                        effect_and_capability_dependencies,
+                    },
+                )
+            })
+            .collect();
+
         VerificationFactDependencyIndex {
             nominal_types: self.verification_nominal_type_index(),
             assumptions_by_name,
+            functions,
         }
     }
 
@@ -614,47 +693,43 @@ impl Program {
     ) -> Option<BodyFactBasis> {
         let function_index = self.verification_function_index();
         let specialization_index = self.verification_specialization_index();
-        let dependency_index = self.verification_fact_dependency_index(identities);
-        self.body_fact_basis_with_function_index(
-            function,
+        let dependency_index = self.verification_fact_dependency_index(
             identities,
             &function_index,
             &specialization_index,
-            &dependency_index,
-        )
+        );
+        self.body_fact_basis_with_dependency_index(function, identities, &dependency_index)
     }
 
-    pub(crate) fn body_fact_basis_with_function_index(
+    pub(crate) fn body_fact_basis_with_dependency_index(
         &self,
         function: &Function,
         identities: &SemanticIdentities,
-        function_index: &BTreeMap<SemanticId, &Function>,
-        specialization_index: &BTreeMap<SemanticId, Vec<(usize, &GenericSpecializationRecord)>>,
         dependency_index: &VerificationFactDependencyIndex<'_>,
     ) -> Option<BodyFactBasis> {
         let body = function.body.as_ref()?;
         let home = function.identity_namespace(&self.module);
         let subject = body.identity(home, &function.name);
-        let subject_fingerprint = body.fingerprint().ok()?;
         let declaration = function_id(home, &function.name);
+        let function_summary = dependency_index.functions.get(&declaration)?;
+        let subject_fingerprint = function_summary.body_fingerprint.clone()?;
         let declaration_interface = VerificationFactDependency {
             role: VerificationDependencyRole::CallableInterface,
             identity: declaration.clone(),
-            fingerprint: function.interface_fingerprint(),
+            fingerprint: function_summary.interface_fingerprint.clone(),
         };
         let mut dependencies = BTreeSet::new();
-        self.add_effect_and_capability_dependencies(function, identities, &mut dependencies)?;
+        dependencies.extend(
+            function_summary
+                .effect_and_capability_dependencies
+                .as_ref()?
+                .iter()
+                .cloned(),
+        );
 
-        // Call and nominal dependencies come from typed semantic references,
-        // not from matching arbitrary strings in the serialized body. This
-        // keeps labels, diagnostics, and user data from creating false edges.
-        // Assumption identities are still conservatively found in the body
-        // representation because their current payload is string-addressed.
-        let mut used_assumptions = body_assumption_references(body);
-        let calls = body_call_references(body);
-        let mut relevant_specializations =
-            select_relevant_specializations(&declaration, &calls, specialization_index);
-        let mut nominal_types = body_nominal_type_references(self, function, body);
+        let mut used_assumptions = function_summary.assumptions.clone();
+        let mut relevant_specializations = function_summary.specializations.clone();
+        let mut nominal_types = function_summary.nominal_types.clone();
 
         // A caller depends on the successful verification of the entire
         // reachable implementation closure. If a downstream dependency
@@ -663,7 +738,8 @@ impl Program {
         // dependency closure into this fact so that change also invalidates
         // callers beyond the first edge. The visited set keeps recursive call
         // graphs finite and preserves one dependency per semantic identity.
-        let mut pending_functions = calls
+        let mut pending_functions = function_summary
+            .calls
             .iter()
             .map(|call| call.function.clone())
             .collect::<Vec<_>>();
@@ -673,7 +749,7 @@ impl Program {
                 .map(|specialization| specialization.specialization_function.clone()),
         );
         let mut visited_functions = BTreeSet::new();
-        let mut reachable_functions = Vec::new();
+        let mut reachable_function_identities = Vec::new();
         let mut next_pending = 0;
         while next_pending < pending_functions.len() {
             let identity = pending_functions[next_pending].clone();
@@ -681,30 +757,25 @@ impl Program {
             if identity == declaration || !visited_functions.insert(identity.clone()) {
                 continue;
             }
-            let Some(candidate) = function_index.get(&identity).copied() else {
+            let Some(candidate_summary) = dependency_index.functions.get(&identity) else {
                 continue;
             };
-            reachable_functions.push(candidate);
-            let Some(candidate_body) = candidate.body.as_ref() else {
+            reachable_function_identities.push(identity);
+            let candidate = candidate_summary.function;
+            let Some(_candidate_body) = candidate.body.as_ref() else {
                 continue;
             };
-            used_assumptions.extend(body_assumption_references(candidate_body));
-            nominal_types.extend(body_nominal_type_references(
-                self,
-                candidate,
-                candidate_body,
-            ));
-            let candidate_calls = body_call_references(candidate_body);
-            pending_functions.extend(candidate_calls.iter().map(|call| call.function.clone()));
-            let candidate_declaration =
-                function_id(candidate.identity_namespace(&self.module), &candidate.name);
-            for (specialization_identity, specialization) in select_relevant_specializations(
-                &candidate_declaration,
-                &candidate_calls,
-                specialization_index,
-            ) {
+            used_assumptions.extend(candidate_summary.assumptions.iter().cloned());
+            nominal_types.extend(candidate_summary.nominal_types.iter().cloned());
+            pending_functions.extend(
+                candidate_summary
+                    .calls
+                    .iter()
+                    .map(|call| call.function.clone()),
+            );
+            for (specialization_identity, specialization) in &candidate_summary.specializations {
                 if relevant_specializations
-                    .insert(specialization_identity, specialization)
+                    .insert(specialization_identity.clone(), *specialization)
                     .is_none()
                 {
                     pending_functions.push(specialization.specialization_function.clone());
@@ -719,21 +790,28 @@ impl Program {
                 }
             }
         }
-        for candidate in &reachable_functions {
+        for identity in reachable_function_identities {
+            let candidate_summary = dependency_index.functions.get(&identity)?;
+            let candidate = candidate_summary.function;
             let identity = function_id(candidate.identity_namespace(&self.module), &candidate.name);
             dependencies.insert(VerificationFactDependency {
                 role: VerificationDependencyRole::CallableInterface,
                 identity: identity.clone(),
-                fingerprint: candidate.interface_fingerprint(),
+                fingerprint: candidate_summary.interface_fingerprint.clone(),
             });
-            let implementation_fingerprint =
-                self.function_semantic_fingerprint(&identity, function_index)?;
+            let implementation_fingerprint = candidate_summary.semantic_fingerprint.clone()?;
             dependencies.insert(VerificationFactDependency {
                 role: VerificationDependencyRole::CallableImplementation,
                 identity,
                 fingerprint: implementation_fingerprint,
             });
-            self.add_effect_and_capability_dependencies(candidate, identities, &mut dependencies)?;
+            dependencies.extend(
+                candidate_summary
+                    .effect_and_capability_dependencies
+                    .as_ref()?
+                    .iter()
+                    .cloned(),
+            );
         }
 
         for identity in nominal_types {
@@ -744,10 +822,6 @@ impl Program {
             }
         }
 
-        used_assumptions.extend(function.assumptions.iter().cloned());
-        for candidate in &reachable_functions {
-            used_assumptions.extend(candidate.assumptions.iter().cloned());
-        }
         for assumption in used_assumptions {
             if let Some(candidates) = dependency_index.assumptions_by_name.get(&assumption) {
                 dependencies.extend(candidates.iter().cloned());
@@ -759,7 +833,7 @@ impl Program {
                 specialization,
                 &identity,
                 identities,
-                function_index,
+                &dependency_index.functions,
             ) {
                 dependencies.insert(VerificationFactDependency {
                     role: VerificationDependencyRole::GenericSpecialization,
@@ -819,15 +893,17 @@ impl Program {
         specialization: &GenericSpecializationRecord,
         identity: &SemanticId,
         identities: &SemanticIdentities,
-        function_index: &BTreeMap<SemanticId, &Function>,
+        function_summaries: &BTreeMap<SemanticId, VerificationFunctionDependencySummary<'_>>,
     ) -> Option<String> {
         let record_fingerprint = identities.fingerprint(identity)?;
-        let generic_function_fingerprint =
-            self.function_semantic_fingerprint(&specialization.generic_function, function_index)?;
-        let specialized_function_fingerprint = self.function_semantic_fingerprint(
-            &specialization.specialization_function,
-            function_index,
-        )?;
+        let generic_function_fingerprint = function_summaries
+            .get(&specialization.generic_function)?
+            .semantic_fingerprint
+            .as_ref()?;
+        let specialized_function_fingerprint = function_summaries
+            .get(&specialization.specialization_function)?
+            .semantic_fingerprint
+            .as_ref()?;
         let bytes = serde_json::to_vec(&(
             record_fingerprint,
             generic_function_fingerprint,
@@ -836,35 +912,28 @@ impl Program {
         .ok()?;
         Some(crate::sha256_hex(&bytes))
     }
+}
 
-    fn function_semantic_fingerprint(
-        &self,
-        identity: &SemanticId,
-        function_index: &BTreeMap<SemanticId, &Function>,
-    ) -> Option<String> {
-        let function = function_index.get(identity).copied()?;
-        let body_fingerprint = function
-            .body
-            .as_ref()
-            .map(|body| body.fingerprint())
-            .transpose()
-            .ok()?;
-        #[derive(Serialize)]
-        struct FunctionSemanticFingerprint<'a> {
-            interface_fingerprint: String,
-            body_fingerprint: Option<String>,
-            effects: &'a [Effect],
-            capabilities: &'a [String],
-        }
-        let material = FunctionSemanticFingerprint {
-            interface_fingerprint: function.interface_fingerprint(),
-            body_fingerprint,
-            effects: &function.effects,
-            capabilities: &function.capabilities,
-        };
-        let bytes = serde_json::to_vec(&material).ok()?;
-        Some(crate::sha256_hex(&bytes))
+fn function_semantic_fingerprint(
+    function: &Function,
+    interface_fingerprint: &str,
+    body_fingerprint: &Option<String>,
+) -> Option<String> {
+    #[derive(Serialize)]
+    struct FunctionSemanticFingerprint<'a> {
+        interface_fingerprint: &'a str,
+        body_fingerprint: &'a Option<String>,
+        effects: &'a [Effect],
+        capabilities: &'a [String],
     }
+    let material = FunctionSemanticFingerprint {
+        interface_fingerprint,
+        body_fingerprint,
+        effects: &function.effects,
+        capabilities: &function.capabilities,
+    };
+    let bytes = serde_json::to_vec(&material).ok()?;
+    Some(crate::sha256_hex(&bytes))
 }
 
 fn record_type_semantic_fingerprint(record_type: &RecordType) -> Option<String> {
