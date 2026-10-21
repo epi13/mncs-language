@@ -424,11 +424,14 @@ impl Program {
             let mut has_declaration_basis = false;
             if let Some(request) = request {
                 if declaration_identity_valid {
-                    let basis = self.declaration_fact_basis_with_identities(
+                    let basis = self.declaration_fact_basis_with_dependency_index(
                         function,
                         fact_identities
                             .as_ref()
                             .expect("request has semantic identities"),
+                        fact_dependency_index
+                            .as_ref()
+                            .expect("request has semantic dependency index"),
                     );
                     if let Some(basis) = basis {
                         let declaration_profile = request
