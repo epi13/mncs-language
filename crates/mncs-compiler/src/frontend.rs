@@ -487,16 +487,18 @@ impl ReferenceCompiler {
                 match elaboration {
                     (Ok(elaborated), resolutions, resolved_modules, operation_sources) => {
                         module_resolutions = resolved_modules.clone();
-                        let report = if let Some(request) = verification_request {
-                            let scoped_request = source_scoped_fact_request(
+                        let scoped_request = verification_request.map(|request| {
+                            source_scoped_fact_request(
                                 request,
                                 &envelope,
                                 tree,
                                 &elaborated,
                                 &resolved_modules,
-                            );
-                            let fact_result =
-                                elaborated.validate_with_verified_facts(&scoped_request);
+                            )
+                        });
+                        let frontend_validation =
+                            elaborated.validate_for_frontend(scoped_request.as_ref());
+                        if let Some(fact_result) = frontend_validation.verification {
                             verification_facts = fact_result.facts;
                             verification_fact_reuse = Some(fact_result.reuse);
                             declaration_verification_facts = fact_result.declaration_facts;
@@ -509,24 +511,20 @@ impl ReferenceCompiler {
                                 fact_result.record_type_declaration_facts;
                             record_type_declaration_fact_reuse =
                                 Some(fact_result.record_type_declaration_reuse);
-                            fact_result.report
-                        } else {
-                            elaborated.validate()
-                        };
+                        }
                         binding_table = elaborated.binding_table.clone();
-                        let canonical = elaborated
-                            .canonical_form()
-                            .expect("an elaborated program is canonicalizable");
+                        let canonical = frontend_validation.canonical;
                         artifacts.push(CompilerArtifactRef::new(
                             ArtifactRepresentation::Semantic,
                             canonical.schema_version,
                             canonical.fingerprint,
                         ));
+                        let report = frontend_validation.report;
                         if report.valid {
-                            let graph = elaborated
-                                .semantic_graph()
-                                .expect("validated elaboration has a semantic graph");
-                            let identity_map = elaborated.semantic_identities();
+                            let graph = frontend_validation
+                                .graph
+                                .expect("validated frontend output has a semantic graph");
+                            let identity_map = frontend_validation.identities;
                             artifacts.push(CompilerArtifactRef::new(
                                 ArtifactRepresentation::SemanticGraph,
                                 &graph.schema_version,
