@@ -25,7 +25,7 @@ pub const VERIFICATION_FACT_POLICY_ID: &str = "mncs-language-function-body-polic
 pub const DECLARATION_FACT_SCHEMA_VERSION: &str = "mncs.language-declaration-verification-fact/1";
 pub const DECLARATION_FACT_REUSE_SCHEMA_VERSION: &str = "mncs.language-declaration-fact-reuse/1";
 pub const DECLARATION_FACT_VERIFIER_ID: &str = "mncs-language-function-declaration-validator/1";
-pub const DECLARATION_FACT_POLICY_ID: &str = "mncs-language-function-declaration-policy/1";
+pub const DECLARATION_FACT_POLICY_ID: &str = "mncs-language-function-declaration-policy/2";
 pub const FINITE_TYPE_FACT_VERIFIER_ID: &str = "mncs-language-finite-type-validator/1";
 pub const FINITE_TYPE_FACT_POLICY_ID: &str = "mncs-language-finite-type-policy/1";
 pub const RECORD_TYPE_FACT_VERIFIER_ID: &str = "mncs-language-record-type-validator/1";
@@ -328,12 +328,33 @@ struct VerificationFunctionDependencySummary<'a> {
     function: &'a Function,
     body_fingerprint: Option<String>,
     interface_fingerprint: String,
+    declaration_fingerprint: String,
     semantic_fingerprint: Option<String>,
     calls: BTreeSet<BodyCallReference>,
     assumptions: BTreeSet<String>,
     nominal_types: BTreeSet<SemanticId>,
     specializations: BTreeMap<SemanticId, &'a GenericSpecializationRecord>,
     effect_and_capability_dependencies: Option<BTreeSet<VerificationFactDependency>>,
+}
+
+fn declaration_fingerprint(
+    interface_fingerprint: &str,
+    evidence: &[crate::EvidenceClaim],
+) -> String {
+    #[derive(Serialize)]
+    struct FingerprintMaterial<'a> {
+        schema_version: &'static str,
+        interface_fingerprint: &'a str,
+        evidence: &'a [crate::EvidenceClaim],
+    }
+
+    let material = FingerprintMaterial {
+        schema_version: "mncs.language-function-declaration-fingerprint/1",
+        interface_fingerprint,
+        evidence,
+    };
+    let bytes = serde_json::to_vec(&material).expect("function declaration fingerprint serializes");
+    crate::sha256_hex(&bytes)
 }
 
 impl<'a> VerificationNominalTypeIndex<'a> {
@@ -434,6 +455,8 @@ impl Program {
             .iter()
             .map(|(identity, function)| {
                 let interface_fingerprint = function.interface_fingerprint();
+                let declaration_fingerprint =
+                    declaration_fingerprint(&interface_fingerprint, &function.evidence);
                 let body_fingerprint_result = match function.body.as_ref() {
                     Some(body) => body.fingerprint().ok().map(Some),
                     None => Some(None),
@@ -476,6 +499,7 @@ impl Program {
                         function,
                         body_fingerprint,
                         interface_fingerprint,
+                        declaration_fingerprint,
                         semantic_fingerprint,
                         calls,
                         assumptions,
@@ -494,17 +518,41 @@ impl Program {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn declaration_fact_basis_with_identities(
         &self,
         function: &Function,
         identities: &SemanticIdentities,
     ) -> Option<DeclarationFactBasis> {
+        let interface_fingerprint = function.interface_fingerprint();
+        let subject_fingerprint =
+            declaration_fingerprint(&interface_fingerprint, &function.evidence);
+        self.declaration_fact_basis_with_fingerprint(function, identities, subject_fingerprint)
+    }
+
+    pub(crate) fn declaration_fact_basis_with_dependency_index(
+        &self,
+        function: &Function,
+        identities: &SemanticIdentities,
+        dependency_index: &VerificationFactDependencyIndex<'_>,
+    ) -> Option<DeclarationFactBasis> {
+        let identity = function_id(function.identity_namespace(&self.module), &function.name);
+        let summary = dependency_index.functions.get(&identity)?;
+        self.declaration_fact_basis_with_fingerprint(
+            function,
+            identities,
+            summary.declaration_fingerprint.clone(),
+        )
+    }
+
+    fn declaration_fact_basis_with_fingerprint(
+        &self,
+        function: &Function,
+        identities: &SemanticIdentities,
+        subject_fingerprint: String,
+    ) -> Option<DeclarationFactBasis> {
         let home = function.identity_namespace(&self.module);
         let subject = function_id(home, &function.name);
-        let mut declaration = function.clone();
-        declaration.body = None;
-        let bytes = serde_json::to_vec(&declaration).ok()?;
-        let subject_fingerprint = crate::sha256_hex(&bytes);
         let mut dependencies = BTreeSet::new();
         for assumption in &function.assumptions {
             let identity = assumption_id(&self.module, assumption);
@@ -1329,6 +1377,15 @@ impl DeclarationVerificationFact {
         if self.verification_witness_identity != self.computed_witness_identity() {
             return Err(DeclarationFactReuseMiss::InvalidWitness);
         }
+        if self.verifier_identity != current.verifier_identity {
+            return Err(DeclarationFactReuseMiss::VerifierChanged);
+        }
+        if self.policy_identity != current.policy_identity {
+            return Err(DeclarationFactReuseMiss::PolicyChanged);
+        }
+        if self.language_profile != current.language_profile {
+            return Err(DeclarationFactReuseMiss::LanguageProfileChanged);
+        }
         if self.subject != current.subject
             || self.subject_fingerprint != current.subject_fingerprint
         {
@@ -1338,15 +1395,6 @@ impl DeclarationVerificationFact {
             || self.invalidating_changes != current.invalidating_changes
         {
             return Err(DeclarationFactReuseMiss::DependenciesChanged);
-        }
-        if self.verifier_identity != current.verifier_identity {
-            return Err(DeclarationFactReuseMiss::VerifierChanged);
-        }
-        if self.policy_identity != current.policy_identity {
-            return Err(DeclarationFactReuseMiss::PolicyChanged);
-        }
-        if self.language_profile != current.language_profile {
-            return Err(DeclarationFactReuseMiss::LanguageProfileChanged);
         }
         Ok(())
     }
@@ -2509,6 +2557,16 @@ mod tests {
             ".contracts.positive_amount"
         );
 
+        let mut prior_policy = first.declaration_facts.clone();
+        prior_policy[0].policy_identity = "mncs-language-function-declaration-policy/1".to_owned();
+        prior_policy[0].verification_witness_identity = prior_policy[0].computed_witness_identity();
+        let policy_miss =
+            program.validate_with_verified_facts(&declaration_request("0.19", prior_policy));
+        assert_eq!(
+            policy_miss.declaration_reuse.recomputed[0].reason,
+            DeclarationFactReuseMiss::PolicyChanged
+        );
+
         let restored: Vec<DeclarationVerificationFact> =
             serde_json::from_slice(&serde_json::to_vec(&first.declaration_facts).unwrap()).unwrap();
         let subject = function_id(&program.module, "transfer");
@@ -2532,6 +2590,42 @@ mod tests {
         assert!(second.report.warnings.iter().any(|warning| {
             warning.path == "functions[1].contracts.positive_amount" && warning.code == "MNCS101"
         }));
+    }
+
+    #[test]
+    fn declaration_fingerprints_share_interface_work_and_preserve_evidence() {
+        let program = crate::validation::tests::valid_program();
+        let function = &program.functions[0];
+        let identities = program.semantic_identities();
+        let function_index = program.verification_function_index();
+        let specialization_index = program.verification_specialization_index();
+        let dependency_index = program.verification_fact_dependency_index(
+            &identities,
+            &function_index,
+            &specialization_index,
+        );
+
+        let direct = program
+            .declaration_fact_basis_with_identities(function, &identities)
+            .expect("function declaration fact basis");
+        let indexed = program
+            .declaration_fact_basis_with_dependency_index(function, &identities, &dependency_index)
+            .expect("indexed function declaration fact basis");
+        assert_eq!(indexed.subject_fingerprint, direct.subject_fingerprint);
+        assert_eq!(
+            direct.policy_identity,
+            "mncs-language-function-declaration-policy/2"
+        );
+
+        let mut without_evidence = function.clone();
+        without_evidence.evidence.clear();
+        let without_evidence = program
+            .declaration_fact_basis_with_identities(&without_evidence, &identities)
+            .expect("declaration fact basis without evidence");
+        assert_ne!(
+            direct.subject_fingerprint,
+            without_evidence.subject_fingerprint
+        );
     }
 
     #[test]
