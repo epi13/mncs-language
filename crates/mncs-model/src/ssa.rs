@@ -25,6 +25,12 @@ pub const SSA_SCHEMA_VERSION: &str = "0.5";
 /// the `BodyType` tag aliases and must pass through
 /// [`SsaModule::normalize_legacy_types`] before validation or execution.
 pub const SSA_SCHEMA_VERSION_PRE_TYPED: &str = "0.4";
+pub const SSA_FUNCTION_VERIFICATION_FACT_SCHEMA_VERSION: &str =
+    "mncs.language-ssa-function-verification-fact/1";
+pub const SSA_FUNCTION_VERIFICATION_FACT_VERIFIER_ID: &str =
+    "mncs-language-ssa-function-validator/1";
+pub const SSA_FUNCTION_VERIFICATION_FACT_POLICY_ID: &str = "mncs-language-ssa-function-policy/1";
+pub const SSA_FUNCTION_VERIFICATION_LANGUAGE_PROFILE: &str = "mncs-language-ssa-profile/0.5";
 
 fn trace_timing(stage: &str, started: Instant) {
     crate::record_stage(stage, started.elapsed());
@@ -392,6 +398,109 @@ pub struct SsaValidationReport {
     pub errors: Vec<SsaDiagnostic>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SsaFunctionFactDependencyRole {
+    CallableIdentity,
+    ObligationIdentity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct SsaFunctionFactDependency {
+    pub role: SsaFunctionFactDependencyRole,
+    pub identity: SemanticId,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "identity")]
+pub enum SsaFunctionFactInvalidator {
+    SubjectFunctionChanged(SemanticId),
+    CallableAvailabilityChanged(SemanticId),
+    ObligationAvailabilityChanged(SemanticId),
+    SsaSchemaChanged,
+    VerifierChanged,
+    PolicyChanged,
+    LanguageProfileChanged,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SsaFunctionFactResult {
+    Verified,
+}
+
+/// Language-owned evidence that one exact SSA function passed the structural
+/// verifier. The module validator rechecks the current function body and its
+/// direct callable and obligation references before accepting this fact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsaFunctionVerificationFact {
+    pub schema_version: String,
+    pub subject: SemanticId,
+    pub subject_fingerprint: String,
+    pub verifier_identity: String,
+    pub policy_identity: String,
+    pub language_profile: String,
+    pub ssa_schema: String,
+    pub dependencies: Vec<SsaFunctionFactDependency>,
+    pub result: SsaFunctionFactResult,
+    pub verification_witness_identity: String,
+    pub invalidating_changes: Vec<SsaFunctionFactInvalidator>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SsaFunctionFactReuseMiss {
+    Missing,
+    DuplicatePriorFacts,
+    DuplicateSubjectFunctions,
+    UnsupportedSchema,
+    InvalidWitness,
+    SubjectChanged,
+    DependenciesChanged,
+    VerifierChanged,
+    PolicyChanged,
+    LanguageProfileChanged,
+    SsaSchemaChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsaFunctionFactRecomputation {
+    pub subject: SemanticId,
+    pub reason: SsaFunctionFactReuseMiss,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsaFunctionFactReuseObservation {
+    pub schema_version: String,
+    /// Function validators actually skipped after Language checked the
+    /// subject, verifier, policy, profile, and dependency identities.
+    pub reused: Vec<SemanticId>,
+    /// Function validators actually run because prior evidence was missing
+    /// or no longer matched the current SSA snapshot.
+    pub recomputed: Vec<SsaFunctionFactRecomputation>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsaFunctionFactRequest {
+    #[serde(default)]
+    pub prior_facts: Vec<SsaFunctionVerificationFact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsaFunctionFactValidation {
+    pub report: SsaValidationReport,
+    pub facts: Vec<SsaFunctionVerificationFact>,
+    pub reuse: SsaFunctionFactReuseObservation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SsaLoweringFactResult {
+    pub module: SsaModule,
+    pub facts: Vec<SsaFunctionVerificationFact>,
+    pub reuse: SsaFunctionFactReuseObservation,
+}
+
 #[derive(Debug, Error)]
 pub enum SsaError {
     #[error("cannot lower an invalid program to SSA")]
@@ -484,6 +593,18 @@ impl SsaModule {
     }
 
     pub fn validate(&self) -> SsaValidationReport {
+        self.validate_with_verified_facts(&SsaFunctionFactRequest::default())
+            .report
+    }
+
+    /// Validate the module while reusing only Language-issued facts whose
+    /// exact SSA function and actual callable/obligation dependencies still
+    /// match this snapshot. Module identities and trace tables are always
+    /// checked again because they are not function-local facts.
+    pub fn validate_with_verified_facts(
+        &self,
+        request: &SsaFunctionFactRequest,
+    ) -> SsaFunctionFactValidation {
         let mut errors = Vec::new();
         if self.schema_version != SSA_SCHEMA_VERSION {
             errors.push(diagnostic(
@@ -498,6 +619,31 @@ impl SsaModule {
             .iter()
             .map(|function| function.semantic_identity.clone())
             .collect::<BTreeSet<_>>();
+        let obligation_ids = self
+            .obligations
+            .iter()
+            .map(|obligation| obligation.identity.clone())
+            .collect::<BTreeSet<_>>();
+        let mut prior_facts = BTreeMap::<SemanticId, Vec<&SsaFunctionVerificationFact>>::new();
+        for fact in &request.prior_facts {
+            prior_facts
+                .entry(fact.subject.clone())
+                .or_default()
+                .push(fact);
+        }
+        let mut semantic_identity_counts = BTreeMap::<SemanticId, usize>::new();
+        let mut ssa_identity_counts = BTreeMap::<SemanticId, usize>::new();
+        for function in &self.functions {
+            *semantic_identity_counts
+                .entry(function.semantic_identity.clone())
+                .or_default() += 1;
+            *ssa_identity_counts
+                .entry(function.identity.clone())
+                .or_default() += 1;
+        }
+        let mut facts = Vec::new();
+        let mut reused = Vec::new();
+        let mut recomputed = Vec::new();
         for (function_index, function) in self.functions.iter().enumerate() {
             let path = format!("functions[{function_index}]");
             if !function_ids.insert(function.identity.clone()) {
@@ -507,13 +653,60 @@ impl SsaModule {
                     "duplicate SSA function identity",
                 ));
             }
+            let (subject_fingerprint, dependencies) =
+                ssa_function_fact_basis(function, &semantic_function_ids, &obligation_ids);
+            let prior = prior_facts.get(&function.semantic_identity);
+            let reuse_miss = if self.schema_version != SSA_SCHEMA_VERSION {
+                Some(SsaFunctionFactReuseMiss::SsaSchemaChanged)
+            } else if semantic_identity_counts.get(&function.semantic_identity) != Some(&1)
+                || ssa_identity_counts.get(&function.identity) != Some(&1)
+            {
+                Some(SsaFunctionFactReuseMiss::DuplicateSubjectFunctions)
+            } else {
+                match prior.map(Vec::as_slice) {
+                    Some([fact]) => ssa_function_fact_reuse_miss(
+                        fact,
+                        subject_fingerprint.as_deref(),
+                        &dependencies,
+                    ),
+                    Some([]) | None => Some(SsaFunctionFactReuseMiss::Missing),
+                    Some(_) => Some(SsaFunctionFactReuseMiss::DuplicatePriorFacts),
+                }
+            };
+            if reuse_miss.is_none() {
+                reused.push(function.semantic_identity.clone());
+                if let Some(fact) = prior.and_then(|rows| rows.first()) {
+                    facts.push((*fact).clone());
+                }
+                continue;
+            }
+
+            let mut function_errors = Vec::new();
             validate_function(
                 function,
                 &semantic_function_ids,
                 &self.obligations,
                 &path,
-                &mut errors,
+                &mut function_errors,
             );
+            errors.extend(function_errors.iter().cloned());
+            recomputed.push(SsaFunctionFactRecomputation {
+                subject: function.semantic_identity.clone(),
+                reason: reuse_miss.expect("the prior fact was not reusable"),
+            });
+            if function_errors.is_empty()
+                && self.schema_version == SSA_SCHEMA_VERSION
+                && semantic_identity_counts.get(&function.semantic_identity) == Some(&1)
+                && ssa_identity_counts.get(&function.identity) == Some(&1)
+            {
+                if let Some(subject_fingerprint) = subject_fingerprint {
+                    facts.push(make_ssa_function_verification_fact(
+                        function.semantic_identity.clone(),
+                        subject_fingerprint,
+                        dependencies,
+                    ));
+                }
+            }
         }
         let mut trace_keys = BTreeSet::new();
         for (index, entry) in self.trace.entries.iter().enumerate() {
@@ -532,9 +725,17 @@ impl SsaModule {
                 ));
             }
         }
-        SsaValidationReport {
-            valid: errors.is_empty(),
-            errors,
+        SsaFunctionFactValidation {
+            report: SsaValidationReport {
+                valid: errors.is_empty(),
+                errors,
+            },
+            facts,
+            reuse: SsaFunctionFactReuseObservation {
+                schema_version: SSA_FUNCTION_VERIFICATION_FACT_SCHEMA_VERSION.to_owned(),
+                reused,
+                recomputed,
+            },
         }
     }
 
@@ -544,7 +745,23 @@ impl SsaModule {
     /// may be present in selected SSA. This check is intentionally repeated at
     /// the backend boundary so direct adapter callers fail closed as well.
     pub fn validate_lowering_boundary(&self, program: &Program) -> SsaValidationReport {
-        let mut errors = self.validate().errors;
+        self.validate_lowering_boundary_with_verified_facts(
+            program,
+            &SsaFunctionFactRequest::default(),
+        )
+        .report
+    }
+
+    /// Validate the backend boundary with reusable function-local structural
+    /// SSA facts. Program-dependent generic and concrete-type checks remain
+    /// fresh for every call.
+    pub fn validate_lowering_boundary_with_verified_facts(
+        &self,
+        program: &Program,
+        request: &SsaFunctionFactRequest,
+    ) -> SsaFunctionFactValidation {
+        let mut validation = self.validate_with_verified_facts(request);
+        let mut errors = std::mem::take(&mut validation.report.errors);
         for (function_index, function) in self.functions.iter().enumerate() {
             let path = format!("functions[{function_index}]");
             let source = program.functions.iter().find(|candidate| {
@@ -676,10 +893,9 @@ impl SsaModule {
             }
         }
 
-        SsaValidationReport {
-            valid: errors.is_empty(),
-            errors,
-        }
+        validation.report.valid = errors.is_empty();
+        validation.report.errors = errors;
+        validation
     }
 
     /// Permit one deliberately narrow evidence-gated experiment: eliminating
@@ -963,13 +1179,26 @@ impl Program {
         trace_timing("ssa-validate", started);
         let ir = self.lower_to_ir()?;
         trace_timing("ssa-ir", started);
-        self.lower_to_ssa_from_ir_inner(&ir, started)
+        self.lower_to_ssa_from_ir_inner(&ir, started, &SsaFunctionFactRequest::default())
+            .map(|result| result.module)
     }
 
     /// Lower selected SSA from a HIR module already produced for this exact
     /// semantic program. Compiler drivers use this to avoid lowering HIR a
     /// second time merely because they also need the SSA emission.
     pub fn lower_to_ssa_from_ir(&self, ir: &HighLevelIr) -> Result<SsaModule, SsaError> {
+        self.lower_to_ssa_from_ir_with_verified_facts(ir, &SsaFunctionFactRequest::default())
+            .map(|result| result.module)
+    }
+
+    /// Lower SSA and reuse verified per-function structural facts when the
+    /// current function bodies and their direct callable/obligation
+    /// dependencies match the Language-issued evidence.
+    pub fn lower_to_ssa_from_ir_with_verified_facts(
+        &self,
+        ir: &HighLevelIr,
+        request: &SsaFunctionFactRequest,
+    ) -> Result<SsaLoweringFactResult, SsaError> {
         crate::record_counter("ssa_build");
         let started = Instant::now();
         let report = self.validate();
@@ -994,7 +1223,7 @@ impl Program {
         }
         trace_timing("ssa-validate", started);
         trace_timing("ssa-ir-reused", started);
-        self.lower_to_ssa_from_ir_inner(ir, started)
+        self.lower_to_ssa_from_ir_inner(ir, started, request)
     }
 
     /// Lower SSA from already-lowered HIR and attach admitted tranche-0.2
@@ -1019,7 +1248,8 @@ impl Program {
         &self,
         ir: &HighLevelIr,
         started: Instant,
-    ) -> Result<SsaModule, SsaError> {
+        request: &SsaFunctionFactRequest,
+    ) -> Result<SsaLoweringFactResult, SsaError> {
         let semantic_identity = crate::identity::program_id(&self.module);
         let mut functions = Vec::new();
         let mut trace_entries = BTreeMap::<SemanticId, SsaTraceEntry>::new();
@@ -1103,12 +1333,16 @@ impl Program {
             generic_specializations: ir.generic_specializations.clone(),
             proof_relationships: Vec::new(),
         };
-        let validation = module.validate();
+        let validation = module.validate_with_verified_facts(request);
         trace_timing("ssa-total", started);
-        if validation.valid {
-            Ok(module)
+        if validation.report.valid {
+            Ok(SsaLoweringFactResult {
+                module,
+                facts: validation.facts,
+                reuse: validation.reuse,
+            })
         } else {
-            Err(SsaError::Invalid(validation))
+            Err(SsaError::Invalid(validation.report))
         }
     }
 }
@@ -1482,6 +1716,153 @@ fn lower_terminator(
                 .collect(),
         },
     }
+}
+
+fn ssa_function_fact_basis(
+    function: &SsaFunction,
+    semantic_function_ids: &BTreeSet<SemanticId>,
+    obligation_ids: &BTreeSet<SemanticId>,
+) -> (Option<String>, Vec<SsaFunctionFactDependency>) {
+    let subject_fingerprint = serde_json::to_vec(function)
+        .ok()
+        .map(|bytes| format!("sha256:{}", sha256_hex(&bytes)));
+    let mut dependencies = BTreeSet::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let SsaInstructionKind::Call { function, .. } = &instruction.kind {
+                dependencies.insert(SsaFunctionFactDependency {
+                    role: SsaFunctionFactDependencyRole::CallableIdentity,
+                    identity: function.clone(),
+                    fingerprint: if semantic_function_ids.contains(function) {
+                        "present".to_owned()
+                    } else {
+                        "missing".to_owned()
+                    },
+                });
+            }
+            for obligation in &instruction.obligations {
+                dependencies.insert(SsaFunctionFactDependency {
+                    role: SsaFunctionFactDependencyRole::ObligationIdentity,
+                    identity: obligation.clone(),
+                    fingerprint: if obligation_ids.contains(obligation) {
+                        "present".to_owned()
+                    } else {
+                        "missing".to_owned()
+                    },
+                });
+            }
+        }
+    }
+    for iteration in &function.bounded_iterations {
+        for obligation in &iteration.obligations {
+            dependencies.insert(SsaFunctionFactDependency {
+                role: SsaFunctionFactDependencyRole::ObligationIdentity,
+                identity: obligation.clone(),
+                fingerprint: if obligation_ids.contains(obligation) {
+                    "present".to_owned()
+                } else {
+                    "missing".to_owned()
+                },
+            });
+        }
+    }
+    (subject_fingerprint, dependencies.into_iter().collect())
+}
+
+fn make_ssa_function_verification_fact(
+    subject: SemanticId,
+    subject_fingerprint: String,
+    dependencies: Vec<SsaFunctionFactDependency>,
+) -> SsaFunctionVerificationFact {
+    let mut invalidating_changes = vec![
+        SsaFunctionFactInvalidator::SubjectFunctionChanged(subject.clone()),
+        SsaFunctionFactInvalidator::SsaSchemaChanged,
+        SsaFunctionFactInvalidator::VerifierChanged,
+        SsaFunctionFactInvalidator::PolicyChanged,
+        SsaFunctionFactInvalidator::LanguageProfileChanged,
+    ];
+    for dependency in &dependencies {
+        invalidating_changes.push(match dependency.role {
+            SsaFunctionFactDependencyRole::CallableIdentity => {
+                SsaFunctionFactInvalidator::CallableAvailabilityChanged(dependency.identity.clone())
+            }
+            SsaFunctionFactDependencyRole::ObligationIdentity => {
+                SsaFunctionFactInvalidator::ObligationAvailabilityChanged(
+                    dependency.identity.clone(),
+                )
+            }
+        });
+    }
+    let mut fact = SsaFunctionVerificationFact {
+        schema_version: SSA_FUNCTION_VERIFICATION_FACT_SCHEMA_VERSION.to_owned(),
+        subject,
+        subject_fingerprint,
+        verifier_identity: SSA_FUNCTION_VERIFICATION_FACT_VERIFIER_ID.to_owned(),
+        policy_identity: SSA_FUNCTION_VERIFICATION_FACT_POLICY_ID.to_owned(),
+        language_profile: SSA_FUNCTION_VERIFICATION_LANGUAGE_PROFILE.to_owned(),
+        ssa_schema: SSA_SCHEMA_VERSION.to_owned(),
+        dependencies,
+        result: SsaFunctionFactResult::Verified,
+        verification_witness_identity: String::new(),
+        invalidating_changes,
+    };
+    fact.verification_witness_identity = ssa_function_fact_witness_identity(&fact)
+        .expect("Language SSA verification facts serialize deterministically");
+    fact
+}
+
+fn ssa_function_fact_witness_identity(fact: &SsaFunctionVerificationFact) -> Option<String> {
+    let material = (
+        fact.schema_version.as_str(),
+        &fact.subject,
+        fact.subject_fingerprint.as_str(),
+        fact.verifier_identity.as_str(),
+        fact.policy_identity.as_str(),
+        fact.language_profile.as_str(),
+        fact.ssa_schema.as_str(),
+        &fact.dependencies,
+        fact.result,
+        &fact.invalidating_changes,
+    );
+    serde_json::to_vec(&material).ok().map(|bytes| {
+        let mut witness = b"mncs.language.ssa-function-verification-witness/1\0".to_vec();
+        witness.extend_from_slice(&bytes);
+        format!("sha256:{}", sha256_hex(&witness))
+    })
+}
+
+fn ssa_function_fact_reuse_miss(
+    fact: &SsaFunctionVerificationFact,
+    subject_fingerprint: Option<&str>,
+    dependencies: &[SsaFunctionFactDependency],
+) -> Option<SsaFunctionFactReuseMiss> {
+    if fact.schema_version != SSA_FUNCTION_VERIFICATION_FACT_SCHEMA_VERSION {
+        return Some(SsaFunctionFactReuseMiss::UnsupportedSchema);
+    }
+    if fact.subject_fingerprint != subject_fingerprint.unwrap_or_default() {
+        return Some(SsaFunctionFactReuseMiss::SubjectChanged);
+    }
+    if fact.verifier_identity != SSA_FUNCTION_VERIFICATION_FACT_VERIFIER_ID {
+        return Some(SsaFunctionFactReuseMiss::VerifierChanged);
+    }
+    if fact.policy_identity != SSA_FUNCTION_VERIFICATION_FACT_POLICY_ID {
+        return Some(SsaFunctionFactReuseMiss::PolicyChanged);
+    }
+    if fact.language_profile != SSA_FUNCTION_VERIFICATION_LANGUAGE_PROFILE {
+        return Some(SsaFunctionFactReuseMiss::LanguageProfileChanged);
+    }
+    if fact.ssa_schema != SSA_SCHEMA_VERSION {
+        return Some(SsaFunctionFactReuseMiss::SsaSchemaChanged);
+    }
+    if fact.dependencies != dependencies {
+        return Some(SsaFunctionFactReuseMiss::DependenciesChanged);
+    }
+    if ssa_function_fact_witness_identity(fact).as_deref()
+        != Some(fact.verification_witness_identity.as_str())
+    {
+        return Some(SsaFunctionFactReuseMiss::InvalidWitness);
+    }
+    None
 }
 
 fn validate_function(
@@ -2496,8 +2877,8 @@ fn diagnostic(code: &str, path: &str, message: &str) -> SsaDiagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::body::tests::executable_program;
     use crate::MicroVerifier;
+    use crate::body::tests::executable_program;
 
     #[test]
     fn executable_body_lowers_to_deterministic_valid_ssa_with_trace() {
@@ -2507,11 +2888,13 @@ mod tests {
         assert_eq!(first, second);
         assert!(first.validate().valid, "{:#?}", first.validate().errors);
         assert_eq!(first.schema_version, SSA_SCHEMA_VERSION);
-        assert!(first
-            .trace
-            .entries
-            .iter()
-            .any(|entry| entry.ssa_identities.len() == 1));
+        assert!(
+            first
+                .trace
+                .entries
+                .iter()
+                .any(|entry| entry.ssa_identities.len() == 1)
+        );
         assert_eq!(first.fingerprint().unwrap(), second.fingerprint().unwrap());
     }
 
@@ -2567,10 +2950,12 @@ mod tests {
         };
         let allowed = ssa.attempt_no_overflow_elision(&operation, &obligation, &[evidence.clone()]);
         assert!(allowed.permitted);
-        assert!(allowed
-            .record
-            .backend_promises_permitted
-            .contains(&"no-overflow".to_owned()));
+        assert!(
+            allowed
+                .record
+                .backend_promises_permitted
+                .contains(&"no-overflow".to_owned())
+        );
         evidence.freshness = EvidenceFreshness::Stale;
         let stale = ssa.attempt_no_overflow_elision(&operation, &obligation, &[evidence]);
         assert!(!stale.permitted);
@@ -2586,6 +2971,118 @@ mod tests {
         let report = ssa.validate();
         assert!(!report.valid);
         assert!(report.errors.iter().any(|error| error.code == "SSA006"));
+    }
+
+    #[test]
+    fn language_ssa_function_facts_reuse_only_exact_verified_units() {
+        let program = executable_program();
+        let hir = program.lower_to_ir().expect("HIR");
+        let cold = program
+            .lower_to_ssa_from_ir_with_verified_facts(&hir, &SsaFunctionFactRequest::default())
+            .expect("cold SSA lowering");
+        assert_eq!(cold.reuse.reused, Vec::<SemanticId>::new());
+        assert_eq!(cold.facts.len(), 1);
+        assert_eq!(
+            cold.reuse.recomputed[0].reason,
+            SsaFunctionFactReuseMiss::Missing
+        );
+        assert!(cold.module.validate().valid);
+
+        let warm = program
+            .lower_to_ssa_from_ir_with_verified_facts(
+                &hir,
+                &SsaFunctionFactRequest {
+                    prior_facts: cold.facts.clone(),
+                },
+            )
+            .expect("warm SSA lowering");
+        assert_eq!(warm.module, cold.module);
+        assert_eq!(warm.reuse.reused, vec![cold.facts[0].subject.clone()]);
+        assert!(warm.reuse.recomputed.is_empty());
+
+        let mut edited_body = cold.module.clone();
+        edited_body.functions[0].blocks[0].instructions[0]
+            .inputs
+            .push(SemanticId("mncs:missing-value".to_owned()));
+        let body_edit = edited_body.validate_with_verified_facts(&SsaFunctionFactRequest {
+            prior_facts: cold.facts.clone(),
+        });
+        assert!(!body_edit.report.valid);
+        assert!(body_edit.reuse.reused.is_empty());
+        assert_eq!(
+            body_edit.reuse.recomputed[0].reason,
+            SsaFunctionFactReuseMiss::SubjectChanged
+        );
+        assert!(
+            body_edit
+                .report
+                .errors
+                .iter()
+                .any(|error| error.code == "SSA006")
+        );
+        assert!(body_edit.facts.is_empty());
+
+        let referenced_obligation = cold.module.functions[0]
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .flat_map(|instruction| &instruction.obligations)
+            .next()
+            .cloned()
+            .expect("function references an obligation");
+        let mut removed_dependency = cold.module.clone();
+        removed_dependency
+            .obligations
+            .retain(|obligation| obligation.identity != referenced_obligation);
+        let dependency_edit =
+            removed_dependency.validate_with_verified_facts(&SsaFunctionFactRequest {
+                prior_facts: cold.facts.clone(),
+            });
+        assert!(!dependency_edit.report.valid);
+        assert!(dependency_edit.reuse.reused.is_empty());
+        assert_eq!(
+            dependency_edit.reuse.recomputed[0].reason,
+            SsaFunctionFactReuseMiss::DependenciesChanged
+        );
+        assert!(
+            dependency_edit
+                .report
+                .errors
+                .iter()
+                .any(|error| error.code == "SSA011")
+        );
+        assert!(dependency_edit.facts.is_empty());
+
+        let mut forged_witness = cold.facts[0].clone();
+        forged_witness.verifier_identity = "untrusted-verifier/1".to_owned();
+        let forged = cold
+            .module
+            .validate_with_verified_facts(&SsaFunctionFactRequest {
+                prior_facts: vec![forged_witness],
+            });
+        assert!(forged.reuse.reused.is_empty());
+        assert_eq!(
+            forged.reuse.recomputed[0].reason,
+            SsaFunctionFactReuseMiss::VerifierChanged
+        );
+
+        let mut duplicate_subject = cold.module.clone();
+        let mut duplicate = duplicate_subject.functions[0].clone();
+        duplicate.identity = SemanticId("mncs:test:duplicate-ssa-function".to_owned());
+        duplicate_subject.functions.push(duplicate);
+        let duplicate_check =
+            duplicate_subject.validate_with_verified_facts(&SsaFunctionFactRequest {
+                prior_facts: cold.facts.clone(),
+            });
+        assert!(duplicate_check.reuse.reused.is_empty());
+        assert!(
+            duplicate_check
+                .reuse
+                .recomputed
+                .iter()
+                .all(|row| { row.reason == SsaFunctionFactReuseMiss::DuplicateSubjectFunctions })
+        );
+        assert!(duplicate_check.facts.is_empty());
     }
 
     #[test]

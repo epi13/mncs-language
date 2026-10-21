@@ -213,10 +213,15 @@ pub use representation::{
     RepresentationDecision, RepresentationObservation, SpatialFacts,
 };
 pub use ssa::{
-    SsaBlock, SsaBoundedIteration, SsaDiagnostic, SsaError, SsaFunction, SsaInstruction,
-    SsaInstructionKind, SsaModule, SsaTerminator, SsaTraceEntry, SsaTraceMap,
-    SsaTransformationDecision, SsaValidationReport, SsaValue, SSA_SCHEMA_VERSION,
-    SSA_SCHEMA_VERSION_PRE_TYPED,
+    SsaBlock, SsaBoundedIteration, SsaDiagnostic, SsaError, SsaFunction, SsaFunctionFactDependency,
+    SsaFunctionFactDependencyRole, SsaFunctionFactInvalidator, SsaFunctionFactRecomputation,
+    SsaFunctionFactRequest, SsaFunctionFactResult, SsaFunctionFactReuseMiss,
+    SsaFunctionFactReuseObservation, SsaFunctionFactValidation, SsaFunctionVerificationFact,
+    SsaInstruction, SsaInstructionKind, SsaLoweringFactResult, SsaModule, SsaTerminator,
+    SsaTraceEntry, SsaTraceMap, SsaTransformationDecision, SsaValidationReport, SsaValue,
+    SSA_FUNCTION_VERIFICATION_FACT_POLICY_ID, SSA_FUNCTION_VERIFICATION_FACT_SCHEMA_VERSION,
+    SSA_FUNCTION_VERIFICATION_FACT_VERIFIER_ID, SSA_FUNCTION_VERIFICATION_LANGUAGE_PROFILE,
+    SSA_SCHEMA_VERSION, SSA_SCHEMA_VERSION_PRE_TYPED,
 };
 pub use ssa_execution::{
     compare_body_and_ssa, execute_ssa, execute_ssa_module, execute_ssa_module_prevalidated,
