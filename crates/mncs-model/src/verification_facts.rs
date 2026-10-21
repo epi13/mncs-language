@@ -281,6 +281,24 @@ impl NominalTypeDefinition<'_> {
             Self::Finite(finite_type) => &finite_type.name,
         }
     }
+
+    fn body_dependency(&self) -> Option<VerificationFactDependency> {
+        let (identity, fingerprint) = match self {
+            Self::Record(record_type) => (
+                &record_type.identity,
+                crate::sha256_hex(serde_json::to_string(record_type).ok()?.as_bytes()),
+            ),
+            Self::Finite(finite_type) => (
+                &finite_type.identity,
+                crate::sha256_hex(serde_json::to_string(finite_type).ok()?.as_bytes()),
+            ),
+        };
+        Some(VerificationFactDependency {
+            role: VerificationDependencyRole::NominalType,
+            identity: identity.clone(),
+            fingerprint,
+        })
+    }
 }
 
 /// Per-snapshot nominal declarations indexed for record-fact dependency
@@ -290,6 +308,13 @@ pub(crate) struct VerificationNominalTypeIndex<'a> {
     by_identity: BTreeMap<SemanticId, Vec<NominalTypeDefinition<'a>>>,
     by_module_and_name: BTreeMap<(Option<String>, String), Vec<NominalTypeDefinition<'a>>>,
     by_name: BTreeMap<String, Vec<NominalTypeDefinition<'a>>>,
+}
+
+/// Per-snapshot indexes for semantic dependencies consulted by body facts.
+/// Building these once avoids rescanning every declaration for each function.
+pub(crate) struct VerificationFactDependencyIndex<'a> {
+    pub(crate) nominal_types: VerificationNominalTypeIndex<'a>,
+    assumptions_by_name: BTreeMap<String, Vec<VerificationFactDependency>>,
 }
 
 impl<'a> VerificationNominalTypeIndex<'a> {
@@ -351,6 +376,43 @@ impl Program {
             index.insert(NominalTypeDefinition::Finite(finite_type));
         }
         index
+    }
+
+    pub(crate) fn verification_fact_dependency_index(
+        &self,
+        identities: &SemanticIdentities,
+    ) -> VerificationFactDependencyIndex<'_> {
+        let mut assumption_fingerprints = BTreeMap::<SemanticId, Vec<String>>::new();
+        for identity in &identities.objects {
+            if identity.kind == crate::IdentityKind::Assumption {
+                assumption_fingerprints
+                    .entry(identity.identity.clone())
+                    .or_default()
+                    .push(identity.fingerprint.clone());
+            }
+        }
+
+        let mut assumptions_by_name = BTreeMap::new();
+        for assumption in &self.assumptions {
+            let identity = assumption_id(&self.module, &assumption.id);
+            if let Some(fingerprints) = assumption_fingerprints.get(&identity) {
+                let dependencies = assumptions_by_name
+                    .entry(assumption.id.clone())
+                    .or_insert_with(Vec::new);
+                dependencies.extend(fingerprints.iter().map(|fingerprint| {
+                    VerificationFactDependency {
+                        role: VerificationDependencyRole::Assumption,
+                        identity: identity.clone(),
+                        fingerprint: fingerprint.clone(),
+                    }
+                }));
+            }
+        }
+
+        VerificationFactDependencyIndex {
+            nominal_types: self.verification_nominal_type_index(),
+            assumptions_by_name,
+        }
     }
 
     pub(crate) fn declaration_fact_basis_with_identities(
@@ -551,11 +613,13 @@ impl Program {
     ) -> Option<BodyFactBasis> {
         let function_index = self.verification_function_index();
         let specialization_index = self.verification_specialization_index();
+        let dependency_index = self.verification_fact_dependency_index(identities);
         self.body_fact_basis_with_function_index(
             function,
             identities,
             &function_index,
             &specialization_index,
+            &dependency_index,
         )
     }
 
@@ -565,6 +629,7 @@ impl Program {
         identities: &SemanticIdentities,
         function_index: &BTreeMap<SemanticId, &Function>,
         specialization_index: &BTreeMap<SemanticId, Vec<(usize, &GenericSpecializationRecord)>>,
+        dependency_index: &VerificationFactDependencyIndex<'_>,
     ) -> Option<BodyFactBasis> {
         let body = function.body.as_ref()?;
         let home = function.identity_namespace(&self.module);
@@ -670,51 +735,22 @@ impl Program {
             self.add_effect_and_capability_dependencies(candidate, identities, &mut dependencies)?;
         }
 
-        // `SemanticIdentities` preserves the legacy rule that record objects
-        // are enumerated only for source-bound programs. The verifier still
-        // resolves record types from declaration-only model programs, so
-        // capture those exact existing record identities and their canonical
-        // identity fingerprint directly as dependencies too.
-        for record_type in &self.record_types {
-            if nominal_types.contains(&record_type.identity) {
-                let serialized = serde_json::to_string(record_type).ok()?;
-                dependencies.insert(VerificationFactDependency {
-                    role: VerificationDependencyRole::NominalType,
-                    identity: record_type.identity.clone(),
-                    fingerprint: crate::sha256_hex(serialized.as_bytes()),
-                });
+        for identity in nominal_types {
+            if let Some(candidates) = dependency_index.nominal_types.by_identity.get(&identity) {
+                for candidate in candidates {
+                    dependencies.insert(candidate.body_dependency()?);
+                }
             }
         }
 
-        for record in &identities.objects {
-            match record.kind {
-                crate::IdentityKind::FiniteType if nominal_types.contains(&record.identity) => {
-                    dependencies.insert(VerificationFactDependency {
-                        role: VerificationDependencyRole::NominalType,
-                        identity: record.identity.clone(),
-                        fingerprint: record.fingerprint.clone(),
-                    });
-                }
-                crate::IdentityKind::Assumption => {
-                    let used = self.assumptions.iter().any(|assumption| {
-                        let assumption_identity =
-                            crate::identity::assumption_id(&self.module, &assumption.id);
-                        assumption_identity == record.identity
-                            && (function.assumptions.contains(&assumption.id)
-                                || body_strings.contains(assumption.id.as_str())
-                                || reachable_functions.iter().any(|candidate| {
-                                    candidate.assumptions.contains(&assumption.id)
-                                }))
-                    });
-                    if used {
-                        dependencies.insert(VerificationFactDependency {
-                            role: VerificationDependencyRole::Assumption,
-                            identity: record.identity.clone(),
-                            fingerprint: record.fingerprint.clone(),
-                        });
-                    }
-                }
-                _ => {}
+        let mut used_assumptions = body_strings;
+        used_assumptions.extend(function.assumptions.iter().cloned());
+        for candidate in &reachable_functions {
+            used_assumptions.extend(candidate.assumptions.iter().cloned());
+        }
+        for assumption in used_assumptions {
+            if let Some(candidates) = dependency_index.assumptions_by_name.get(&assumption) {
+                dependencies.extend(candidates.iter().cloned());
             }
         }
 
@@ -1649,6 +1685,46 @@ mod tests {
         assert!(reused.report.valid, "{:?}", reused.report.errors);
         assert_eq!(reused.reuse.reused.len(), 1);
         assert!(reused.reuse.recomputed.is_empty());
+    }
+
+    #[test]
+    fn body_fact_dependency_index_skips_unrelated_declarations_across_many_functions() {
+        let mut program = call_program();
+        let prototype = program
+            .functions
+            .iter()
+            .find(|function| function.name == "independent")
+            .unwrap()
+            .clone();
+        for index in 0..96 {
+            let mut function = prototype.clone();
+            function.name = format!("independent_{index}");
+            program.functions.push(function);
+        }
+        for index in 0..2048 {
+            let name = format!("Unused_{index}");
+            program.record_types.push(RecordType {
+                identity: record_type_id("Unrelated.Module", &name, &[("field", "i64")]),
+                name,
+                fields: vec![RecordField {
+                    name: "field".to_owned(),
+                    field_type: "i64".to_owned(),
+                }],
+            });
+        }
+
+        let first = program.validate_with_verified_facts(&request("0.19", Vec::new()));
+        assert!(first.report.valid, "{:?}", first.report.errors);
+        assert_eq!(first.facts.len(), 98);
+        assert!(first.facts.iter().all(|fact| fact
+            .dependencies
+            .iter()
+            .all(|dependency| dependency.role != VerificationDependencyRole::NominalType)));
+
+        let second = program.validate_with_verified_facts(&request("0.19", first.facts));
+        assert!(second.report.valid, "{:?}", second.report.errors);
+        assert_eq!(second.reuse.reused.len(), 98);
+        assert!(second.reuse.recomputed.is_empty());
     }
 
     #[test]
