@@ -17,7 +17,7 @@ use crate::{
     SemanticId, SemanticIdentities,
 };
 
-pub const VERIFICATION_FACT_SCHEMA_VERSION: &str = "mncs.language-verification-fact/3";
+pub const VERIFICATION_FACT_SCHEMA_VERSION: &str = "mncs.language-verification-fact/4";
 pub const VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION: &str =
     "mncs.language-verification-fact-reuse-observation/2";
 pub const VERIFICATION_FACT_VERIFIER_ID: &str = "mncs-language-function-body-validator/4";
@@ -31,9 +31,11 @@ pub const FINITE_TYPE_FACT_POLICY_ID: &str = "mncs-language-finite-type-policy/1
 pub const RECORD_TYPE_FACT_VERIFIER_ID: &str = "mncs-language-record-type-validator/1";
 pub const RECORD_TYPE_FACT_POLICY_ID: &str = "mncs-language-record-type-policy/1";
 pub const VERIFICATION_DEPENDENCY_SUMMARY_CACHE_SCHEMA_VERSION: &str =
-    "mncs.language-verification-dependency-summary-cache/1";
+    "mncs.language-verification-dependency-summary-cache/2";
 pub const VERIFICATION_DEPENDENCY_SUMMARY_OBSERVATION_SCHEMA_VERSION: &str =
-    "mncs.language-verification-dependency-summary-cache-observation/1";
+    "mncs.language-verification-dependency-summary-cache-observation/2";
+pub const VERIFICATION_BODY_DEPENDENCY_SUMMARY_SCHEMA_VERSION: &str =
+    "mncs.language-verification-body-dependency-summary/1";
 /// Bump this when the resolved-body dependency extraction rules change.
 pub const VERIFICATION_DEPENDENCY_SUMMARY_POLICY_IDENTITY: &str =
     "mncs-language-verification-dependency-extractor/1";
@@ -96,6 +98,11 @@ pub struct VerificationFact {
     pub language_profile: String,
     pub declaration_interface: VerificationFactDependency,
     pub dependencies: Vec<VerificationFactDependency>,
+    /// Resolved direct references used to derive the dependency closure.
+    /// Language revalidates the subject, interface, verifier, policy, and
+    /// witness before using this summary to seed a fresh process cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependency_summary: Option<VerificationBodyDependencySummary>,
     pub declared_effects: Vec<Effect>,
     pub declared_capabilities: Vec<String>,
     pub result: VerificationFactResult,
@@ -183,12 +190,16 @@ pub struct VerificationFactValidation {
     pub record_type_declaration_reuse: DeclarationFactReuseObservation,
 }
 
-/// Observation of Language's process-local cache for direct body dependencies.
-/// Reuse here avoids rescanning unchanged resolved bodies; it does not skip
-/// verification or authorize reuse of a `VerificationFact`.
+/// Observation of direct dependency extraction avoided by a verified fact or
+/// the process-local cache. These hits do not skip body verification or
+/// authorize reuse of a `VerificationFact`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerificationDependencySummaryCacheObservation {
     pub schema_version: String,
+    /// Direct summaries restored from verified Language facts after checking
+    /// the current body, interface, verifier, policy, and witness identities.
+    pub fact_seeded_function_subjects: Vec<SemanticId>,
+    /// Direct summaries reused from this process's bounded memory cache.
     pub reused_function_subjects: Vec<SemanticId>,
     pub recomputed_function_subjects: Vec<SemanticId>,
     pub evicted_entry_count: usize,
@@ -198,6 +209,7 @@ impl Default for VerificationDependencySummaryCacheObservation {
     fn default() -> Self {
         Self {
             schema_version: VERIFICATION_DEPENDENCY_SUMMARY_OBSERVATION_SCHEMA_VERSION.to_owned(),
+            fact_seeded_function_subjects: Vec::new(),
             reused_function_subjects: Vec::new(),
             recomputed_function_subjects: Vec::new(),
             evicted_entry_count: 0,
@@ -205,12 +217,12 @@ impl Default for VerificationDependencySummaryCacheObservation {
     }
 }
 
-/// Caller-owned, bounded, process-local cache for Language's direct semantic
+/// Caller-owned, bounded in-memory cache for Language's direct semantic
 /// dependency extraction. Its private entries cannot be deserialized from an
-/// untrusted artifact. Every hit is guarded by the current function identity,
-/// callable interface fingerprint, resolved body fingerprint, and extractor
-/// policy identity; dependency fingerprints and verification facts are rebuilt
-/// against the current program.
+/// artifact. A fresh cache can be seeded only from a verified body fact whose
+/// witness, body, interface, verifier, and extractor policy match. Dependency
+/// fingerprints and verification facts are rebuilt against the current
+/// program before semantic reuse is considered.
 #[derive(Debug)]
 pub struct VerificationDependencySummaryCache {
     entries: BTreeMap<SemanticId, DependencySummaryCacheEntry>,
@@ -218,6 +230,27 @@ pub struct VerificationDependencySummaryCache {
     next_generation: u64,
     total_reference_count: usize,
     total_byte_count: usize,
+}
+
+/// Direct dependency information produced by Language's resolved-body
+/// extractor and carried inside a successful body fact. It can avoid
+/// repeating structural extraction in a fresh process; current dependency
+/// fingerprints and fact validity are still rebuilt from the current program.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerificationBodyDependencySummary {
+    pub schema_version: String,
+    pub extractor_policy_identity: String,
+    pub calls: Vec<VerificationBodyCallReference>,
+    pub assumptions: Vec<String>,
+    pub nominal_types: Vec<SemanticId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct VerificationBodyCallReference {
+    pub function: SemanticId,
+    pub instantiation: Option<SemanticId>,
+    pub specialization: Option<SemanticId>,
+    pub canonical_arguments: Option<String>,
 }
 
 impl Default for VerificationDependencySummaryCache {
@@ -245,7 +278,7 @@ struct DependencySummaryCacheEntry {
 
 #[derive(Debug, Clone)]
 struct CachedBodyDependencySummary {
-    calls: BTreeSet<BodyCallReference>,
+    calls: BTreeSet<VerificationBodyCallReference>,
     assumptions: BTreeSet<String>,
     nominal_types: BTreeSet<SemanticId>,
 }
@@ -260,7 +293,7 @@ impl CachedBodyDependencySummary {
             .calls
             .iter()
             .map(|call| {
-                std::mem::size_of::<BodyCallReference>()
+                std::mem::size_of::<VerificationBodyCallReference>()
                     + call.function.as_str().len()
                     + call
                         .instantiation
@@ -299,6 +332,8 @@ impl VerificationDependencySummaryCache {
         body: &FunctionBody,
         body_fingerprint: Option<&str>,
         interface_fingerprint: &str,
+        fact_subject: &SemanticId,
+        prior_fact: Option<&VerificationFact>,
         observation: &mut VerificationDependencySummaryCacheObservation,
     ) -> CachedBodyDependencySummary {
         if let Some(body_fingerprint) = body_fingerprint {
@@ -309,6 +344,28 @@ impl VerificationDependencySummaryCache {
             }) {
                 observation.reused_function_subjects.push(subject.clone());
                 return entry.summary.clone();
+            }
+
+            if let Some(summary) = prior_fact.and_then(|fact| {
+                fact.dependency_summary_for_cache(
+                    fact_subject,
+                    subject,
+                    body_fingerprint,
+                    interface_fingerprint,
+                )
+            }) {
+                if self.retain(
+                    subject,
+                    body_fingerprint,
+                    interface_fingerprint,
+                    &summary,
+                    observation,
+                ) {
+                    observation
+                        .fact_seeded_function_subjects
+                        .push(subject.clone());
+                    return summary;
+                }
             }
         }
 
@@ -327,6 +384,24 @@ impl VerificationDependencySummaryCache {
         let Some(body_fingerprint) = body_fingerprint else {
             return summary;
         };
+        self.retain(
+            subject,
+            body_fingerprint,
+            interface_fingerprint,
+            &summary,
+            observation,
+        );
+        summary
+    }
+
+    fn retain(
+        &mut self,
+        subject: &SemanticId,
+        body_fingerprint: &str,
+        interface_fingerprint: &str,
+        summary: &CachedBodyDependencySummary,
+        observation: &mut VerificationDependencySummaryCacheObservation,
+    ) -> bool {
         let reference_count = summary.reference_count();
         let byte_count = summary.retained_byte_count();
         if reference_count > MAX_DEPENDENCY_SUMMARY_REFERENCES_PER_ENTRY
@@ -335,7 +410,7 @@ impl VerificationDependencySummaryCache {
             if self.remove(subject) {
                 observation.evicted_entry_count += 1;
             }
-            return summary;
+            return false;
         }
 
         if self.remove(subject) {
@@ -390,7 +465,7 @@ impl VerificationDependencySummaryCache {
                     .is_some_and(|entry| entry.generation == *generation)
             });
         }
-        summary
+        true
     }
 
     fn remove(&mut self, subject: &SemanticId) -> bool {
@@ -487,6 +562,7 @@ pub(crate) struct BodyFactBasis {
     pub subject_fingerprint: String,
     pub declaration_interface: VerificationFactDependency,
     pub dependencies: Vec<VerificationFactDependency>,
+    pub dependency_summary: VerificationBodyDependencySummary,
     pub declared_effects: Vec<Effect>,
     pub declared_capabilities: Vec<String>,
 }
@@ -569,7 +645,7 @@ struct VerificationFunctionDependencySummary<'a> {
     interface_fingerprint: String,
     declaration_fingerprint: String,
     semantic_fingerprint: Option<String>,
-    calls: BTreeSet<BodyCallReference>,
+    calls: BTreeSet<VerificationBodyCallReference>,
     assumptions: BTreeSet<String>,
     nominal_types: BTreeSet<SemanticId>,
     specializations: BTreeMap<SemanticId, &'a GenericSpecializationRecord>,
@@ -669,6 +745,7 @@ impl Program {
             function_index,
             specialization_index,
             None,
+            None,
         )
         .0
     }
@@ -678,6 +755,7 @@ impl Program {
         identities: &SemanticIdentities,
         function_index: &BTreeMap<SemanticId, &'a Function>,
         specialization_index: &BTreeMap<SemanticId, Vec<(usize, &'a GenericSpecializationRecord)>>,
+        prior_facts_by_subject: Option<&BTreeMap<SemanticId, Vec<&VerificationFact>>>,
         mut dependency_summary_cache: Option<&mut VerificationDependencySummaryCache>,
     ) -> (
         VerificationFactDependencyIndex<'a>,
@@ -731,6 +809,14 @@ impl Program {
                 let (calls, assumptions, nominal_types, specializations) = if let Some(body) =
                     function.body.as_ref()
                 {
+                    let body_subject =
+                        body.identity(function.identity_namespace(&self.module), &function.name);
+                    let prior_fact = prior_facts_by_subject
+                        .and_then(|facts| facts.get(&body_subject))
+                        .and_then(|facts| match facts.as_slice() {
+                            [fact] => Some(*fact),
+                            _ => None,
+                        });
                     let summary = match dependency_summary_cache.as_deref_mut() {
                         Some(cache) => cache.body_summary(
                             self,
@@ -739,6 +825,8 @@ impl Program {
                             body,
                             body_fingerprint.as_deref(),
                             &interface_fingerprint,
+                            &body_subject,
+                            prior_fact,
                             &mut dependency_summary_observation,
                         ),
                         None => {
@@ -797,6 +885,9 @@ impl Program {
             .collect();
 
         let dependency_summary_cache = cache_enabled.then(|| {
+            dependency_summary_observation
+                .fact_seeded_function_subjects
+                .sort();
             dependency_summary_observation
                 .reused_function_subjects
                 .sort();
@@ -1194,6 +1285,14 @@ impl Program {
             subject_fingerprint,
             declaration_interface,
             dependencies: dependencies.into_iter().collect(),
+            dependency_summary: VerificationBodyDependencySummary {
+                schema_version: VERIFICATION_BODY_DEPENDENCY_SUMMARY_SCHEMA_VERSION.to_owned(),
+                extractor_policy_identity: VERIFICATION_DEPENDENCY_SUMMARY_POLICY_IDENTITY
+                    .to_owned(),
+                calls: function_summary.calls.iter().cloned().collect(),
+                assumptions: function_summary.assumptions.iter().cloned().collect(),
+                nominal_types: function_summary.nominal_types.iter().cloned().collect(),
+            },
             declared_effects: function.effects.clone(),
             declared_capabilities: function.capabilities.clone(),
         })
@@ -1292,15 +1391,7 @@ fn record_type_semantic_fingerprint(record_type: &RecordType) -> Option<String> 
     Some(crate::sha256_hex(&bytes))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct BodyCallReference {
-    function: SemanticId,
-    instantiation: Option<SemanticId>,
-    specialization: Option<SemanticId>,
-    canonical_arguments: Option<String>,
-}
-
-fn body_call_references(body: &FunctionBody) -> BTreeSet<BodyCallReference> {
+fn body_call_references(body: &FunctionBody) -> BTreeSet<VerificationBodyCallReference> {
     let mut calls = BTreeSet::new();
     for block in &body.blocks {
         for operation in &block.operations {
@@ -1312,7 +1403,7 @@ fn body_call_references(body: &FunctionBody) -> BTreeSet<BodyCallReference> {
                 ..
             } = &operation.kind
             {
-                calls.insert(BodyCallReference {
+                calls.insert(VerificationBodyCallReference {
                     function: function.clone(),
                     instantiation: instantiation.clone(),
                     specialization: specialization.clone(),
@@ -1331,18 +1422,14 @@ fn body_call_references(body: &FunctionBody) -> BTreeSet<BodyCallReference> {
     // its explicit call set keeps the dependency basis aligned with the
     // verified iteration summary as well as the individual operations.
     for iteration in &body.bounded_iterations {
-        calls.extend(
-            iteration
-                .callees
-                .iter()
-                .cloned()
-                .map(|function| BodyCallReference {
-                    function,
-                    instantiation: None,
-                    specialization: None,
-                    canonical_arguments: None,
-                }),
-        );
+        calls.extend(iteration.callees.iter().cloned().map(|function| {
+            VerificationBodyCallReference {
+                function,
+                instantiation: None,
+                specialization: None,
+                canonical_arguments: None,
+            }
+        }));
     }
     calls
 }
@@ -1517,6 +1604,7 @@ impl VerificationFact {
             language_profile: language_profile.to_owned(),
             declaration_interface: basis.declaration_interface,
             dependencies: basis.dependencies,
+            dependency_summary: Some(basis.dependency_summary),
             declared_effects: basis.declared_effects,
             declared_capabilities: basis.declared_capabilities,
             result: VerificationFactResult::Verified,
@@ -1582,6 +1670,50 @@ impl VerificationFact {
         Ok(())
     }
 
+    fn dependency_summary_for_cache(
+        &self,
+        subject: &SemanticId,
+        declaration_identity: &SemanticId,
+        body_fingerprint: &str,
+        interface_fingerprint: &str,
+    ) -> Option<CachedBodyDependencySummary> {
+        if self.schema_version != VERIFICATION_FACT_SCHEMA_VERSION
+            || self.verifier_identity != VERIFICATION_FACT_VERIFIER_ID
+            || self.policy_identity != VERIFICATION_FACT_POLICY_ID
+            || self.result != VerificationFactResult::Verified
+            || self.verification_witness_identity != self.computed_witness_identity()
+            || &self.subject != subject
+            || self.subject_fingerprint != body_fingerprint
+            || self.declaration_interface.role != VerificationDependencyRole::CallableInterface
+            || &self.declaration_interface.identity != declaration_identity
+            || self.declaration_interface.fingerprint != interface_fingerprint
+        {
+            return None;
+        }
+        let summary = self.dependency_summary.as_ref()?;
+        if summary.schema_version != VERIFICATION_BODY_DEPENDENCY_SUMMARY_SCHEMA_VERSION
+            || summary.extractor_policy_identity != VERIFICATION_DEPENDENCY_SUMMARY_POLICY_IDENTITY
+            || summary.calls.len() + summary.assumptions.len() + summary.nominal_types.len()
+                > MAX_DEPENDENCY_SUMMARY_REFERENCES_PER_ENTRY
+            || !summary.calls.windows(2).all(|pair| pair[0] < pair[1])
+            || !summary.assumptions.windows(2).all(|pair| pair[0] < pair[1])
+            || !summary
+                .nominal_types
+                .windows(2)
+                .all(|pair| pair[0] < pair[1])
+        {
+            return None;
+        }
+        let summary = CachedBodyDependencySummary {
+            calls: summary.calls.iter().cloned().collect(),
+            assumptions: summary.assumptions.iter().cloned().collect(),
+            nominal_types: summary.nominal_types.iter().cloned().collect(),
+        };
+        let byte_count = summary.retained_byte_count();
+        let accepted = byte_count <= MAX_DEPENDENCY_SUMMARY_CACHE_BYTES_PER_ENTRY;
+        accepted.then_some(summary)
+    }
+
     fn computed_witness_identity(&self) -> String {
         #[derive(Serialize)]
         struct Witness<'a> {
@@ -1593,6 +1725,7 @@ impl VerificationFact {
             language_profile: &'a str,
             declaration_interface: &'a VerificationFactDependency,
             dependencies: &'a [VerificationFactDependency],
+            dependency_summary: &'a Option<VerificationBodyDependencySummary>,
             declared_effects: &'a [Effect],
             declared_capabilities: &'a [String],
             result: VerificationFactResult,
@@ -1607,6 +1740,7 @@ impl VerificationFact {
             language_profile: &self.language_profile,
             declaration_interface: &self.declaration_interface,
             dependencies: &self.dependencies,
+            dependency_summary: &self.dependency_summary,
             declared_effects: &self.declared_effects,
             declared_capabilities: &self.declared_capabilities,
             result: self.result,
@@ -1731,7 +1865,7 @@ impl DeclarationVerificationFact {
 fn specialization_is_relevant(
     specialization: &GenericSpecializationRecord,
     declaration: &SemanticId,
-    calls: &BTreeSet<BodyCallReference>,
+    calls: &BTreeSet<VerificationBodyCallReference>,
 ) -> bool {
     specialization.specialization_function == *declaration
         || calls
@@ -1741,7 +1875,7 @@ fn specialization_is_relevant(
 
 fn specialization_call_matches(
     specialization: &GenericSpecializationRecord,
-    call: &BodyCallReference,
+    call: &VerificationBodyCallReference,
 ) -> bool {
     let addresses_specialization = call.instantiation.as_ref()
         == Some(&specialization.instantiation)
@@ -1754,7 +1888,7 @@ fn specialization_call_matches(
 
 fn select_relevant_specializations<'a>(
     declaration: &SemanticId,
-    calls: &BTreeSet<BodyCallReference>,
+    calls: &BTreeSet<VerificationBodyCallReference>,
     index: &BTreeMap<SemanticId, Vec<(usize, &'a GenericSpecializationRecord)>>,
 ) -> BTreeMap<SemanticId, &'a GenericSpecializationRecord> {
     let mut selected_by_ordinal = BTreeMap::<usize, &'a GenericSpecializationRecord>::new();

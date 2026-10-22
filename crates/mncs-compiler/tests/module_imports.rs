@@ -1872,25 +1872,35 @@ fn linked_frontend_reuses_exact_language_dependency_summaries_across_body_edits(
         .verification_dependency_summary_cache_reuse
         .as_ref()
         .expect("Language dependency cache observation");
+    assert!(first
+        .verification_facts
+        .iter()
+        .all(|fact| fact.dependency_summary.is_some()));
     assert_eq!(cold.reused_function_subjects.len(), 0);
     assert_eq!(cold.recomputed_function_subjects.len(), 4);
 
+    // A fresh process restores facts from the serialized Language contract
+    // and starts with an empty structural summary cache.
+    let persisted_facts = serde_json::to_vec(&first.verification_facts).unwrap();
+    let persisted_declarations = serde_json::to_vec(&first.declaration_verification_facts).unwrap();
+    let restored_facts: Vec<VerificationFact> = serde_json::from_slice(&persisted_facts).unwrap();
+    let restored_declarations: Vec<DeclarationVerificationFact> =
+        serde_json::from_slice(&persisted_declarations).unwrap();
+    let mut restarted_cache = VerificationDependencySummaryCache::default();
     let second = compiler.front_end_with_verified_facts_and_dependency_summary_cache(
         resolver.envelope("root", format!("// comment-only edit\n{source}")),
         &resolver,
         &[],
-        &request(
-            first.verification_facts,
-            first.declaration_verification_facts,
-        ),
-        &mut cache,
+        &request(restored_facts, restored_declarations),
+        &mut restarted_cache,
     );
     assert!(second.is_valid(), "{:?}", second.diagnostics);
     let warm = second
         .verification_dependency_summary_cache_reuse
         .as_ref()
         .expect("Language dependency cache observation");
-    assert_eq!(warm.reused_function_subjects.len(), 4);
+    assert_eq!(warm.fact_seeded_function_subjects.len(), 4);
+    assert!(warm.reused_function_subjects.is_empty());
     assert!(warm.recomputed_function_subjects.is_empty());
     let warm_facts = second
         .verification_fact_reuse
@@ -1904,14 +1914,14 @@ fn linked_frontend_reuses_exact_language_dependency_summaries_across_body_edits(
         "fn local(value: u64) -> (result: u64) { return 1; }",
     );
     let changed = compiler.front_end_with_verified_facts_and_dependency_summary_cache(
-        resolver.envelope("root", changed_source),
+        resolver.envelope("root", changed_source.clone()),
         &resolver,
         &[],
         &request(
             second.verification_facts,
             second.declaration_verification_facts,
         ),
-        &mut cache,
+        &mut restarted_cache,
     );
     assert!(changed.is_valid(), "{:?}", changed.diagnostics);
     let edit = changed
@@ -1928,6 +1938,47 @@ fn linked_frontend_reuses_exact_language_dependency_summaries_across_body_edits(
         .expect("verified body fact observation");
     assert_eq!(changed_facts.reused.len(), 3);
     assert_eq!(changed_facts.recomputed.len(), 1);
+
+    // The summary may be seeded for a caller whose body is unchanged, but
+    // dependency fingerprints must still be rebuilt from a changed imported
+    // implementation and invalidate that caller's prior verification fact.
+    let changed_library = library_source.replace(
+        "fn imported(value: u64) -> (result: u64) { return value; }",
+        "fn imported(value: u64) -> (result: u64) { return 1; }",
+    );
+    let changed_resolver = MapResolver::default().with("lib.dependency_cache", &changed_library);
+    let mut dependency_restart_cache = VerificationDependencySummaryCache::default();
+    let dependency_edit = compiler.front_end_with_verified_facts_and_dependency_summary_cache(
+        changed_resolver.envelope("root", changed_source),
+        &changed_resolver,
+        &[],
+        &request(
+            changed.verification_facts.clone(),
+            changed.declaration_verification_facts.clone(),
+        ),
+        &mut dependency_restart_cache,
+    );
+    assert!(
+        dependency_edit.is_valid(),
+        "{:?}",
+        dependency_edit.diagnostics
+    );
+    let seeded = dependency_edit
+        .verification_dependency_summary_cache_reuse
+        .as_ref()
+        .expect("dependency restart cache observation");
+    assert_eq!(seeded.fact_seeded_function_subjects.len(), 3);
+    assert_eq!(seeded.recomputed_function_subjects.len(), 1);
+    let dependency_facts = dependency_edit
+        .verification_fact_reuse
+        .as_ref()
+        .expect("dependency edit fact observation");
+    assert_eq!(dependency_facts.reused.len(), 2);
+    assert_eq!(dependency_facts.recomputed.len(), 2);
+    assert!(dependency_facts.recomputed.iter().any(|row| {
+        row.subject.as_str().contains("entry")
+            && row.reason == VerificationFactReuseMiss::DependenciesChanged
+    }));
 }
 
 #[test]
@@ -2002,6 +2053,44 @@ fn linked_frontend_reuses_serialized_verification_facts_and_rechecks_tampered_wi
             fact.source_location_identity.as_deref() == Some(current_envelope.identity.as_str())
         }
     }));
+
+    let mut altered_summary_facts = restored_facts.clone();
+    altered_summary_facts
+        .iter_mut()
+        .find(|fact| fact.subject.as_str().ends_with("app.fact_restart::entry"))
+        .and_then(|fact| fact.dependency_summary.as_mut())
+        .expect("entry carries its verified dependency summary")
+        .extractor_policy_identity
+        .push_str("-altered");
+    let mut restart_cache = VerificationDependencySummaryCache::default();
+    let altered_summary = compiler.front_end_with_verified_facts_and_dependency_summary_cache(
+        current_envelope.clone(),
+        &resolver,
+        &[],
+        &request(altered_summary_facts, restored_declaration_facts.clone()),
+        &mut restart_cache,
+    );
+    assert!(
+        altered_summary.is_valid(),
+        "{:?}",
+        altered_summary.diagnostics
+    );
+    let summary_observation = altered_summary
+        .verification_dependency_summary_cache_reuse
+        .as_ref()
+        .expect("altered summary cache observation");
+    assert_eq!(summary_observation.fact_seeded_function_subjects.len(), 2);
+    assert_eq!(summary_observation.recomputed_function_subjects.len(), 1);
+    let altered_fact_reuse = altered_summary
+        .verification_fact_reuse
+        .as_ref()
+        .expect("altered summary body fact observation");
+    assert_eq!(altered_fact_reuse.reused.len(), 2);
+    assert_eq!(altered_fact_reuse.recomputed.len(), 1);
+    assert_eq!(
+        altered_fact_reuse.recomputed[0].reason,
+        VerificationFactReuseMiss::InvalidWitness
+    );
 
     let mut tampered_facts = restored_facts;
     let entry_fact = tampered_facts

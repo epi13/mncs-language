@@ -66,8 +66,9 @@ impl Program {
         self.validate_internal(Some(request), Some(&identities), None)
     }
 
-    /// Validate with prior verified facts and reuse Language's bounded,
-    /// process-local direct dependency summaries for unchanged bodies.
+    /// Validate with prior verified facts and reuse Language's bounded direct
+    /// dependency summaries for unchanged bodies. A fresh cache can be seeded
+    /// by valid fact witnesses; current dependency identities are rederived.
     pub fn validate_with_verified_facts_and_dependency_summary_cache(
         &self,
         request: &VerificationFactRequest,
@@ -163,26 +164,10 @@ impl Program {
             BTreeMap::<_, Vec<&DeclarationVerificationFact>>::new();
         let fact_function_index = request.map(|_| self.verification_function_index());
         let fact_specialization_index = request.map(|_| self.verification_specialization_index());
-        let (fact_dependency_index, dependency_summary_cache_observation) = match fact_identities {
-            Some(identities) => {
-                let (index, observation) = self.verification_fact_dependency_index_with_cache(
-                    identities,
-                    fact_function_index
-                        .as_ref()
-                        .expect("request has semantic function index"),
-                    fact_specialization_index
-                        .as_ref()
-                        .expect("request has semantic specialization index"),
-                    dependency_summary_cache,
-                );
-                (Some(index), observation)
-            }
-            None => (None, None),
-        };
         if let Some(request) = request {
             for fact in &request.prior_facts {
                 prior_by_subject
-                    .entry(&fact.subject)
+                    .entry(fact.subject.clone())
                     .or_default()
                     .push(fact);
             }
@@ -199,6 +184,23 @@ impl Program {
                     .push(fact);
             }
         }
+        let (fact_dependency_index, dependency_summary_cache_observation) = match fact_identities {
+            Some(identities) => {
+                let (index, observation) = self.verification_fact_dependency_index_with_cache(
+                    identities,
+                    fact_function_index
+                        .as_ref()
+                        .expect("request has semantic function index"),
+                    fact_specialization_index
+                        .as_ref()
+                        .expect("request has semantic specialization index"),
+                    Some(&prior_by_subject),
+                    dependency_summary_cache,
+                );
+                (Some(index), observation)
+            }
+            None => (None, None),
+        };
 
         if self.schema_version != SUPPORTED_SCHEMA_VERSION {
             errors.push(diagnostic(
