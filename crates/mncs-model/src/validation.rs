@@ -509,6 +509,7 @@ impl Program {
             let mut declaration_errors = Vec::new();
             let mut declaration_warnings = Vec::new();
             let mut has_declaration_basis = false;
+            let mut declaration_verified_for_body = false;
             if let Some(request) = request {
                 if declaration_identity_valid {
                     let basis = self.declaration_fact_basis_with_dependency_index(
@@ -548,6 +549,7 @@ impl Program {
                         match reuse {
                             Ok(()) => {
                                 crate::record_counter("declaration_fact_reuse");
+                                declaration_verified_for_body = true;
                                 declaration_reused.push(current.subject.clone());
                                 let mut refreshed = prior[0].clone();
                                 refreshed.source_location_identity = declaration_location.clone();
@@ -574,6 +576,7 @@ impl Program {
                                     &mut declaration_warnings,
                                 );
                                 if declaration_errors.is_empty() {
+                                    declaration_verified_for_body = true;
                                     let verified_warnings = declaration_warnings
                                         .iter()
                                         .map(|warning| DeclarationVerificationWarning {
@@ -664,10 +667,22 @@ impl Program {
                     .get(&current.subject)
                     .cloned()
                     .unwrap_or_default();
-                let reuse = match prior.as_slice() {
-                    [] => Err(VerificationFactReuseMiss::Missing),
-                    [_first, _second, ..] => Err(VerificationFactReuseMiss::DuplicatePriorFacts),
-                    [fact] => fact.current_basis_matches(&current),
+                let reuse = if declaration_verified_for_body {
+                    match prior.as_slice() {
+                        [] => Err(VerificationFactReuseMiss::Missing),
+                        [_first, _second, ..] => {
+                            Err(VerificationFactReuseMiss::DuplicatePriorFacts)
+                        }
+                        [fact] => fact.current_basis_matches(&current),
+                    }
+                } else {
+                    match prior.as_slice() {
+                        [] => Err(VerificationFactReuseMiss::Missing),
+                        [_first, _second, ..] => {
+                            Err(VerificationFactReuseMiss::DuplicatePriorFacts)
+                        }
+                        [_fact] => Err(VerificationFactReuseMiss::DeclarationInterfaceChanged),
+                    }
                 };
                 match reuse {
                     Ok(()) => {
@@ -685,7 +700,7 @@ impl Program {
                         crate::record_counter("function_body_verification");
                         let mut body_errors = Vec::new();
                         body.validate(self, function, &function_path, &mut body_errors);
-                        if body_errors.is_empty() {
+                        if declaration_verified_for_body && body_errors.is_empty() {
                             facts.push(current);
                         }
                         errors.extend(body_errors);

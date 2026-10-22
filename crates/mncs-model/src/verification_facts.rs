@@ -21,7 +21,7 @@ pub const VERIFICATION_FACT_SCHEMA_VERSION: &str = "mncs.language-verification-f
 pub const VERIFICATION_FACT_REUSE_OBSERVATION_SCHEMA_VERSION: &str =
     "mncs.language-verification-fact-reuse-observation/2";
 pub const VERIFICATION_FACT_VERIFIER_ID: &str = "mncs-language-function-body-validator/4";
-pub const VERIFICATION_FACT_POLICY_ID: &str = "mncs-language-function-body-policy/1";
+pub const VERIFICATION_FACT_POLICY_ID: &str = "mncs-language-function-body-policy/2";
 pub const DECLARATION_FACT_SCHEMA_VERSION: &str = "mncs.language-declaration-verification-fact/1";
 pub const DECLARATION_FACT_REUSE_SCHEMA_VERSION: &str = "mncs.language-declaration-fact-reuse/1";
 pub const DECLARATION_FACT_VERIFIER_ID: &str = "mncs-language-function-declaration-validator/1";
@@ -1965,6 +1965,38 @@ mod tests {
     }
 
     #[test]
+    fn invalid_declaration_does_not_issue_or_reuse_a_body_fact() {
+        let mut program = crate::body::tests::executable_program();
+        program.functions[0].effects.push(Effect {
+            kind: "read".to_owned(),
+            target: "storage".to_owned(),
+            capability: "storage.read".to_owned(),
+        });
+
+        let first = program.validate_with_verified_facts(&request("0.19", Vec::new()));
+        assert!(!first.report.valid, "{:?}", first.report.errors);
+        assert!(first.facts.is_empty(), "{:?}", first.facts);
+
+        // Even a well-formed fact with a matching current basis cannot skip
+        // the body when its declaration failed in this validation request.
+        let identities = program.semantic_identities();
+        let basis = program
+            .body_fact_basis_with_identities(&program.functions[0], &identities)
+            .expect("the body has an identity even though its declaration is invalid");
+        let unverified_candidate = VerificationFact::from_basis(basis, "0.19", None);
+        let second =
+            program.validate_with_verified_facts(&request("0.19", vec![unverified_candidate]));
+        assert!(!second.report.valid, "{:?}", second.report.errors);
+        assert!(second.reuse.reused.is_empty());
+        assert_eq!(second.reuse.recomputed.len(), 1);
+        assert_eq!(
+            second.reuse.recomputed[0].reason,
+            VerificationFactReuseMiss::DeclarationInterfaceChanged
+        );
+        assert!(second.facts.is_empty());
+    }
+
+    #[test]
     fn changed_declaration_interface_rechecks_body_and_reports_fresh_error() {
         let original = crate::body::tests::executable_program();
         let cached = original
@@ -2812,7 +2844,7 @@ mod tests {
         );
 
         let mut new_policy = cached.clone();
-        new_policy[0].policy_identity = "mncs-language-function-body-policy/2".to_owned();
+        new_policy[0].policy_identity = "mncs-language-function-body-policy/3".to_owned();
         new_policy[0].verification_witness_identity = new_policy[0].computed_witness_identity();
         let policy_result = program.validate_with_verified_facts(&request("0.19", new_policy));
         assert_eq!(
