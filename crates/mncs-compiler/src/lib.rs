@@ -17,9 +17,11 @@ pub use frontend::{
     elaborate_program_with_resolver_and_modules,
     elaborate_program_with_resolver_and_modules_and_seeds,
     elaborate_program_with_resolver_and_modules_and_seeds_with_map,
-    specialize_program_with_host_seeds, ModuleResolution, ModuleResolutionOutcome, ModuleResolver,
-    NullResolver, SourceFrontEndResult, SourceStudyOutput, TestInventory, TestInventoryEntry,
-    TEST_INVENTORY_SCHEMA_VERSION,
+    specialize_program_with_host_seeds, ModuleElaborationCache, ModuleElaborationCacheObservation,
+    ModuleResolution, ModuleResolutionOutcome, ModuleResolver, NullResolver, SourceFrontEndResult,
+    SourceStudyOutput, TestInventory, TestInventoryEntry,
+    MODULE_ELABORATION_CACHE_OBSERVATION_SCHEMA_VERSION, MODULE_ELABORATION_CACHE_SCHEMA_VERSION,
+    MODULE_ELABORATION_POLICY_IDENTITY, TEST_INVENTORY_SCHEMA_VERSION,
 };
 pub use inventory::{
     declaration_inventory, declaration_inventory_from_ast, declaration_inventory_from_syntax,

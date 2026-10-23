@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use mncs_compiler::{
-    elaborate_program_with_resolver, elaborate_program_with_resolver_and_modules, ModuleResolver,
-    NullResolver, ReferenceCompiler, ResolvedNameKind, SourceParseCache,
+    elaborate_program_with_resolver, elaborate_program_with_resolver_and_modules,
+    ModuleElaborationCache, ModuleResolver, NullResolver, ReferenceCompiler, ResolvedNameKind,
+    SourceParseCache,
 };
 use mncs_model::{
     DeclarationFactReuseMiss, DeclarationVerificationFact, VerificationDependencyRole,
@@ -1842,6 +1843,240 @@ fn linked_frontend_reuses_unchanged_import_parses_after_cache_restart() {
             .len(),
         2
     );
+}
+
+#[test]
+fn linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes() {
+    let leaf_source = "mncs 0.19;\nmodule lib.fact_leaf;\nfn base(value: u64) -> (result: u64) { return value; }\n";
+    let mid_source = "mncs 0.19;\nmodule lib.fact_mid;\nuse lib.fact_leaf;\nfn forward(value: u64) -> (result: u64) { return lib.fact_leaf.base(value); }\n";
+    let resolver = MapResolver::default()
+        .with("lib.fact_leaf", leaf_source)
+        .with("lib.fact_mid", mid_source);
+    let compiler = ReferenceCompiler::default();
+    let request = |prior_facts, prior_declaration_facts| VerificationFactRequest {
+        language_profile: "0.19".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts,
+        prior_declaration_facts,
+        prior_record_type_declaration_facts: Vec::new(),
+        source_location_identities: BTreeMap::new(),
+    };
+    let source = "mncs 0.19;\nmodule app.fact_cache;\nuse lib.fact_mid;\nfn entry(value: u64) -> (result: u64) { return lib.fact_mid.forward(value); }\n";
+    let mut cache = ModuleElaborationCache::default();
+
+    let first = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
+        resolver.envelope("root", source.to_owned()),
+        &resolver,
+        &[],
+        &request(Vec::new(), Vec::new()),
+        &mut cache,
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    let cold = first
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("module elaboration cache observation");
+    assert!(cold.reused_module_subjects.is_empty());
+    assert_eq!(
+        cold.linked_module_subjects,
+        vec!["lib.fact_leaf", "lib.fact_mid"]
+    );
+    assert_eq!(cold.published_entry_count, 2);
+
+    // Restore the Language-owned cache as a new process would. A root-only
+    // comment edit leaves every imported source and dependency closure exact.
+    let serialized = serde_json::to_vec(&cache).expect("module cache serializes");
+    let mut cache: ModuleElaborationCache =
+        serde_json::from_slice(&serialized).expect("module cache restores");
+    let second = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
+        resolver.envelope("root", format!("// root comment edit\n{source}")),
+        &resolver,
+        &[],
+        &request(
+            first.verification_facts.clone(),
+            first.declaration_verification_facts.clone(),
+        ),
+        &mut cache,
+    );
+    assert!(second.is_valid(), "{:?}", second.diagnostics);
+    let warm = second
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("module elaboration cache observation");
+    assert_eq!(
+        warm.reused_module_subjects,
+        vec!["lib.fact_leaf", "lib.fact_mid"]
+    );
+    assert!(warm.linked_module_subjects.is_empty());
+    assert_eq!(
+        first
+            .program
+            .as_ref()
+            .expect("cold program")
+            .content_fingerprint()
+            .expect("cold semantic fingerprint"),
+        second
+            .program
+            .as_ref()
+            .expect("warm program")
+            .content_fingerprint()
+            .expect("warm semantic fingerprint")
+    );
+    assert_eq!(
+        second
+            .verification_fact_reuse
+            .as_ref()
+            .expect("verification facts reused independently")
+            .reused
+            .len(),
+        first.verification_facts.len()
+    );
+
+    // A transitive leaf edit changes the closure identities for both the leaf
+    // and its importing module, forcing both actual link operations to rerun.
+    let changed_leaf = "mncs 0.19;\nmodule lib.fact_leaf;\nfn base(value: u64) -> (result: u64) { return value + 1; }\n";
+    let changed_resolver = MapResolver::default()
+        .with("lib.fact_leaf", changed_leaf)
+        .with("lib.fact_mid", mid_source);
+    let changed = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
+        changed_resolver.envelope("root", source.to_owned()),
+        &changed_resolver,
+        &[],
+        &request(
+            second.verification_facts.clone(),
+            second.declaration_verification_facts.clone(),
+        ),
+        &mut cache,
+    );
+    assert!(changed.is_valid(), "{:?}", changed.diagnostics);
+    let changed_observation = changed
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("transitive invalidation observation");
+    assert_eq!(
+        changed_observation.invalidated_module_subjects,
+        vec!["lib.fact_leaf", "lib.fact_mid"]
+    );
+    assert_eq!(
+        changed_observation.linked_module_subjects,
+        vec!["lib.fact_leaf", "lib.fact_mid"]
+    );
+    assert_eq!(changed_observation.published_entry_count, 2);
+    assert_ne!(
+        second
+            .program
+            .as_ref()
+            .expect("prior program")
+            .content_fingerprint()
+            .expect("prior semantic fingerprint"),
+        changed
+            .program
+            .as_ref()
+            .expect("changed program")
+            .content_fingerprint()
+            .expect("changed semantic fingerprint")
+    );
+
+    // A tampered serialized Program is rejected by the entry digest; the
+    // current source is linked again and replaces the corrupt entry.
+    let mut tampered_value: serde_json::Value =
+        serde_json::from_slice(&serde_json::to_vec(&cache).expect("cache serializes"))
+            .expect("cache is JSON");
+    tampered_value["entries"][0]["program"]["module"] =
+        serde_json::Value::String("forged.module".to_owned());
+    let tampered_bytes = serde_json::to_vec(&tampered_value).expect("tampered cache serializes");
+    let mut tampered_cache: ModuleElaborationCache =
+        serde_json::from_slice(&tampered_bytes).expect("tampered cache deserializes");
+    let tampered = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
+        changed_resolver.envelope("root", source.to_owned()),
+        &changed_resolver,
+        &[],
+        &request(
+            changed.verification_facts.clone(),
+            changed.declaration_verification_facts.clone(),
+        ),
+        &mut tampered_cache,
+    );
+    assert!(tampered.is_valid(), "{:?}", tampered.diagnostics);
+    let tamper_observation = tampered
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("tamper observation");
+    assert_eq!(tamper_observation.rejected_entry_count, 1);
+    assert!(tamper_observation
+        .invalidated_module_subjects
+        .contains(&"lib.fact_leaf".to_owned()));
+    assert!(tamper_observation
+        .linked_module_subjects
+        .contains(&"lib.fact_leaf".to_owned()));
+
+    // Invalid current source must be parsed into a fresh diagnostic instead
+    // of being hidden by the previously successful module entries.
+    let invalid_resolver = MapResolver::default()
+        .with("lib.fact_leaf", "mncs 0.19; module lib.fact_leaf; fn {")
+        .with("lib.fact_mid", mid_source);
+    let invalid = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
+        invalid_resolver.envelope("root", source.to_owned()),
+        &invalid_resolver,
+        &[],
+        &request(
+            changed.verification_facts.clone(),
+            changed.declaration_verification_facts.clone(),
+        ),
+        &mut cache,
+    );
+    assert!(!invalid.is_valid());
+    assert!(invalid.program.is_none());
+    assert!(!invalid.diagnostics.is_empty());
+    assert!(invalid
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("invalid input still reports cache work")
+        .reused_module_subjects
+        .is_empty());
+
+    // Imported declaration locations are restored only for the exact source
+    // identity. Shifting an imported declaration with a comment forces the
+    // parent module to relink and refreshes the location consumed by root.
+    let mut location_cache = cache.clone();
+    let shifted_mid = format!("// inserted source line\n{mid_source}");
+    let shifted_resolver = MapResolver::default()
+        .with("lib.fact_leaf", changed_leaf)
+        .with("lib.fact_mid", &shifted_mid);
+    let shifted = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
+        shifted_resolver.envelope("root", source.to_owned()),
+        &shifted_resolver,
+        &[],
+        &request(
+            changed.verification_facts.clone(),
+            changed.declaration_verification_facts.clone(),
+        ),
+        &mut location_cache,
+    );
+    assert!(shifted.is_valid(), "{:?}", shifted.diagnostics);
+    let shifted_observation = shifted
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("source-location refresh observation");
+    assert_eq!(
+        shifted_observation.reused_module_subjects,
+        vec!["lib.fact_leaf"]
+    );
+    assert_eq!(
+        shifted_observation.linked_module_subjects,
+        vec!["lib.fact_mid"]
+    );
+    let declaration_line = |result: &mncs_compiler::SourceFrontEndResult| {
+        result
+            .name_resolutions
+            .resolutions
+            .iter()
+            .find(|resolution| resolution.path.iter().any(|part| part == "forward"))
+            .map(|resolution| resolution.declaration.line)
+            .expect("root's qualified call resolves to the imported forward declaration")
+    };
+    assert_eq!(declaration_line(&changed), 4);
+    assert_eq!(declaration_line(&shifted), 5);
 }
 
 #[test]

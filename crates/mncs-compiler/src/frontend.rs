@@ -27,7 +27,9 @@ use mncs_syntax::{
     AST_SCHEMA_VERSION, CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION, SOURCE_ENVELOPE_SCHEMA_VERSION,
     SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_9,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::io::{self, Write};
 
 fn trace_timing(stage: &str, started: Instant) {
     mncs_model::record_stage(stage, started.elapsed());
@@ -42,8 +44,91 @@ fn trace_timing(stage: &str, started: Instant) {
 
 use crate::resolution::{NameResolution, NameResolutionIndex, ResolvedNameKind};
 use crate::source_map::ExecutionSourceMap;
-use crate::source_parse_cache::{SourceParseCache, SourceParseCacheObservation};
+use crate::source_parse_cache::{
+    profile_registry_identity, SourceParseCache, SourceParseCacheObservation,
+    SOURCE_PARSE_POLICY_IDENTITY,
+};
 use crate::{fingerprint, native_node_profile, ReferenceCompiler};
+
+pub const MODULE_ELABORATION_CACHE_SCHEMA_VERSION: &str =
+    "mncs.language-module-elaboration-cache/1";
+pub const MODULE_ELABORATION_CACHE_OBSERVATION_SCHEMA_VERSION: &str =
+    "mncs.language-module-elaboration-cache-observation/1";
+/// Bump this identity whenever source-to-Program linking changes without an
+/// AST or Language profile schema change.
+pub const MODULE_ELABORATION_POLICY_IDENTITY: &str = "mncs-language-module-linker/1";
+
+const MODULE_ELABORATION_CACHE_MAX_ENTRIES: usize = 128;
+const MODULE_ELABORATION_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
+
+/// Caller-owned, serializable memoization of successfully linked imported
+/// modules. Entries are reused only when the exact source envelope, profile
+/// registry, parser/linker policy, and transitive import closure all match.
+/// Semantic verification still runs against the assembled current program.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleElaborationCache {
+    #[serde(default = "module_elaboration_cache_schema_version")]
+    schema_version: String,
+    #[serde(default)]
+    entries: Vec<ModuleElaborationCacheEntry>,
+    #[serde(skip)]
+    entry_sizes: Vec<usize>,
+}
+
+impl Default for ModuleElaborationCache {
+    fn default() -> Self {
+        Self {
+            schema_version: module_elaboration_cache_schema_version(),
+            entries: Vec::new(),
+            entry_sizes: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ModuleElaborationCacheEntry {
+    subject: String,
+    declared_module: String,
+    source_identity: String,
+    source_profile: String,
+    profile_registry_identity: String,
+    parser_policy_identity: String,
+    ast_schema_version: String,
+    elaboration_policy_identity: String,
+    dependency_closure_fingerprint: String,
+    output_digest: String,
+    program: Program,
+    declarations: DeclarationSpans,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleElaborationCacheObservation {
+    pub schema_version: String,
+    /// Imported modules whose linked Program and declaration spans passed all
+    /// source, dependency, policy, and output-integrity guards.
+    pub reused_module_subjects: Vec<String>,
+    /// Imported modules actually linked during this frontend call.
+    pub linked_module_subjects: Vec<String>,
+    /// Prior subjects dropped because a source/dependency/policy guard changed.
+    pub invalidated_module_subjects: Vec<String>,
+    pub rejected_entry_count: usize,
+    pub evicted_entry_count: usize,
+    pub published_entry_count: usize,
+}
+
+impl Default for ModuleElaborationCacheObservation {
+    fn default() -> Self {
+        Self {
+            schema_version: MODULE_ELABORATION_CACHE_OBSERVATION_SCHEMA_VERSION.to_owned(),
+            reused_module_subjects: Vec::new(),
+            linked_module_subjects: Vec::new(),
+            invalidated_module_subjects: Vec::new(),
+            rejected_entry_count: 0,
+            evicted_entry_count: 0,
+            published_entry_count: 0,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SourceFrontEndResult {
@@ -90,6 +175,10 @@ pub struct SourceFrontEndResult {
     /// source parse cache for this frontend invocation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_parse_cache_reuse: Option<SourceParseCacheObservation>,
+    /// Imported modules whose Language-owned linking work was reused or
+    /// recomputed under exact transitive dependency guards.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module_elaboration_cache_reuse: Option<ModuleElaborationCacheObservation>,
     /// Compact, versioned semantic binding substrate used by elaboration,
     /// tooling, and downstream identity/evidence consumers.
     pub binding_table: Option<SemanticBindingTable>,
@@ -373,7 +462,9 @@ impl ReferenceCompiler {
         resolver: &dyn ModuleResolver,
         seeds: &[mncs_model::HostGenericSeedRequest],
     ) -> SourceFrontEndResult {
-        self.front_end_with_resolver_seeds_and_facts(envelope, resolver, seeds, None, None, None)
+        self.front_end_with_resolver_seeds_and_facts(
+            envelope, resolver, seeds, None, None, None, None,
+        )
     }
 
     /// Runs the normal Language frontend while allowing the Language model to
@@ -392,6 +483,7 @@ impl ReferenceCompiler {
             resolver,
             seeds,
             Some(request),
+            None,
             None,
             None,
         )
@@ -416,6 +508,7 @@ impl ReferenceCompiler {
             Some(request),
             Some(parse_cache),
             None,
+            None,
         )
     }
 
@@ -436,6 +529,7 @@ impl ReferenceCompiler {
             Some(request),
             None,
             Some(dependency_summary_cache),
+            None,
         )
     }
 
@@ -458,6 +552,53 @@ impl ReferenceCompiler {
             Some(request),
             Some(parse_cache),
             Some(dependency_summary_cache),
+            None,
+        )
+    }
+
+    /// Runs the Language frontend with a caller-owned imported-module linking
+    /// cache. Cache entries are serializable between processes and are
+    /// accepted only for an exact source snapshot and transitive dependency
+    /// closure under the same parser, profile, and linker policies.
+    pub fn front_end_with_verified_facts_and_module_elaboration_cache(
+        &self,
+        envelope: SourceEnvelope,
+        resolver: &dyn ModuleResolver,
+        seeds: &[mncs_model::HostGenericSeedRequest],
+        request: &VerificationFactRequest,
+        module_elaboration_cache: &mut ModuleElaborationCache,
+    ) -> SourceFrontEndResult {
+        self.front_end_with_resolver_seeds_and_facts(
+            envelope,
+            resolver,
+            seeds,
+            Some(request),
+            None,
+            None,
+            Some(module_elaboration_cache),
+        )
+    }
+
+    /// Runs the Language frontend with the persistent parse and imported
+    /// module linking caches plus the process-local dependency summary cache.
+    pub fn front_end_with_verified_facts_and_caches_and_module_elaboration_cache(
+        &self,
+        envelope: SourceEnvelope,
+        resolver: &dyn ModuleResolver,
+        seeds: &[mncs_model::HostGenericSeedRequest],
+        request: &VerificationFactRequest,
+        parse_cache: &mut SourceParseCache,
+        dependency_summary_cache: &mut VerificationDependencySummaryCache,
+        module_elaboration_cache: &mut ModuleElaborationCache,
+    ) -> SourceFrontEndResult {
+        self.front_end_with_resolver_seeds_and_facts(
+            envelope,
+            resolver,
+            seeds,
+            Some(request),
+            Some(parse_cache),
+            Some(dependency_summary_cache),
+            Some(module_elaboration_cache),
         )
     }
 
@@ -469,6 +610,7 @@ impl ReferenceCompiler {
         verification_request: Option<&VerificationFactRequest>,
         parse_cache: Option<&mut SourceParseCache>,
         dependency_summary_cache: Option<&mut VerificationDependencySummaryCache>,
+        mut module_elaboration_cache: Option<&mut ModuleElaborationCache>,
     ) -> SourceFrontEndResult {
         let cache_resolver = parse_cache.map(|cache| SourceParseCacheResolver {
             inner: resolver,
@@ -516,6 +658,7 @@ impl ReferenceCompiler {
         let mut finite_type_declaration_fact_reuse = None;
         let mut record_type_declaration_verification_facts = Vec::new();
         let mut record_type_declaration_fact_reuse = None;
+        let mut module_elaboration_cache_reuse = None;
         let mut semantic_graph = None;
         let mut identities = None;
         let mut name_resolutions = NameResolutionIndex::default();
@@ -536,10 +679,25 @@ impl ReferenceCompiler {
                 ));
             } else {
                 let elaboration_started = Instant::now();
-                let elaboration = elaborate_program_with_resolver_and_modules_and_seeds_with_map(
+                let (
+                    elaboration_result,
+                    resolutions,
+                    resolved_modules,
+                    operation_sources,
+                    cache_observation,
+                ) = elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
                     tree,
+                    Some(&envelope),
                     active_resolver,
                     seeds,
+                    module_elaboration_cache.as_deref_mut(),
+                );
+                module_elaboration_cache_reuse = cache_observation;
+                let elaboration = (
+                    elaboration_result,
+                    resolutions,
+                    resolved_modules,
+                    operation_sources,
                 );
                 trace_timing("elaboration", elaboration_started);
                 match elaboration {
@@ -675,6 +833,7 @@ impl ReferenceCompiler {
             source_parse_cache_reuse: cache_resolver
                 .as_ref()
                 .map(|adapter| adapter.observation.borrow().clone()),
+            module_elaboration_cache_reuse,
             binding_table,
             name_resolutions,
             module_resolutions,
@@ -1017,6 +1176,26 @@ pub fn elaborate_program_with_resolver_and_modules_and_seeds_with_map(
     Vec<ModuleResolution>,
     Option<BTreeMap<SemanticId, SourceSpan>>,
 ) {
+    let (result, resolutions, modules, operation_sources, _) =
+        elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
+            ast, None, resolver, seeds, None,
+        );
+    (result, resolutions, modules, operation_sources)
+}
+
+fn elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
+    ast: &AbstractSyntaxTree,
+    root_source: Option<&SourceEnvelope>,
+    resolver: &dyn ModuleResolver,
+    seeds: &[mncs_model::HostGenericSeedRequest],
+    module_elaboration_cache: Option<&mut ModuleElaborationCache>,
+) -> (
+    Result<Program, Vec<SourceDiagnostic>>,
+    Vec<NameResolution>,
+    Vec<ModuleResolution>,
+    Option<BTreeMap<SemanticId, SourceSpan>>,
+    Option<ModuleElaborationCacheObservation>,
+) {
     let recording_resolver = RecordingResolver {
         inner: resolver,
         sources: RefCell::new(BTreeMap::new()),
@@ -1028,15 +1207,24 @@ pub fn elaborate_program_with_resolver_and_modules_and_seeds_with_map(
     let mut module_profiles = BTreeMap::new();
     let mut visiting = BTreeSet::new();
     let mut module_ceilings = BTreeMap::new();
+    let mut module_closure_fingerprints = BTreeMap::new();
+    let mut cache_observation = module_elaboration_cache
+        .as_ref()
+        .map(|_| ModuleElaborationCacheObservation::default());
+    let mut module_elaboration_cache = module_elaboration_cache;
     let mut operation_sources = None;
     let result = if let Err(mut errors) = elaborate_import_closure(
         ast,
+        root_source.map(|source| source.identity.as_str()),
         &recording_resolver,
         &mut elaborated,
         &mut declaration_spans,
         &mut visiting,
         &mut module_ceilings,
         &mut module_profiles,
+        &mut module_closure_fingerprints,
+        &mut module_elaboration_cache,
+        &mut cache_observation,
     ) {
         diagnostics.append(&mut errors);
         Err(diagnostics)
@@ -1097,7 +1285,13 @@ pub fn elaborate_program_with_resolver_and_modules_and_seeds_with_map(
             })
         })
         .collect();
-    (result, resolutions, module_resolutions, operation_sources)
+    (
+        result,
+        resolutions,
+        module_resolutions,
+        operation_sources,
+        cache_observation,
+    )
 }
 
 fn module_names_compatible(requested: &str, declared: &str) -> bool {
@@ -1183,16 +1377,20 @@ struct MergedContext {
 /// own imports are present in the map.
 fn elaborate_import_closure(
     ast: &AbstractSyntaxTree,
+    source_identity: Option<&str>,
     resolver: &dyn ModuleResolver,
     elaborated: &mut BTreeMap<String, Program>,
     declaration_spans: &mut BTreeMap<String, DeclarationSpans>,
     visiting: &mut BTreeSet<String>,
     module_ceilings: &mut BTreeMap<String, u32>,
     module_profiles: &mut BTreeMap<String, String>,
-) -> Result<(), Vec<SourceDiagnostic>> {
+    module_closure_fingerprints: &mut BTreeMap<String, String>,
+    module_elaboration_cache: &mut Option<&mut ModuleElaborationCache>,
+    cache_observation: &mut Option<ModuleElaborationCacheObservation>,
+) -> Result<String, Vec<SourceDiagnostic>> {
     let name = ast.module.text.clone();
-    if elaborated.contains_key(&name) {
-        return Ok(());
+    if let Some(closure_fingerprint) = module_closure_fingerprints.get(&name) {
+        return Ok(closure_fingerprint.clone());
     }
     // RFC 0036: each module's admitted sequence ceiling travels with the
     // closure so the post-specialization sweep can check every substituted
@@ -1214,6 +1412,7 @@ fn elaborate_import_closure(
             ast.module.span,
         )]);
     }
+    let mut direct_dependency_closures = Vec::new();
     for use_decl in &ast.uses {
         let dependency_name = use_decl.module.text.clone();
         if dependency_name == name {
@@ -1224,6 +1423,11 @@ fn elaborate_import_closure(
             )]);
         }
         if elaborated.contains_key(&dependency_name) {
+            if let Some(closure_fingerprint) =
+                module_closure_fingerprints.get(&dependency_name).cloned()
+            {
+                direct_dependency_closures.push((dependency_name, closure_fingerprint));
+            }
             continue;
         }
         let dependency_envelope = match resolver.resolve_detailed(&dependency_name) {
@@ -1280,31 +1484,68 @@ fn elaborate_import_closure(
         // surfacing a span that lives in another file. Non-import errors
         // (cycle, unavailable, incompatible, conflicting) already name
         // their edge and pass through unchanged.
-        if let Err(errors) = elaborate_import_closure(
+        let dependency_closure_fingerprint = match elaborate_import_closure(
             &dependency_ast,
+            Some(&dependency_envelope.identity),
             resolver,
             elaborated,
             declaration_spans,
             visiting,
             module_ceilings,
             module_profiles,
+            module_closure_fingerprints,
+            module_elaboration_cache,
+            cache_observation,
         ) {
-            return Err(errors
-                .into_iter()
-                .map(|error| {
-                    if error.code == "MNE172" {
-                        import_failure_diagnostic(
-                            &dependency_name,
-                            dependency_envelope.origin.locator.as_deref(),
-                            "load",
-                            vec![error],
-                            use_decl.module.span,
-                        )
-                    } else {
-                        error
-                    }
-                })
-                .collect());
+            Ok(closure_fingerprint) => closure_fingerprint,
+            Err(errors) => {
+                return Err(errors
+                    .into_iter()
+                    .map(|error| {
+                        if error.code == "MNE172" {
+                            import_failure_diagnostic(
+                                &dependency_name,
+                                dependency_envelope.origin.locator.as_deref(),
+                                "load",
+                                vec![error],
+                                use_decl.module.span,
+                            )
+                        } else {
+                            error
+                        }
+                    })
+                    .collect())
+            }
+        };
+        let cached = match (
+            module_elaboration_cache.as_deref_mut(),
+            cache_observation.as_mut(),
+        ) {
+            (Some(cache), Some(observation)) => cache.lookup(
+                &dependency_name,
+                &dependency_ast.module.text,
+                &dependency_envelope,
+                &dependency_ast.language_version.text,
+                &dependency_closure_fingerprint,
+                observation,
+            ),
+            _ => None,
+        };
+        if let Some((program, declarations)) = cached {
+            elaborated.insert(dependency_name.clone(), program);
+            declaration_spans.insert(dependency_name.clone(), declarations);
+            module_closure_fingerprints.insert(
+                dependency_name.clone(),
+                dependency_closure_fingerprint.clone(),
+            );
+            direct_dependency_closures.push((dependency_name, dependency_closure_fingerprint));
+            continue;
+        }
+
+        if let Some(observation) = cache_observation.as_mut() {
+            observation
+                .linked_module_subjects
+                .push(dependency_name.clone());
         }
         let dependency_program = link_module_with_closure(
             &dependency_ast,
@@ -1322,10 +1563,43 @@ fn elaborate_import_closure(
                 use_decl.module.span,
             )]
         })?;
-        elaborated.insert(dependency_name, dependency_program);
+        elaborated.insert(dependency_name.clone(), dependency_program.clone());
+        module_closure_fingerprints.insert(
+            dependency_name.clone(),
+            dependency_closure_fingerprint.clone(),
+        );
+        let declarations = declaration_spans
+            .get(&dependency_name)
+            .cloned()
+            .unwrap_or_default();
+        if let (Some(cache), Some(observation)) = (
+            module_elaboration_cache.as_deref_mut(),
+            cache_observation.as_mut(),
+        ) {
+            cache.publish(
+                &dependency_name,
+                &dependency_ast.module.text,
+                &dependency_envelope,
+                &dependency_ast.language_version.text,
+                &dependency_closure_fingerprint,
+                dependency_program,
+                declarations,
+                observation,
+            );
+        }
+        direct_dependency_closures.push((dependency_name, dependency_closure_fingerprint));
     }
     visiting.remove(&name);
-    Ok(())
+    let identity = source_identity
+        .map(str::to_owned)
+        .unwrap_or_else(|| fingerprint(ast));
+    let closure_fingerprint = module_dependency_closure_fingerprint(
+        &identity,
+        &ast.language_version.text,
+        &direct_dependency_closures,
+    );
+    module_closure_fingerprints.insert(name, closure_fingerprint.clone());
+    Ok(closure_fingerprint)
 }
 
 /// Links one module against its already-elaborated direct imports.
@@ -2688,7 +2962,7 @@ fn build_binding_table(
 
 /// Source spans of every nominal declaration name, used to point name
 /// occurrences at the exact declaration they resolve to.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct DeclarationSpans {
     functions: BTreeMap<String, SourceSpan>,
     finite_types: BTreeMap<String, SourceSpan>,
@@ -2777,6 +3051,282 @@ impl DeclarationSpans {
                 .or_insert(*span);
         }
     }
+}
+
+#[derive(Serialize)]
+struct ModuleElaborationCacheContent<'a> {
+    subject: &'a str,
+    declared_module: &'a str,
+    source_identity: &'a str,
+    source_profile: &'a str,
+    profile_registry_identity: &'a str,
+    parser_policy_identity: &'a str,
+    ast_schema_version: &'a str,
+    elaboration_policy_identity: &'a str,
+    dependency_closure_fingerprint: &'a str,
+    program: &'a Program,
+    declarations: &'a DeclarationSpans,
+}
+
+impl ModuleElaborationCache {
+    fn lookup(
+        &mut self,
+        subject: &str,
+        declared_module: &str,
+        envelope: &SourceEnvelope,
+        source_profile: &str,
+        dependency_closure_fingerprint: &str,
+        observation: &mut ModuleElaborationCacheObservation,
+    ) -> Option<(Program, DeclarationSpans)> {
+        if self.schema_version != MODULE_ELABORATION_CACHE_SCHEMA_VERSION {
+            observation.rejected_entry_count += self.entries.len();
+            self.entries.clear();
+            self.entry_sizes.clear();
+            self.schema_version = MODULE_ELABORATION_CACHE_SCHEMA_VERSION.to_owned();
+        }
+        self.ensure_entry_sizes();
+        observation.evicted_entry_count += self.trim_bounded();
+
+        let matches = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| (entry.subject == subject).then_some(index))
+            .collect::<Vec<_>>();
+        if matches.is_empty() {
+            return None;
+        }
+        if matches.len() != 1 {
+            observation.rejected_entry_count += matches.len();
+            observation
+                .invalidated_module_subjects
+                .push(subject.to_owned());
+            for index in matches.into_iter().rev() {
+                self.entries.remove(index);
+                self.entry_sizes.remove(index);
+            }
+            return None;
+        }
+
+        let index = matches[0];
+        let entry = &self.entries[index];
+        let profile_registry = profile_registry_identity();
+        let guards_match = envelope.identity_is_valid()
+            && entry.subject == subject
+            && entry.declared_module == declared_module
+            && entry.source_identity == envelope.identity
+            && entry.source_profile == source_profile
+            && entry.profile_registry_identity == profile_registry
+            && entry.parser_policy_identity == SOURCE_PARSE_POLICY_IDENTITY
+            && entry.ast_schema_version == AST_SCHEMA_VERSION
+            && entry.elaboration_policy_identity == MODULE_ELABORATION_POLICY_IDENTITY
+            && entry.dependency_closure_fingerprint == dependency_closure_fingerprint;
+        let integrity = module_elaboration_entry_content(entry).and_then(|content| {
+            serialized_hash_and_size(&content, MODULE_ELABORATION_CACHE_MAX_BYTES)
+        });
+        let integrity_matches = integrity
+            .as_ref()
+            .is_some_and(|(digest, _)| digest == &entry.output_digest);
+        if !guards_match || !integrity_matches {
+            observation.rejected_entry_count += 1;
+            observation
+                .invalidated_module_subjects
+                .push(subject.to_owned());
+            self.entries.remove(index);
+            self.entry_sizes.remove(index);
+            return None;
+        }
+
+        let entry = self.entries.remove(index);
+        let entry_size = self.entry_sizes.remove(index);
+        let output = (entry.program.clone(), entry.declarations.clone());
+        self.entries.push(entry);
+        self.entry_sizes.push(entry_size);
+        observation.reused_module_subjects.push(subject.to_owned());
+        Some(output)
+    }
+
+    fn publish(
+        &mut self,
+        subject: &str,
+        declared_module: &str,
+        envelope: &SourceEnvelope,
+        source_profile: &str,
+        dependency_closure_fingerprint: &str,
+        program: Program,
+        declarations: DeclarationSpans,
+        observation: &mut ModuleElaborationCacheObservation,
+    ) {
+        if !envelope.identity_is_valid() {
+            return;
+        }
+        let profile_registry = profile_registry_identity();
+        let mut entry = ModuleElaborationCacheEntry {
+            subject: subject.to_owned(),
+            declared_module: declared_module.to_owned(),
+            source_identity: envelope.identity.clone(),
+            source_profile: source_profile.to_owned(),
+            profile_registry_identity: profile_registry,
+            parser_policy_identity: SOURCE_PARSE_POLICY_IDENTITY.to_owned(),
+            ast_schema_version: AST_SCHEMA_VERSION.to_owned(),
+            elaboration_policy_identity: MODULE_ELABORATION_POLICY_IDENTITY.to_owned(),
+            dependency_closure_fingerprint: dependency_closure_fingerprint.to_owned(),
+            output_digest: String::new(),
+            program,
+            declarations,
+        };
+        let Some((digest, _)) = module_elaboration_entry_content(&entry).and_then(|content| {
+            serialized_hash_and_size(&content, MODULE_ELABORATION_CACHE_MAX_BYTES)
+        }) else {
+            return;
+        };
+        entry.output_digest = digest;
+        let Some((_, entry_size)) =
+            serialized_hash_and_size(&entry, MODULE_ELABORATION_CACHE_MAX_BYTES)
+        else {
+            return;
+        };
+        self.ensure_entry_sizes();
+        for index in (0..self.entries.len()).rev() {
+            if self.entries[index].subject == subject {
+                self.entries.remove(index);
+                self.entry_sizes.remove(index);
+            }
+        }
+        self.entries.push(entry);
+        self.entry_sizes.push(entry_size);
+        observation.evicted_entry_count += self.trim_bounded();
+        if self.entries.iter().any(|entry| entry.subject == subject) {
+            observation.published_entry_count += 1;
+        }
+    }
+
+    fn ensure_entry_sizes(&mut self) {
+        if self.entry_sizes.len() == self.entries.len() {
+            return;
+        }
+        self.entry_sizes = self
+            .entries
+            .iter()
+            .map(|entry| {
+                serialized_hash_and_size(entry, MODULE_ELABORATION_CACHE_MAX_BYTES)
+                    .map(|(_, size)| size)
+                    .unwrap_or(MODULE_ELABORATION_CACHE_MAX_BYTES.saturating_add(1))
+            })
+            .collect();
+    }
+
+    fn trim_bounded(&mut self) -> usize {
+        self.ensure_entry_sizes();
+        let mut removed = 0;
+        while self.entries.len() > MODULE_ELABORATION_CACHE_MAX_ENTRIES
+            || self.entry_sizes.iter().sum::<usize>() > MODULE_ELABORATION_CACHE_MAX_BYTES
+        {
+            if self.entries.is_empty() {
+                break;
+            }
+            self.entries.remove(0);
+            self.entry_sizes.remove(0);
+            removed += 1;
+        }
+        removed
+    }
+}
+
+fn module_elaboration_entry_content(
+    entry: &ModuleElaborationCacheEntry,
+) -> Option<ModuleElaborationCacheContent<'_>> {
+    Some(ModuleElaborationCacheContent {
+        subject: &entry.subject,
+        declared_module: &entry.declared_module,
+        source_identity: &entry.source_identity,
+        source_profile: &entry.source_profile,
+        profile_registry_identity: &entry.profile_registry_identity,
+        parser_policy_identity: &entry.parser_policy_identity,
+        ast_schema_version: &entry.ast_schema_version,
+        elaboration_policy_identity: &entry.elaboration_policy_identity,
+        dependency_closure_fingerprint: &entry.dependency_closure_fingerprint,
+        program: &entry.program,
+        declarations: &entry.declarations,
+    })
+}
+
+fn module_elaboration_cache_schema_version() -> String {
+    MODULE_ELABORATION_CACHE_SCHEMA_VERSION.to_owned()
+}
+
+fn serialized_hash_and_size<T: Serialize>(
+    value: &T,
+    maximum_bytes: usize,
+) -> Option<(String, usize)> {
+    let mut writer = BoundedHashWriter {
+        digest: Sha256::new(),
+        bytes: 0,
+        maximum_bytes,
+    };
+    serde_json::to_writer(&mut writer, value).ok()?;
+    let digest = writer.digest.finalize();
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        write!(&mut hex, "{byte:02x}").expect("writing to a String is infallible");
+    }
+    Some((hex, writer.bytes))
+}
+
+struct BoundedHashWriter {
+    digest: Sha256,
+    bytes: usize,
+    maximum_bytes: usize,
+}
+
+impl Write for BoundedHashWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > self.maximum_bytes.saturating_sub(self.bytes) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "serialized module elaboration exceeds the cache byte limit",
+            ));
+        }
+        self.digest.update(bytes);
+        self.bytes += bytes.len();
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn module_dependency_closure_fingerprint(
+    source_identity: &str,
+    source_profile: &str,
+    direct_dependencies: &[(String, String)],
+) -> String {
+    #[derive(Serialize)]
+    struct ClosureMaterial<'a> {
+        cache_schema_version: &'a str,
+        source_identity: &'a str,
+        source_profile: &'a str,
+        profile_registry_identity: String,
+        parser_policy_identity: &'a str,
+        ast_schema_version: &'a str,
+        elaboration_policy_identity: &'a str,
+        direct_dependencies: &'a [(String, String)],
+    }
+    let material = ClosureMaterial {
+        cache_schema_version: MODULE_ELABORATION_CACHE_SCHEMA_VERSION,
+        source_identity,
+        source_profile,
+        profile_registry_identity: profile_registry_identity(),
+        parser_policy_identity: SOURCE_PARSE_POLICY_IDENTITY,
+        ast_schema_version: AST_SCHEMA_VERSION,
+        elaboration_policy_identity: MODULE_ELABORATION_POLICY_IDENTITY,
+        direct_dependencies,
+    };
+    let bytes =
+        serde_json::to_vec(&material).expect("module elaboration dependency identity serializes");
+    mncs_model::sha256_hex(&bytes)
 }
 
 /// Record type-annotation occurrences (parameter, output, binding, and carried

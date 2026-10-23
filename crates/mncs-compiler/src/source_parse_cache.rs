@@ -343,7 +343,7 @@ fn cache_schema_version() -> String {
     SOURCE_PARSE_CACHE_SCHEMA_VERSION.to_owned()
 }
 
-fn profile_registry_identity() -> String {
+pub(crate) fn profile_registry_identity() -> String {
     let snapshot = source_profile_registry_snapshot();
     let bytes = serde_json::to_vec(&snapshot).expect("profile registry snapshot is serializable");
     sha256_hex(&bytes)
