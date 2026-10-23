@@ -2095,6 +2095,34 @@ fn linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes(
             .expect("changed semantic fingerprint")
     );
 
+    // A persisted Language module cache must retain the edited dependency's
+    // current source identity across a root-only source change.
+    let mut restarted_cache: ModuleElaborationCache = serde_json::from_slice(
+        &serde_json::to_vec(&cache).expect("changed module cache serializes"),
+    )
+    .expect("changed module cache deserializes in a fresh process");
+    let restarted = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
+        changed_resolver.envelope("root", format!("{source}\n// root comment restart\n")),
+        &changed_resolver,
+        &[],
+        &request(
+            changed.verification_facts.clone(),
+            changed.declaration_verification_facts.clone(),
+        ),
+        &mut restarted_cache,
+    );
+    assert!(restarted.is_valid(), "{:?}", restarted.diagnostics);
+    let restarted_observation = restarted
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("fresh-process module cache observation");
+    assert_eq!(
+        restarted_observation.reused_module_subjects,
+        vec!["lib.fact_leaf", "lib.fact_mid"]
+    );
+    assert!(restarted_observation.linked_module_subjects.is_empty());
+    assert!(restarted_observation.invalidated_module_subjects.is_empty());
+
     // A cache produced under the previous dependency-closure contract is
     // discarded as a whole before Language continues on the current source.
     let mut legacy_cache_value: serde_json::Value =
