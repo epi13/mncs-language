@@ -2080,6 +2080,88 @@ fn linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes(
 }
 
 #[test]
+fn linked_frontend_combines_parse_dependency_and_module_elaboration_caches() {
+    let leaf_source = "mncs 0.19;\nmodule lib.combined_leaf;\nenum State { Ready, Done }\nrecord LeafValue { state: State, value: u64 }\nfn base(value: u64) -> (result: u64) { return value; }\n";
+    let mid_source = "mncs 0.19;\nmodule lib.combined_mid;\nuse lib.combined_leaf;\nfn forward(value: u64) -> (result: u64) { return lib.combined_leaf.base(value); }\n";
+    let resolver = MapResolver::default()
+        .with("lib.combined_leaf", leaf_source)
+        .with("lib.combined_mid", mid_source);
+    let compiler = ReferenceCompiler::default();
+    let request = VerificationFactRequest {
+        language_profile: "0.19".to_owned(),
+        subject_language_profiles: BTreeMap::new(),
+        prior_facts: Vec::new(),
+        prior_declaration_facts: Vec::new(),
+        prior_record_type_declaration_facts: Vec::new(),
+        source_location_identities: BTreeMap::new(),
+    };
+    let root = "mncs 0.19;\nmodule app.combined;\nuse lib.combined_mid;\nfn entry(value: u64) -> (result: u64) { return lib.combined_mid.forward(value); }\n";
+    let mut parse_cache = SourceParseCache::default();
+    let mut dependency_cache = VerificationDependencySummaryCache::default();
+    let mut module_cache = ModuleElaborationCache::default();
+
+    let first = compiler.front_end_with_verified_facts_and_caches_and_module_elaboration_cache(
+        resolver.envelope("root", root.to_owned()),
+        &resolver,
+        &[],
+        &request,
+        &mut parse_cache,
+        &mut dependency_cache,
+        &mut module_cache,
+    );
+    assert!(first.is_valid(), "{:?}", first.diagnostics);
+    let cold = first
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("combined cache observation");
+    assert_eq!(
+        cold.linked_module_subjects,
+        vec!["lib.combined_leaf", "lib.combined_mid"]
+    );
+    assert_eq!(cold.published_entry_count, 2);
+
+    let mut parse_cache: SourceParseCache =
+        serde_json::from_slice(&serde_json::to_vec(&parse_cache).expect("parse cache serializes"))
+            .expect("parse cache restores");
+    let mut module_cache: ModuleElaborationCache = serde_json::from_slice(
+        &serde_json::to_vec(&module_cache).expect("module cache serializes"),
+    )
+    .expect("module cache restores");
+    let mut dependency_cache = VerificationDependencySummaryCache::default();
+    let second = compiler.front_end_with_verified_facts_and_caches_and_module_elaboration_cache(
+        resolver.envelope("root", format!("// comment edit\n{root}")),
+        &resolver,
+        &[],
+        &VerificationFactRequest {
+            prior_facts: first.verification_facts.clone(),
+            prior_declaration_facts: first.declaration_verification_facts.clone(),
+            ..request
+        },
+        &mut parse_cache,
+        &mut dependency_cache,
+        &mut module_cache,
+    );
+    assert!(second.is_valid(), "{:?}", second.diagnostics);
+    let warm = second
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("restored combined cache observation");
+    assert_eq!(
+        warm.reused_module_subjects,
+        vec!["lib.combined_leaf", "lib.combined_mid"]
+    );
+    assert!(warm.linked_module_subjects.is_empty());
+    assert_eq!(
+        second
+            .source_parse_cache_reuse
+            .as_ref()
+            .expect("source parse observation")
+            .published_entry_count,
+        1
+    );
+}
+
+#[test]
 fn linked_frontend_reuses_exact_language_dependency_summaries_across_body_edits() {
     let library_source = "mncs 0.19;\nmodule lib.dependency_cache;\nfn imported(value: u64) -> (result: u64) { return value; }\nfn imported_idle(value: u64) -> (result: u64) { return value; }\n";
     let resolver = MapResolver::default().with("lib.dependency_cache", library_source);
