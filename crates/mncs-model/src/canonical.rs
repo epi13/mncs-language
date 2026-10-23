@@ -390,6 +390,10 @@ fn sorted_semantic_ids(ids: &[crate::SemanticId]) -> Vec<JsonValue> {
 }
 
 pub(crate) fn canonical_function(function: &Function) -> JsonValue {
+    canonical_function_with_body(function, true)
+}
+
+fn canonical_function_with_body(function: &Function, include_body: bool) -> JsonValue {
     let mut result = object([
         ("assumptions", sorted_strings(&function.assumptions)),
         ("capabilities", sorted_strings(&function.capabilities)),
@@ -464,13 +468,15 @@ pub(crate) fn canonical_function(function: &Function) -> JsonValue {
             );
         }
     }
-    if let Some(body) = &function.body {
-        if let JsonValue::Object(fields) = &mut result {
-            fields.insert(
-                "body".to_owned(),
-                serde_json::from_str(&body.canonical_json().expect("canonical body"))
-                    .expect("canonical body JSON"),
-            );
+    if include_body {
+        if let Some(body) = &function.body {
+            if let JsonValue::Object(fields) = &mut result {
+                fields.insert(
+                    "body".to_owned(),
+                    serde_json::from_str(&body.canonical_json().expect("canonical body"))
+                        .expect("canonical body JSON"),
+                );
+            }
         }
     }
     // Local declarations omit this compatibility field; imported functions
@@ -492,9 +498,7 @@ impl Function {
     /// body edit can reuse independent callers while a signature, contract,
     /// effect, capability, or assumption edit invalidates them.
     pub fn interface_fingerprint(&self) -> String {
-        let mut interface = self.clone();
-        interface.body = None;
-        let canonical = canonical_function(&interface);
+        let canonical = canonical_function_with_body(self, false);
         let bytes = serde_json::to_vec(&canonical).expect("canonical function interface");
         sha256_hex(&bytes)
     }
@@ -904,5 +908,34 @@ mod tests {
             before.content_fingerprint().unwrap(),
             after.content_fingerprint().unwrap()
         );
+    }
+
+    #[test]
+    fn interface_fingerprint_matches_the_body_erased_canonical_function() {
+        let mut function = program().functions.remove(0);
+        let body_erased = {
+            let mut clone = function.clone();
+            clone.body = None;
+            serde_json::to_vec(&canonical_function(&clone)).unwrap()
+        };
+        assert_eq!(function.interface_fingerprint(), sha256_hex(&body_erased));
+
+        // Body changes must not affect the callable interface identity.
+        let before = function.interface_fingerprint();
+        function.body = Some(crate::FunctionBody {
+            schema_version: crate::EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
+            entry: "entry".to_owned(),
+            parameters: Vec::new(),
+            generic_params: Vec::new(),
+            cycle_policy: crate::BodyCyclePolicy::Legacy,
+            bounded_iterations: Vec::new(),
+            blocks: vec![crate::BodyBlock {
+                id: "entry".to_owned(),
+                parameters: Vec::new(),
+                operations: Vec::new(),
+                terminator: crate::BodyTerminator::Return { values: Vec::new() },
+            }],
+        });
+        assert_eq!(function.interface_fingerprint(), before);
     }
 }
