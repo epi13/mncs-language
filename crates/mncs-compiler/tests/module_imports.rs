@@ -1832,8 +1832,14 @@ fn linked_frontend_reuses_unchanged_import_parses_after_cache_restart() {
             .envelope("lib.parse_cache", library_source.to_owned())
             .identity
     );
-    assert_eq!(observation.parsed_source_identities.len(), 1);
-    assert_eq!(observation.published_entry_count, 1);
+    assert_eq!(
+        observation.reused_same_significant_tokens_source_identities,
+        [resolver
+            .envelope("root", format!("// root snapshot comment edit\n{source}"))
+            .identity]
+    );
+    assert!(observation.parsed_source_identities.is_empty());
+    assert_eq!(observation.published_entry_count, 0);
     assert_eq!(
         second
             .verification_fact_reuse
@@ -2431,7 +2437,8 @@ fn linked_frontend_combines_parse_dependency_and_module_elaboration_caches() {
             .source_parse_cache_reuse
             .as_ref()
             .expect("source parse observation")
-            .published_entry_count,
+            .reused_same_significant_tokens_source_identities
+            .len(),
         1
     );
 }
