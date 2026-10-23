@@ -1547,7 +1547,33 @@ fn lex_with_source_map(envelope: &SourceEnvelope, source_map: &SourceMap) -> Lex
 pub fn parse(envelope: &SourceEnvelope) -> ParseOutput {
     let source_map = SourceMap::new(&envelope.text);
     let lexical = lex_with_source_map(envelope, &source_map);
-    let mut parser = Parser::new(envelope, &lexical.tokens, &source_map);
+    parse_with_lexical_and_source_map(envelope, lexical, &source_map)
+}
+
+/// Parse an envelope using a freshly lexed document supplied by the caller.
+/// The document is accepted only when its identity, schema, and reconstructed
+/// text agree with the envelope; otherwise the source is lexed again. This
+/// lets Language reuse lexical work while keeping the parser's source snapshot
+/// checks at the syntax boundary.
+pub fn parse_with_lexical(envelope: &SourceEnvelope, lexical: LexedDocument) -> ParseOutput {
+    let source_map = SourceMap::new(&envelope.text);
+    let lexical = if lexical.schema_version == LEXICAL_SCHEMA_VERSION
+        && lexical.source_identity == envelope.identity
+        && lexical.reconstruct() == envelope.text
+    {
+        lexical
+    } else {
+        lex_with_source_map(envelope, &source_map)
+    };
+    parse_with_lexical_and_source_map(envelope, lexical, &source_map)
+}
+
+fn parse_with_lexical_and_source_map(
+    envelope: &SourceEnvelope,
+    lexical: LexedDocument,
+    source_map: &SourceMap,
+) -> ParseOutput {
+    let mut parser = Parser::new(envelope, &lexical.tokens, source_map);
     let (cst, ast) = parser.document();
     let mut diagnostics = lexical.diagnostics.clone();
     diagnostics.append(&mut parser.diagnostics);

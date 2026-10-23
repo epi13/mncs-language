@@ -7,19 +7,21 @@
 //! and logical names do not affect parsing and source spans remain byte based.
 
 use mncs_syntax::{
-    source_profile_registry_snapshot, ParseOutput, SourceArtifactKind, SourceEnvelope,
+    source_profile_registry_snapshot, AbstractSyntaxTree, ConcreteSyntaxTree, CstNode,
+    LexedDocument, ParseOutput, SourceArtifactKind, SourceEnvelope, SourceSpan, SourceToken,
     AST_SCHEMA_VERSION, CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::io::{self, Write};
 
-pub const SOURCE_PARSE_CACHE_SCHEMA_VERSION: &str = "mncs.language-source-parse-cache/2";
+pub const SOURCE_PARSE_CACHE_SCHEMA_VERSION: &str = "mncs.language-source-parse-cache/3";
 /// Bump this identity whenever parser behavior changes without a syntax
 /// artifact schema change.
 pub const SOURCE_PARSE_POLICY_IDENTITY: &str = "mncs-language-source-parser/1";
 pub const SOURCE_PARSE_CACHE_OBSERVATION_SCHEMA_VERSION: &str =
-    "mncs.language-source-parse-cache-observation/2";
+    "mncs.language-source-parse-cache-observation/3";
 
 const MAX_CACHE_ENTRIES: usize = 256;
 const MAX_CACHE_BYTES: usize = 32 * 1024 * 1024;
@@ -60,11 +62,15 @@ impl Default for SourceParseCache {
 struct SourceParseCacheEntry {
     key: String,
     source_identity: String,
+    source_envelope_schema_version: String,
+    language_profile: String,
+    artifact_kind: SourceArtifactKind,
     parser_policy_identity: String,
     profile_registry_identity: String,
     lexical_schema_version: String,
     cst_schema_version: String,
     ast_schema_version: String,
+    significant_tokens_digest: String,
     output_digest: String,
     output: ParseOutput,
 }
@@ -73,11 +79,15 @@ struct SourceParseCacheEntry {
 struct SourceParseCacheEntryRef<'a> {
     key: &'a str,
     source_identity: &'a str,
+    source_envelope_schema_version: &'a str,
+    language_profile: &'a str,
+    artifact_kind: SourceArtifactKind,
     parser_policy_identity: &'a str,
     profile_registry_identity: &'a str,
     lexical_schema_version: &'a str,
     cst_schema_version: &'a str,
     ast_schema_version: &'a str,
+    significant_tokens_digest: &'a str,
     output_digest: &'a str,
     output: &'a ParseOutput,
 }
@@ -87,6 +97,12 @@ pub struct SourceParseCacheObservation {
     pub schema_version: String,
     /// Source envelopes whose parse result was reused after all guards passed.
     pub reused_source_identities: Vec<String>,
+    /// Source envelopes whose semantic syntax tree was reused after fresh
+    /// lexing proved that every non-trivia token and parser assumption stayed
+    /// identical. Current tokens and source locations are rebuilt for these
+    /// snapshots.
+    #[serde(default)]
+    pub reused_same_significant_tokens_source_identities: Vec<String>,
     /// Source envelopes parsed during this frontend call.
     pub parsed_source_identities: Vec<String>,
     /// Prior entries rejected because their schema, digest, or parse output
@@ -104,6 +120,7 @@ impl Default for SourceParseCacheObservation {
         Self {
             schema_version: SOURCE_PARSE_CACHE_OBSERVATION_SCHEMA_VERSION.to_owned(),
             reused_source_identities: Vec::new(),
+            reused_same_significant_tokens_source_identities: Vec::new(),
             parsed_source_identities: Vec::new(),
             rejected_entry_count: 0,
             evicted_entry_count: 0,
@@ -160,11 +177,69 @@ impl SourceParseCache {
             }
         }
 
+        // A changed source snapshot can reuse its syntax tree only after a
+        // fresh lexical pass proves the complete significant-token stream is
+        // unchanged. The fresh lexical document is also used by the fallback
+        // parser, so a miss does not lex the source twice.
+        let lexical = mncs_syntax::lex(envelope);
+        if envelope.identity_is_valid() && lexical.diagnostics.is_empty() {
+            let significant_digest = significant_tokens_digest(&lexical.tokens);
+            let matching = self
+                .entries
+                .iter()
+                .enumerate()
+                .filter_map(|(index, entry)| {
+                    semantic_candidate_matches(
+                        entry,
+                        envelope,
+                        &profile_registry_identity,
+                        &significant_digest,
+                    )
+                    .then_some(index)
+                })
+                .collect::<Vec<_>>();
+            if matching.len() == 1 {
+                let index = matching[0];
+                let entry = &self.entries[index];
+                if entry_matches_significant_tokens(
+                    entry,
+                    envelope,
+                    &profile_registry_identity,
+                    &significant_digest,
+                    &lexical.tokens,
+                ) {
+                    if let Some(output) = rebase_parse_output(
+                        &entry.output,
+                        &envelope.identity,
+                        &envelope.text,
+                        &lexical,
+                    ) {
+                        let entry = self.entries.remove(index);
+                        let entry_size = self.entry_sizes.remove(index);
+                        self.entries.push(entry);
+                        self.entry_sizes.push(entry_size);
+                        observation
+                            .reused_same_significant_tokens_source_identities
+                            .push(envelope.identity.clone());
+                        return output;
+                    }
+                }
+            }
+            if !matching.is_empty() {
+                observation.rejected_entry_count += matching.len();
+                for index in matching.into_iter().rev() {
+                    self.entries.remove(index);
+                    self.entry_sizes.remove(index);
+                }
+            }
+        }
+
         observation
             .parsed_source_identities
             .push(envelope.identity.clone());
         mncs_model::record_counter("source_parse");
-        let output = mncs_syntax::parse(envelope);
+        let output = mncs_syntax::parse_with_lexical(envelope, lexical);
+        let significant_digest = significant_tokens_digest(&output.lexical.tokens);
         if envelope.identity_is_valid() && output_matches_envelope(&output, envelope) {
             let output_digest = match serialized_sha256_with_limit(&output, MAX_CACHE_BYTES) {
                 Some((digest, _)) => digest,
@@ -173,11 +248,15 @@ impl SourceParseCache {
             let entry_view = SourceParseCacheEntryRef {
                 key: &key,
                 source_identity: &envelope.identity,
+                source_envelope_schema_version: &envelope.schema_version,
+                language_profile: &envelope.language_version,
+                artifact_kind: envelope.artifact_kind,
                 parser_policy_identity: SOURCE_PARSE_POLICY_IDENTITY,
                 profile_registry_identity: &profile_registry_identity,
                 lexical_schema_version: LEXICAL_SCHEMA_VERSION,
                 cst_schema_version: CST_SCHEMA_VERSION,
                 ast_schema_version: AST_SCHEMA_VERSION,
+                significant_tokens_digest: &significant_digest,
                 output_digest: &output_digest,
                 output: &output,
             };
@@ -188,11 +267,15 @@ impl SourceParseCache {
             let entry = SourceParseCacheEntry {
                 key,
                 source_identity: envelope.identity.clone(),
+                source_envelope_schema_version: envelope.schema_version.clone(),
+                language_profile: envelope.language_version.clone(),
+                artifact_kind: envelope.artifact_kind,
                 parser_policy_identity: SOURCE_PARSE_POLICY_IDENTITY.to_owned(),
                 profile_registry_identity,
                 lexical_schema_version: LEXICAL_SCHEMA_VERSION.to_owned(),
                 cst_schema_version: CST_SCHEMA_VERSION.to_owned(),
                 ast_schema_version: AST_SCHEMA_VERSION.to_owned(),
+                significant_tokens_digest: significant_digest,
                 output_digest,
                 output: output.clone(),
             };
@@ -350,6 +433,22 @@ pub(crate) fn profile_registry_identity() -> String {
 }
 
 fn cache_key(envelope: &SourceEnvelope, profile_registry_identity: &str) -> String {
+    cache_key_for_parts(
+        &envelope.schema_version,
+        &envelope.language_version,
+        envelope.artifact_kind,
+        &sha256_hex(envelope.text.as_bytes()),
+        profile_registry_identity,
+    )
+}
+
+fn cache_key_for_parts(
+    source_envelope_schema_version: &str,
+    language_profile: &str,
+    artifact_kind: SourceArtifactKind,
+    source_text_sha256: &str,
+    profile_registry_identity: &str,
+) -> String {
     #[derive(Serialize)]
     struct Key<'a> {
         cache_schema_version: &'a str,
@@ -358,7 +457,7 @@ fn cache_key(envelope: &SourceEnvelope, profile_registry_identity: &str) -> Stri
         source_envelope_schema_version: &'a str,
         language_profile: &'a str,
         artifact_kind: SourceArtifactKind,
-        source_text_sha256: String,
+        source_text_sha256: &'a str,
         lexical_schema_version: &'a str,
         cst_schema_version: &'a str,
         ast_schema_version: &'a str,
@@ -367,16 +466,33 @@ fn cache_key(envelope: &SourceEnvelope, profile_registry_identity: &str) -> Stri
         cache_schema_version: SOURCE_PARSE_CACHE_SCHEMA_VERSION,
         parser_policy_identity: SOURCE_PARSE_POLICY_IDENTITY,
         profile_registry_identity,
-        source_envelope_schema_version: &envelope.schema_version,
-        language_profile: &envelope.language_version,
-        artifact_kind: envelope.artifact_kind,
-        source_text_sha256: sha256_hex(envelope.text.as_bytes()),
+        source_envelope_schema_version,
+        language_profile,
+        artifact_kind,
+        source_text_sha256,
         lexical_schema_version: LEXICAL_SCHEMA_VERSION,
         cst_schema_version: CST_SCHEMA_VERSION,
         ast_schema_version: AST_SCHEMA_VERSION,
     };
     let bytes = serde_json::to_vec(&material).expect("parse cache key is serializable");
     sha256_hex(&bytes)
+}
+
+fn semantic_candidate_matches(
+    entry: &SourceParseCacheEntry,
+    envelope: &SourceEnvelope,
+    profile_registry_identity: &str,
+    significant_digest: &str,
+) -> bool {
+    entry.source_envelope_schema_version == envelope.schema_version
+        && entry.language_profile == envelope.language_version
+        && entry.artifact_kind == envelope.artifact_kind
+        && entry.parser_policy_identity == SOURCE_PARSE_POLICY_IDENTITY
+        && entry.profile_registry_identity == profile_registry_identity
+        && entry.lexical_schema_version == LEXICAL_SCHEMA_VERSION
+        && entry.cst_schema_version == CST_SCHEMA_VERSION
+        && entry.ast_schema_version == AST_SCHEMA_VERSION
+        && entry.significant_tokens_digest == significant_digest
 }
 
 fn entry_matches(
@@ -386,16 +502,73 @@ fn entry_matches(
     profile_registry_identity: &str,
 ) -> bool {
     if entry.key != key
+        || entry.source_envelope_schema_version != envelope.schema_version
+        || entry.language_profile != envelope.language_version
+        || entry.artifact_kind != envelope.artifact_kind
         || entry.parser_policy_identity != SOURCE_PARSE_POLICY_IDENTITY
         || entry.profile_registry_identity != profile_registry_identity
         || entry.lexical_schema_version != LEXICAL_SCHEMA_VERSION
         || entry.cst_schema_version != CST_SCHEMA_VERSION
         || entry.ast_schema_version != AST_SCHEMA_VERSION
+        || entry.significant_tokens_digest
+            != significant_tokens_digest(&entry.output.lexical.tokens)
         || !output_matches_entry(&entry.output, &entry.source_identity, envelope)
     {
         return false;
     }
     serialized_sha256(&entry.output).is_some_and(|digest| digest == entry.output_digest)
+}
+
+fn entry_matches_significant_tokens(
+    entry: &SourceParseCacheEntry,
+    envelope: &SourceEnvelope,
+    profile_registry_identity: &str,
+    significant_digest: &str,
+    fresh_tokens: &[SourceToken],
+) -> bool {
+    if !semantic_candidate_matches(
+        entry,
+        envelope,
+        profile_registry_identity,
+        significant_digest,
+    ) || !entry.output.is_valid()
+        || entry.output.lexical.schema_version != LEXICAL_SCHEMA_VERSION
+        || entry.output.lexical.source_identity != entry.source_identity
+        || entry.output.cst.schema_version != CST_SCHEMA_VERSION
+        || entry.output.cst.source_identity != entry.source_identity
+        || entry.output.cst.tokens != entry.output.lexical.tokens
+        || entry.output.cst.source_length != entry.output.lexical.reconstruct().len()
+        || entry.output.cst.reconstruct() != entry.output.lexical.reconstruct()
+        || entry.output.ast.as_ref().is_none_or(|ast| {
+            ast.schema_version != AST_SCHEMA_VERSION || ast.source_identity != entry.source_identity
+        })
+        || entry.significant_tokens_digest
+            != significant_tokens_digest(&entry.output.lexical.tokens)
+    {
+        return false;
+    }
+    let cached_text = entry.output.lexical.reconstruct();
+    if entry.key
+        != cache_key_for_parts(
+            &entry.source_envelope_schema_version,
+            &entry.language_profile,
+            entry.artifact_kind,
+            &sha256_hex(cached_text.as_bytes()),
+            profile_registry_identity,
+        )
+    {
+        return false;
+    }
+    if !serialized_sha256(&entry.output).is_some_and(|digest| digest == entry.output_digest) {
+        return false;
+    }
+    let cached_significant = significant_tokens(&entry.output.lexical.tokens);
+    let fresh_significant = significant_tokens(fresh_tokens);
+    cached_significant.len() == fresh_significant.len()
+        && cached_significant
+            .iter()
+            .zip(fresh_significant)
+            .all(|(cached, fresh)| cached.kind == fresh.kind && cached.text == fresh.text)
 }
 
 fn output_matches_entry(
@@ -408,6 +581,8 @@ fn output_matches_entry(
         && output.cst.schema_version == CST_SCHEMA_VERSION
         && output.cst.source_identity == cached_source_identity
         && output.cst.source_length == envelope.text.len()
+        && output.cst.tokens == output.lexical.tokens
+        && output.cst.reconstruct() == envelope.text
         && output.ast.as_ref().is_none_or(|ast| {
             ast.schema_version == AST_SCHEMA_VERSION
                 && ast.source_identity == cached_source_identity
@@ -423,6 +598,351 @@ fn rebind_source_identity(output: &mut ParseOutput, source_identity: &str) {
     output.cst.source_identity = source_identity.to_owned();
     if let Some(ast) = output.ast.as_mut() {
         ast.source_identity = source_identity.to_owned();
+    }
+}
+
+fn significant_tokens(tokens: &[SourceToken]) -> Vec<&SourceToken> {
+    tokens
+        .iter()
+        .filter(|token| !token.kind.is_trivia())
+        .collect()
+}
+
+fn significant_tokens_digest(tokens: &[SourceToken]) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"mncs.language-significant-token-stream/1");
+    for token in tokens.iter().filter(|token| !token.kind.is_trivia()) {
+        let kind = serde_json::to_vec(&token.kind).expect("token kind is serializable");
+        digest.update((kind.len() as u64).to_be_bytes());
+        digest.update(kind);
+        digest.update((token.text.len() as u64).to_be_bytes());
+        digest.update(token.text.as_bytes());
+    }
+    let digest = digest.finalize();
+    hex_digest(&digest)
+}
+
+struct SourceLocationMap {
+    starts: HashMap<usize, usize>,
+    ends: HashMap<usize, usize>,
+    raw_indices: HashMap<usize, usize>,
+}
+
+impl SourceLocationMap {
+    fn from_tokens(old_tokens: &[SourceToken], new_tokens: &[SourceToken]) -> Option<Self> {
+        let old_significant = significant_tokens(old_tokens);
+        let new_significant = significant_tokens(new_tokens);
+        if old_significant.len() != new_significant.len()
+            || !old_significant
+                .iter()
+                .zip(&new_significant)
+                .all(|(old, new)| old.kind == new.kind && old.text == new.text)
+        {
+            return None;
+        }
+
+        let mut starts = HashMap::with_capacity(old_significant.len());
+        let mut ends = HashMap::with_capacity(old_significant.len());
+        let mut raw_indices = HashMap::with_capacity(old_significant.len());
+        for (old, new) in old_tokens
+            .iter()
+            .enumerate()
+            .filter(|(_, token)| !token.kind.is_trivia())
+            .zip(
+                new_tokens
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, token)| !token.kind.is_trivia()),
+            )
+        {
+            let (old_index, old_token) = old;
+            let (new_index, new_token) = new;
+            if insert_unique(&mut starts, old_token.span.start, new_token.span.start).is_err()
+                || insert_unique(&mut ends, old_token.span.end, new_token.span.end).is_err()
+            {
+                return None;
+            }
+            raw_indices.insert(old_index, new_index);
+        }
+        Some(Self {
+            starts,
+            ends,
+            raw_indices,
+        })
+    }
+
+    fn rebase_span(
+        &self,
+        span: SourceSpan,
+        old_source_length: usize,
+        new_source: &str,
+        lines: &SourceLineIndex,
+    ) -> Option<SourceSpan> {
+        let is_document_span = span.start == 0 && span.end == old_source_length;
+        let start = if is_document_span {
+            0
+        } else {
+            self.starts.get(&span.start).copied()?
+        };
+        let end = if is_document_span {
+            new_source.len()
+        } else {
+            self.ends.get(&span.end).copied()?
+        };
+        if start > end
+            || end > new_source.len()
+            || !new_source.is_char_boundary(start)
+            || !new_source.is_char_boundary(end)
+        {
+            return None;
+        }
+        Some(lines.span_at(new_source, start, end))
+    }
+}
+
+fn insert_unique(map: &mut HashMap<usize, usize>, old: usize, new: usize) -> Result<(), ()> {
+    match map.insert(old, new) {
+        Some(previous) if previous != new => Err(()),
+        _ => Ok(()),
+    }
+}
+
+struct SourceLineIndex {
+    line_starts: Vec<usize>,
+}
+
+impl SourceLineIndex {
+    fn new(source: &str) -> Self {
+        let mut line_starts = vec![0];
+        line_starts.extend(
+            source
+                .bytes()
+                .enumerate()
+                .filter_map(|(index, byte)| (byte == b'\n').then_some(index + 1)),
+        );
+        Self { line_starts }
+    }
+
+    fn span_at(&self, source: &str, start: usize, end: usize) -> SourceSpan {
+        let line_index = match self.line_starts.binary_search(&start) {
+            Ok(index) => index,
+            Err(next) => next.saturating_sub(1),
+        };
+        let line_start = self.line_starts[line_index];
+        SourceSpan {
+            start,
+            end,
+            line: line_index + 1,
+            column: source[line_start..start].chars().count() + 1,
+        }
+    }
+}
+
+fn rebase_parse_output(
+    previous: &ParseOutput,
+    source_identity: &str,
+    source_text: &str,
+    lexical: &LexedDocument,
+) -> Option<ParseOutput> {
+    if !previous.is_valid()
+        || previous.ast.is_none()
+        || !lexical.diagnostics.is_empty()
+        || lexical.reconstruct() != source_text
+    {
+        return None;
+    }
+    let old_source_length = previous.cst.source_length;
+    let locations = SourceLocationMap::from_tokens(&previous.lexical.tokens, &lexical.tokens)?;
+    let lines = SourceLineIndex::new(source_text);
+
+    let mut cst = previous.cst.clone();
+    if !rebase_cst_node(
+        &mut cst.root,
+        &previous.lexical.tokens,
+        old_source_length,
+        source_text,
+        &lexical.tokens,
+        &locations,
+        &lines,
+        true,
+    ) {
+        return None;
+    }
+    cst.source_identity = source_identity.to_owned();
+    cst.source_length = source_text.len();
+    cst.tokens = lexical.tokens.clone();
+
+    let mut ast_value = serde_json::to_value(previous.ast.as_ref()?).ok()?;
+    let mut rebased_span_count = 0;
+    if !rebase_span_values(
+        &mut ast_value,
+        &locations,
+        old_source_length,
+        source_text,
+        &lines,
+        &mut rebased_span_count,
+    ) || rebased_span_count == 0
+    {
+        return None;
+    }
+    let mut ast: AbstractSyntaxTree = serde_json::from_value(ast_value).ok()?;
+    ast.source_identity = source_identity.to_owned();
+
+    let mut diagnostics_value = serde_json::to_value(&previous.diagnostics).ok()?;
+    let mut diagnostic_span_count = 0;
+    if !rebase_span_values(
+        &mut diagnostics_value,
+        &locations,
+        old_source_length,
+        source_text,
+        &lines,
+        &mut diagnostic_span_count,
+    ) {
+        return None;
+    }
+    let diagnostics = serde_json::from_value(diagnostics_value).ok()?;
+
+    let result = ParseOutput {
+        lexical: lexical.clone(),
+        cst: ConcreteSyntaxTree {
+            source_identity: source_identity.to_owned(),
+            ..cst
+        },
+        ast: Some(ast),
+        diagnostics,
+    };
+    (result.is_valid()
+        && result.cst.reconstruct() == source_text
+        && result.cst.source_length == source_text.len()
+        && result.cst.tokens == result.lexical.tokens)
+        .then_some(result)
+}
+
+fn rebase_cst_node(
+    node: &mut CstNode,
+    old_tokens: &[SourceToken],
+    old_source_length: usize,
+    new_source: &str,
+    new_tokens: &[SourceToken],
+    locations: &SourceLocationMap,
+    lines: &SourceLineIndex,
+    is_document_root: bool,
+) -> bool {
+    if is_document_root {
+        node.span = lines.span_at(new_source, 0, new_source.len());
+        node.token_start = 0;
+        node.token_end = new_tokens.len();
+    } else {
+        let Some(span) = locations.rebase_span(node.span, old_source_length, new_source, lines)
+        else {
+            return false;
+        };
+        let Some(new_start) = locations.raw_indices.get(&node.token_start).copied() else {
+            return false;
+        };
+        let Some(old_last) = node.token_end.checked_sub(1) else {
+            return false;
+        };
+        if old_tokens.get(old_last).is_none() {
+            return false;
+        }
+        let Some(new_last) = locations.raw_indices.get(&old_last).copied() else {
+            return false;
+        };
+        if new_tokens.get(new_start).is_none() || new_tokens.get(new_last).is_none() {
+            return false;
+        }
+        node.span = span;
+        node.token_start = new_start;
+        node.token_end = new_last + 1;
+    }
+    node.children.iter_mut().all(|child| {
+        rebase_cst_node(
+            child,
+            old_tokens,
+            old_source_length,
+            new_source,
+            new_tokens,
+            locations,
+            lines,
+            false,
+        )
+    })
+}
+
+fn rebase_span_values(
+    value: &mut serde_json::Value,
+    locations: &SourceLocationMap,
+    old_source_length: usize,
+    new_source: &str,
+    lines: &SourceLineIndex,
+    span_count: &mut usize,
+) -> bool {
+    match value {
+        serde_json::Value::Object(object) => {
+            let span_fields = ["start", "end", "line", "column"];
+            if span_fields.iter().any(|field| object.contains_key(*field)) {
+                let read_usize = |field: &str| {
+                    object
+                        .get(field)
+                        .and_then(serde_json::Value::as_u64)
+                        .map(|number| number as usize)
+                };
+                let Some(start) = read_usize("start") else {
+                    return false;
+                };
+                let Some(end) = read_usize("end") else {
+                    return false;
+                };
+                let Some(line) = read_usize("line") else {
+                    return false;
+                };
+                let Some(column) = read_usize("column") else {
+                    return false;
+                };
+                let Some(span) = locations.rebase_span(
+                    SourceSpan {
+                        start,
+                        end,
+                        line,
+                        column,
+                    },
+                    old_source_length,
+                    new_source,
+                    lines,
+                ) else {
+                    return false;
+                };
+                object.insert("start".to_owned(), serde_json::json!(span.start));
+                object.insert("end".to_owned(), serde_json::json!(span.end));
+                object.insert("line".to_owned(), serde_json::json!(span.line));
+                object.insert("column".to_owned(), serde_json::json!(span.column));
+                *span_count += 1;
+                true
+            } else {
+                object.values_mut().all(|nested| {
+                    rebase_span_values(
+                        nested,
+                        locations,
+                        old_source_length,
+                        new_source,
+                        lines,
+                        span_count,
+                    )
+                })
+            }
+        }
+        serde_json::Value::Array(values) => values.iter_mut().all(|nested| {
+            rebase_span_values(
+                nested,
+                locations,
+                old_source_length,
+                new_source,
+                lines,
+                span_count,
+            )
+        }),
+        _ => true,
     }
 }
 
@@ -533,6 +1053,75 @@ mod tests {
     }
 
     #[test]
+    fn parse_cache_reuses_comment_only_edits_after_restart_with_fresh_locations() {
+        let source =
+            "mncs 0.19;\nmodule cache.comment;\nfn value() -> (result: u64) { return 9; }\n";
+        let original = SourceEnvelope::inline(SourceArtifactKind::Program, "cache.comment", source);
+        let mut first_cache = SourceParseCache::default();
+        let mut first_observation = SourceParseCacheObservation::default();
+        let first = first_cache.parse(&original, &mut first_observation);
+        assert!(first.is_valid(), "{:?}", first.diagnostics);
+
+        let bytes = serde_json::to_vec(&first_cache).expect("cache serializes");
+        let mut restarted_cache: SourceParseCache =
+            serde_json::from_slice(&bytes).expect("cache restores after process restart");
+        let changed = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "cache.comment",
+            format!(
+                "// π comment before the header\nmncs 0.19;\nmodule cache.comment;\n/* comment before function */\nfn value() -> (result: u64) {{ /* inside */ return 9; }}\n// trailing comment\n"
+            ),
+        );
+        let mut observation = SourceParseCacheObservation::default();
+        let reused = restarted_cache.parse(&changed, &mut observation);
+        let freshly_parsed = mncs_syntax::parse(&changed);
+
+        assert_eq!(observation.reused_source_identities, Vec::<String>::new());
+        assert_eq!(
+            observation.reused_same_significant_tokens_source_identities,
+            [changed.identity.clone()]
+        );
+        assert!(observation.parsed_source_identities.is_empty());
+        assert_eq!(observation.published_entry_count, 0);
+        assert_eq!(reused, freshly_parsed);
+        assert_eq!(reused.lexical.reconstruct(), changed.text);
+        assert_eq!(reused.cst.reconstruct(), changed.text);
+        assert_eq!(reused.cst.source_identity, changed.identity);
+        assert_eq!(reused.cst.source_length, changed.text.len());
+        assert_eq!(reused.cst.tokens, reused.lexical.tokens);
+        assert_ne!(
+            reused.ast.as_ref().expect("valid AST").span,
+            first.ast.as_ref().expect("valid original AST").span
+        );
+    }
+
+    #[test]
+    fn parse_cache_does_not_reuse_significant_tokens_across_profile_assumptions() {
+        let mut original = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "cache.profile",
+            "mncs 0.19; module cache.profile; fn value() -> (result: u64) { return 9; }",
+        );
+        let mut cache = SourceParseCache::default();
+        let mut original_observation = SourceParseCacheObservation::default();
+        let original_output = cache.parse(&original, &mut original_observation);
+        assert!(original_output.is_valid());
+
+        original.language_version = "0.18".to_owned();
+        original.seal();
+        let mut observation = SourceParseCacheObservation::default();
+        let changed_assumption = cache.parse(&original, &mut observation);
+        let freshly_parsed = mncs_syntax::parse(&original);
+
+        assert_eq!(changed_assumption, freshly_parsed);
+        assert!(!changed_assumption.is_valid());
+        assert!(observation
+            .reused_same_significant_tokens_source_identities
+            .is_empty());
+        assert_eq!(observation.parsed_source_identities, [original.identity]);
+    }
+
+    #[test]
     fn changed_and_corrupted_snapshots_are_reparsed_with_current_diagnostics() {
         let envelope = SourceEnvelope::inline(
             SourceArtifactKind::Program,
@@ -551,6 +1140,9 @@ mod tests {
         let mut changed_observation = SourceParseCacheObservation::default();
         let changed_output = cache.parse(&changed, &mut changed_observation);
         assert!(changed_observation.reused_source_identities.is_empty());
+        assert!(changed_observation
+            .reused_same_significant_tokens_source_identities
+            .is_empty());
         assert_eq!(
             changed_observation.parsed_source_identities,
             [changed.identity]
@@ -627,11 +1219,15 @@ mod tests {
         let entry_ref = SourceParseCacheEntryRef {
             key: &entry.key,
             source_identity: &entry.source_identity,
+            source_envelope_schema_version: &entry.source_envelope_schema_version,
+            language_profile: &entry.language_profile,
+            artifact_kind: entry.artifact_kind,
             parser_policy_identity: &entry.parser_policy_identity,
             profile_registry_identity: &entry.profile_registry_identity,
             lexical_schema_version: &entry.lexical_schema_version,
             cst_schema_version: &entry.cst_schema_version,
             ast_schema_version: &entry.ast_schema_version,
+            significant_tokens_digest: &entry.significant_tokens_digest,
             output_digest: &entry.output_digest,
             output: &entry.output,
         };
