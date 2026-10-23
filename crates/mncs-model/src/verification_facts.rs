@@ -326,7 +326,7 @@ impl CachedBodyDependencySummary {
 impl VerificationDependencySummaryCache {
     fn body_summary(
         &mut self,
-        program: &Program,
+        nominal_type_index: &VerificationNominalTypeIndex<'_>,
         subject: &SemanticId,
         function: &Function,
         body: &FunctionBody,
@@ -375,7 +375,7 @@ impl VerificationDependencySummaryCache {
         let mut summary = CachedBodyDependencySummary {
             calls: body_call_references(body),
             assumptions: body_assumption_references(body),
-            nominal_types: body_nominal_type_references(program, function, body),
+            nominal_types: body_nominal_type_references(nominal_type_index, function, body),
         };
         summary
             .assumptions
@@ -791,6 +791,7 @@ impl Program {
             }
         }
 
+        let nominal_types = self.verification_nominal_type_index();
         let functions = function_index
             .iter()
             .map(|(identity, function)| {
@@ -819,7 +820,7 @@ impl Program {
                         });
                     let summary = match dependency_summary_cache.as_deref_mut() {
                         Some(cache) => cache.body_summary(
-                            self,
+                            &nominal_types,
                             identity,
                             function,
                             body,
@@ -835,7 +836,11 @@ impl Program {
                             CachedBodyDependencySummary {
                                 calls: body_call_references(body),
                                 assumptions,
-                                nominal_types: body_nominal_type_references(self, function, body),
+                                nominal_types: body_nominal_type_references(
+                                    &nominal_types,
+                                    function,
+                                    body,
+                                ),
                             }
                         }
                     };
@@ -898,7 +903,7 @@ impl Program {
         });
         (
             VerificationFactDependencyIndex {
-                nominal_types: self.verification_nominal_type_index(),
+                nominal_types,
                 assumptions_by_name,
                 functions,
             },
@@ -1222,7 +1227,11 @@ impl Program {
         for specialization in relevant_specializations.values() {
             for argument in &specialization.args {
                 if let GenericArg::Type { ty } = argument {
-                    collect_nominal_type_references(self, ty, &mut nominal_types);
+                    collect_nominal_type_references(
+                        &dependency_index.nominal_types,
+                        ty,
+                        &mut nominal_types,
+                    );
                 }
             }
         }
@@ -1435,31 +1444,31 @@ fn body_call_references(body: &FunctionBody) -> BTreeSet<VerificationBodyCallRef
 }
 
 fn body_nominal_type_references(
-    program: &Program,
+    nominal_type_index: &VerificationNominalTypeIndex<'_>,
     function: &Function,
     body: &FunctionBody,
 ) -> BTreeSet<SemanticId> {
     let mut identities = BTreeSet::new();
     for value in function.inputs.iter().chain(&function.outputs) {
         let ty = BodyType::from_semantic_name(&value.value_type);
-        collect_nominal_type_references(program, &ty, &mut identities);
+        collect_nominal_type_references(nominal_type_index, &ty, &mut identities);
     }
     for parameter in &body.parameters {
-        collect_nominal_type_references(program, &parameter.ty, &mut identities);
+        collect_nominal_type_references(nominal_type_index, &parameter.ty, &mut identities);
     }
     for iteration in &body.bounded_iterations {
-        collect_nominal_type_references(program, &iteration.state_type, &mut identities);
+        collect_nominal_type_references(nominal_type_index, &iteration.state_type, &mut identities);
         if let crate::IterationDomain::OverSequence { element_type } = &iteration.domain {
-            collect_nominal_type_references(program, element_type, &mut identities);
+            collect_nominal_type_references(nominal_type_index, element_type, &mut identities);
         }
     }
     for block in &body.blocks {
         for value in &block.parameters {
-            collect_nominal_type_references(program, &value.ty, &mut identities);
+            collect_nominal_type_references(nominal_type_index, &value.ty, &mut identities);
         }
         for operation in &block.operations {
             for result in &operation.results {
-                collect_nominal_type_references(program, &result.ty, &mut identities);
+                collect_nominal_type_references(nominal_type_index, &result.ty, &mut identities);
             }
             match &operation.kind {
                 BodyOperationKind::Select { operand_type }
@@ -1502,10 +1511,14 @@ fn body_nominal_type_references(
                 | BodyOperationKind::SequenceConstruct {
                     element_type: operand_type,
                     ..
-                } => collect_nominal_type_references(program, operand_type, &mut identities),
+                } => collect_nominal_type_references(
+                    nominal_type_index,
+                    operand_type,
+                    &mut identities,
+                ),
                 BodyOperationKind::Convert { from, to } => {
-                    collect_nominal_type_references(program, from, &mut identities);
-                    collect_nominal_type_references(program, to, &mut identities);
+                    collect_nominal_type_references(nominal_type_index, from, &mut identities);
+                    collect_nominal_type_references(nominal_type_index, to, &mut identities);
                 }
                 BodyOperationKind::FiniteConstruct { type_identity, .. }
                 | BodyOperationKind::FiniteIsVariant { type_identity, .. }
@@ -1517,7 +1530,11 @@ fn body_nominal_type_references(
                 BodyOperationKind::Call { generic_args, .. } => {
                     for argument in generic_args {
                         if let GenericArg::Type { ty } = argument {
-                            collect_nominal_type_references(program, ty, &mut identities);
+                            collect_nominal_type_references(
+                                nominal_type_index,
+                                ty,
+                                &mut identities,
+                            );
                         }
                     }
                 }
@@ -1529,7 +1546,7 @@ fn body_nominal_type_references(
 }
 
 fn collect_nominal_type_references(
-    program: &Program,
+    nominal_type_index: &VerificationNominalTypeIndex<'_>,
     ty: &BodyType,
     identities: &mut BTreeSet<SemanticId>,
 ) {
@@ -1538,23 +1555,26 @@ fn collect_nominal_type_references(
             identities.insert(identity.clone());
         }
         BodyType::Named(name) => {
-            identities.extend(
-                program
-                    .finite_types
-                    .iter()
-                    .filter(|item| item.identity.as_str() == name || item.name == *name)
-                    .map(|item| item.identity.clone()),
-            );
-            identities.extend(
-                program
-                    .record_types
-                    .iter()
-                    .filter(|item| item.identity.as_str() == name || item.name == *name)
-                    .map(|item| item.identity.clone()),
-            );
+            if let Some(candidates) = nominal_type_index
+                .by_identity
+                .get(&SemanticId(name.clone()))
+            {
+                identities.extend(
+                    candidates
+                        .iter()
+                        .map(|candidate| candidate.identity().clone()),
+                );
+            }
+            if let Some(candidates) = nominal_type_index.by_name.get(name) {
+                identities.extend(
+                    candidates
+                        .iter()
+                        .map(|candidate| candidate.identity().clone()),
+                );
+            }
         }
         BodyType::Sequence { element, .. } | BodyType::Vector { element, .. } => {
-            collect_nominal_type_references(program, element, identities);
+            collect_nominal_type_references(nominal_type_index, element, identities);
         }
         _ => {}
     }
@@ -3420,6 +3440,17 @@ mod tests {
             index.by_name.get("Currency").map(Vec::len),
             Some(2),
             "the global fallback retains all candidates so ambiguity remains visible"
+        );
+        let mut named_candidates = BTreeSet::new();
+        collect_nominal_type_references(
+            &index,
+            &BodyType::Named("Currency".to_owned()),
+            &mut named_candidates,
+        );
+        assert_eq!(
+            named_candidates,
+            BTreeSet::from([local_currency.clone(), foreign_currency.clone()]),
+            "body dependency extraction uses the same indexed candidate set"
         );
 
         let wallet = program
