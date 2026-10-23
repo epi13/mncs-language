@@ -1,0 +1,34 @@
+{
+  "kind": "mncs.language.imported-comment-verified-fact-reuse-proof",
+  "language": {
+    "base_revision": "7362448f7b2a03aaedf44647446ff9226d8f6935",
+    "branch": "campaign/luna-language-identity-index-20261023",
+    "source_patch_sha256": "0c6a5e5d91516a9e9b2aea70f6c42624c07da8c7ac8aa1cd69458d91f8532b25",
+    "source_path": "crates/mncs-compiler/tests/module_imports.rs",
+    "source_sha256": "db0dca44a15da5125849f4103db5ee3537b8e2e069c9de314b215e1d5949d0e7"
+  },
+  "observed_at": "2026-10-23T18:14:37.002537+00:00",
+  "schema_version": 1,
+  "verification": {
+    "command": "CARGO_BUILD_JOBS=2 cargo test --release --locked -p mncs-compiler --test module_imports",
+    "imported_comment_edit": {
+      "body_facts_recomputed": 0,
+      "cached_dependency_reused": [
+        "lib.fact_leaf"
+      ],
+      "changed_source_module_relinked": [
+        "lib.fact_mid"
+      ],
+      "declaration_line_after": 5,
+      "declaration_line_before": 4,
+      "source_location_identity_refreshed": true,
+      "unchanged_verified_body_facts_reused": "all prior facts"
+    },
+    "suite_result": {
+      "failed": 0,
+      "ignored": 0,
+      "passed": 55
+    },
+    "test": "linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes"
+  }
+}

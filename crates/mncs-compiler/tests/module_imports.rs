@@ -1932,6 +1932,73 @@ fn linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes(
         first.verification_facts.len()
     );
 
+    // A comment-only edit inside an imported module changes its source and
+    // declaration locations, but not its verified function bodies. Language
+    // relinks the changed module, reuses its unchanged dependency, and refreshes
+    // source locations independently from the semantic verification witness.
+    let commented_mid = format!("// imported comment edit\n{mid_source}");
+    let comment_resolver = MapResolver::default()
+        .with("lib.fact_leaf", leaf_source)
+        .with("lib.fact_mid", &commented_mid);
+    let comment = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
+        comment_resolver.envelope("root", source.to_owned()),
+        &comment_resolver,
+        &[],
+        &request(
+            second.verification_facts.clone(),
+            second.declaration_verification_facts.clone(),
+        ),
+        &mut cache,
+    );
+    assert!(comment.is_valid(), "{:?}", comment.diagnostics);
+    let comment_observation = comment
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("imported comment edit observation");
+    assert_eq!(
+        comment_observation.reused_module_subjects,
+        vec!["lib.fact_leaf"]
+    );
+    assert_eq!(
+        comment_observation.linked_module_subjects,
+        vec!["lib.fact_mid"]
+    );
+    assert_eq!(
+        comment_observation.invalidated_module_subjects,
+        vec!["lib.fact_mid"]
+    );
+    let comment_facts = comment
+        .verification_fact_reuse
+        .as_ref()
+        .expect("imported comment edit body fact observation");
+    assert_eq!(comment_facts.reused.len(), second.verification_facts.len());
+    assert!(comment_facts.recomputed.is_empty(), "{comment_facts:?}");
+    let prior_forward = second
+        .verification_facts
+        .iter()
+        .find(|fact| fact.subject.as_str().contains("lib.fact_mid::forward"))
+        .expect("prior imported forward body fact");
+    let current_forward = comment
+        .verification_facts
+        .iter()
+        .find(|fact| fact.subject == prior_forward.subject)
+        .expect("current imported forward body fact");
+    assert_ne!(
+        prior_forward.source_location_identity, current_forward.source_location_identity,
+        "current source identity must be refreshed even when the body fact is reused"
+    );
+    let declaration_line = |result: &mncs_compiler::SourceFrontEndResult| {
+        result
+            .name_resolutions
+            .resolutions
+            .iter()
+            .find(|resolution| resolution.path.iter().any(|part| part == "forward"))
+            .map(|resolution| resolution.declaration.line)
+            .expect("root's qualified call resolves to the imported forward declaration")
+    };
+    assert_eq!(declaration_line(&second), 4);
+    assert_eq!(declaration_line(&comment), 5);
+
     // A transitive leaf edit changes the closure identities for both the leaf
     // and its importing module, forcing both actual link operations to rerun.
     let changed_leaf = "mncs 0.19;\nmodule lib.fact_leaf;\nfn base(value: u64) -> (result: u64) { return value + 1; }\n";
@@ -1943,8 +2010,8 @@ fn linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes(
         &changed_resolver,
         &[],
         &request(
-            second.verification_facts.clone(),
-            second.declaration_verification_facts.clone(),
+            comment.verification_facts.clone(),
+            comment.declaration_verification_facts.clone(),
         ),
         &mut cache,
     );
@@ -2066,15 +2133,6 @@ fn linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes(
         shifted_observation.linked_module_subjects,
         vec!["lib.fact_mid"]
     );
-    let declaration_line = |result: &mncs_compiler::SourceFrontEndResult| {
-        result
-            .name_resolutions
-            .resolutions
-            .iter()
-            .find(|resolution| resolution.path.iter().any(|part| part == "forward"))
-            .map(|resolution| resolution.declaration.line)
-            .expect("root's qualified call resolves to the imported forward declaration")
-    };
     assert_eq!(declaration_line(&changed), 4);
     assert_eq!(declaration_line(&shifted), 5);
 }
