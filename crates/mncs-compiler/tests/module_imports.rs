@@ -1847,7 +1847,7 @@ fn linked_frontend_reuses_unchanged_import_parses_after_cache_restart() {
 
 #[test]
 fn linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes() {
-    let leaf_source = "mncs 0.19;\nmodule lib.fact_leaf;\nfn base(value: u64) -> (result: u64) { return value; }\n";
+    let leaf_source = "mncs 0.19;\nmodule lib.fact_leaf;\nfn unrelated(value: u64) -> (result: u64) { return value; }\nfn base(value: u64) -> (result: u64) { return value; }\n";
     let mid_source = "mncs 0.19;\nmodule lib.fact_mid;\nuse lib.fact_leaf;\nfn forward(value: u64) -> (result: u64) { return lib.fact_leaf.base(value); }\n";
     let resolver = MapResolver::default()
         .with("lib.fact_leaf", leaf_source)
@@ -1999,12 +1999,13 @@ fn linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes(
     assert_eq!(declaration_line(&second), 4);
     assert_eq!(declaration_line(&comment), 5);
 
-    // A transitive leaf edit changes the closure identities for both the leaf
-    // and its importing module, forcing both actual link operations to rerun.
-    let changed_leaf = "mncs 0.19;\nmodule lib.fact_leaf;\nfn base(value: u64) -> (result: u64) { return value + 1; }\n";
+    // A leaf body edit relinks the changed implementation while an importer
+    // with the same declarations reuses its elaboration. Language's semantic
+    // dependency facts still reverify the changed function and its callers.
+    let changed_leaf = "mncs 0.19;\nmodule lib.fact_leaf;\nfn unrelated(value: u64) -> (result: u64) { return value; }\nfn base(value: u64) -> (result: u64) { return value +% 1; }\n";
     let changed_resolver = MapResolver::default()
         .with("lib.fact_leaf", changed_leaf)
-        .with("lib.fact_mid", mid_source);
+        .with("lib.fact_mid", &commented_mid);
     let changed = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
         changed_resolver.envelope("root", source.to_owned()),
         &changed_resolver,
@@ -2022,13 +2023,63 @@ fn linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes(
         .expect("transitive invalidation observation");
     assert_eq!(
         changed_observation.invalidated_module_subjects,
-        vec!["lib.fact_leaf", "lib.fact_mid"]
+        vec!["lib.fact_leaf"]
     );
     assert_eq!(
         changed_observation.linked_module_subjects,
-        vec!["lib.fact_leaf", "lib.fact_mid"]
+        vec!["lib.fact_leaf"]
     );
-    assert_eq!(changed_observation.published_entry_count, 2);
+    assert_eq!(
+        changed_observation.reused_module_subjects,
+        vec!["lib.fact_mid"]
+    );
+    assert_eq!(changed_observation.published_entry_count, 1);
+    let changed_facts = changed
+        .verification_fact_reuse
+        .as_ref()
+        .expect("body dependency changes trigger Language fact checks");
+    assert_eq!(changed_facts.recomputed.len(), 3);
+    assert_eq!(changed_facts.reused.len(), 1);
+    let prior_base = second
+        .verification_facts
+        .iter()
+        .find(|fact| fact.subject.as_str().contains("lib.fact_leaf::base"))
+        .expect("prior base fact");
+    let current_base = changed
+        .program
+        .as_ref()
+        .expect("current program")
+        .functions
+        .iter()
+        .find(|function| function.name == "base")
+        .and_then(|function| function.body.as_ref())
+        .and_then(|body| body.fingerprint().ok())
+        .expect("current base body fingerprint");
+    assert_ne!(prior_base.subject_fingerprint, current_base);
+    for function_name in [
+        "lib.fact_leaf::base",
+        "lib.fact_mid::forward",
+        "app.fact_cache::entry",
+    ] {
+        let prior_fact = second
+            .verification_facts
+            .iter()
+            .find(|fact| fact.subject.as_str().contains(function_name))
+            .unwrap_or_else(|| panic!("prior verification fact for {function_name}"));
+        assert!(
+            changed_facts
+                .recomputed
+                .iter()
+                .any(|record| record.subject == prior_fact.subject),
+            "changed implementation must reverify dependent {function_name}"
+        );
+    }
+    let prior_unrelated = second
+        .verification_facts
+        .iter()
+        .find(|fact| fact.subject.as_str().contains("lib.fact_leaf::unrelated"))
+        .expect("independent function fact");
+    assert!(changed_facts.reused.contains(&prior_unrelated.subject));
     assert_ne!(
         second
             .program
@@ -2042,6 +2093,75 @@ fn linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes(
             .expect("changed program")
             .content_fingerprint()
             .expect("changed semantic fingerprint")
+    );
+
+    // A cache produced under the previous dependency-closure contract is
+    // discarded as a whole before Language continues on the current source.
+    let mut legacy_cache_value: serde_json::Value =
+        serde_json::from_slice(&serde_json::to_vec(&cache).expect("cache serializes"))
+            .expect("cache is JSON");
+    legacy_cache_value["schema_version"] =
+        serde_json::Value::String("mncs.language-module-elaboration-cache/2".to_owned());
+    let mut legacy_cache: ModuleElaborationCache = serde_json::from_slice(
+        &serde_json::to_vec(&legacy_cache_value).expect("legacy cache serializes"),
+    )
+    .expect("legacy cache remains readable for conservative fallback");
+    let legacy = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
+        changed_resolver.envelope("root", source.to_owned()),
+        &changed_resolver,
+        &[],
+        &request(
+            changed.verification_facts.clone(),
+            changed.declaration_verification_facts.clone(),
+        ),
+        &mut legacy_cache,
+    );
+    assert!(legacy.is_valid(), "{:?}", legacy.diagnostics);
+    let legacy_observation = legacy
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("legacy schema fallback observation");
+    assert_eq!(legacy_observation.rejected_entry_count, 2);
+    assert_eq!(
+        legacy_observation.reused_module_subjects,
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        legacy_observation.linked_module_subjects,
+        vec!["lib.fact_leaf", "lib.fact_mid"]
+    );
+
+    // An imported signature change invalidates the transitive interface
+    // closure, so both the leaf and its importer are linked again. The old
+    // successful source snapshot cannot hide the resulting type diagnostic.
+    let changed_signature_leaf = "mncs 0.19;\nmodule lib.fact_leaf;\nfn unrelated(value: u64) -> (result: u64) { return value; }\nfn base(value: i64) -> (result: i64) { return value; }\n";
+    let signature_resolver = MapResolver::default()
+        .with("lib.fact_leaf", changed_signature_leaf)
+        .with("lib.fact_mid", &commented_mid);
+    let mut interface_cache = cache.clone();
+    let changed_signature = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
+        signature_resolver.envelope("root", source.to_owned()),
+        &signature_resolver,
+        &[],
+        &request(
+            changed.verification_facts.clone(),
+            changed.declaration_verification_facts.clone(),
+        ),
+        &mut interface_cache,
+    );
+    assert!(!changed_signature.is_valid());
+    assert!(!changed_signature.diagnostics.is_empty());
+    let signature_observation = changed_signature
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("signature invalidation observation");
+    assert_eq!(
+        signature_observation.invalidated_module_subjects,
+        vec!["lib.fact_leaf", "lib.fact_mid"]
+    );
+    assert_eq!(
+        signature_observation.linked_module_subjects,
+        vec!["lib.fact_leaf", "lib.fact_mid"]
     );
 
     // A tampered serialized Program is rejected by the entry digest; the
@@ -2106,7 +2226,7 @@ fn linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes(
     // identity. Shifting an imported declaration with a comment forces the
     // parent module to relink and refreshes the location consumed by root.
     let mut location_cache = cache.clone();
-    let shifted_mid = format!("// inserted source line\n{mid_source}");
+    let shifted_mid = format!("// inserted source line\n{commented_mid}");
     let shifted_resolver = MapResolver::default()
         .with("lib.fact_leaf", changed_leaf)
         .with("lib.fact_mid", &shifted_mid);
@@ -2133,8 +2253,77 @@ fn linked_frontend_reuses_import_elaboration_and_invalidates_transitive_changes(
         shifted_observation.linked_module_subjects,
         vec!["lib.fact_mid"]
     );
-    assert_eq!(declaration_line(&changed), 4);
-    assert_eq!(declaration_line(&shifted), 5);
+    assert_eq!(declaration_line(&changed), 5);
+    assert_eq!(declaration_line(&shifted), 6);
+
+    // A location-only edit in the leaf must invalidate a cached transitive
+    // importer because its combined declaration map carries leaf spans.
+    let direct_source = "mncs 0.19;\nmodule app.fact_location;\nuse lib.fact_mid;\nuse lib.fact_leaf;\nfn inspect(value: u64) -> (result: u64) { return lib.fact_leaf.base(value); }\n";
+    let direct_resolver = MapResolver::default()
+        .with("lib.fact_leaf", changed_leaf)
+        .with("lib.fact_mid", &commented_mid);
+    let mut deep_location_cache = cache.clone();
+    let direct = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
+        direct_resolver.envelope("root", direct_source.to_owned()),
+        &direct_resolver,
+        &[],
+        &request(
+            changed.verification_facts.clone(),
+            changed.declaration_verification_facts.clone(),
+        ),
+        &mut deep_location_cache,
+    );
+    assert!(direct.is_valid(), "{:?}", direct.diagnostics);
+    let direct_observation = direct
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("transitive source-location warm observation");
+    assert_eq!(
+        direct_observation.reused_module_subjects,
+        vec!["lib.fact_leaf", "lib.fact_mid"]
+    );
+    let direct_declaration_line = |result: &mncs_compiler::SourceFrontEndResult| {
+        result
+            .name_resolutions
+            .resolutions
+            .iter()
+            .find(|resolution| resolution.path.iter().any(|part| part == "base"))
+            .map(|resolution| resolution.declaration.line)
+            .expect("direct leaf call resolves to its imported declaration")
+    };
+    assert_eq!(direct_declaration_line(&direct), 4);
+    let shifted_leaf = format!("// inserted leaf source line\n{changed_leaf}");
+    let shifted_leaf_resolver = MapResolver::default()
+        .with("lib.fact_leaf", &shifted_leaf)
+        .with("lib.fact_mid", &commented_mid);
+    let shifted_leaf_result = compiler.front_end_with_verified_facts_and_module_elaboration_cache(
+        shifted_leaf_resolver.envelope("root", direct_source.to_owned()),
+        &shifted_leaf_resolver,
+        &[],
+        &request(
+            direct.verification_facts.clone(),
+            direct.declaration_verification_facts.clone(),
+        ),
+        &mut deep_location_cache,
+    );
+    assert!(
+        shifted_leaf_result.is_valid(),
+        "{:?}",
+        shifted_leaf_result.diagnostics
+    );
+    let shifted_leaf_observation = shifted_leaf_result
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("transitive source-location invalidation observation");
+    assert_eq!(
+        shifted_leaf_observation.invalidated_module_subjects,
+        vec!["lib.fact_leaf", "lib.fact_mid"]
+    );
+    assert_eq!(
+        shifted_leaf_observation.linked_module_subjects,
+        vec!["lib.fact_leaf", "lib.fact_mid"]
+    );
+    assert_eq!(direct_declaration_line(&shifted_leaf_result), 5);
 }
 
 #[test]

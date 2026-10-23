@@ -1,0 +1,97 @@
+{
+  "schema_version": "mncs.language.module-interface-dependency-reuse-evidence/1",
+  "identity": "ev_language_module_interface_fact_reuse_20261023",
+  "campaign": {
+    "identity": "cmp_mncs_native_application_readiness_compiler_20261013",
+    "session_id": "ses_164edc158d9b1637",
+    "checkpoint_before_change": "chk_49e8d78bec2b25f4"
+  },
+  "implementation": {
+    "repository": "mncs-language",
+    "branch": "campaign/luna-language-identity-index-20261023",
+    "base_revision": "3d926fd64b0394dab8574777cbe5833b2fc7794f",
+    "module_elaboration_cache_schema": "mncs.language-module-elaboration-cache/3",
+    "module_linker_policy": "mncs-language-module-linker/2",
+    "module_interface_policy": "mncs-language-module-interface-extractor/1",
+    "implementation_diff_sha256": "d19f2d1c39d54bd1586cef57ebc09e8bcc50dd9f12d58e6eb978ba7b1f137925",
+    "source_files": {
+      "crates/mncs-compiler/src/frontend.rs": "9adf10dfa8796edcf7f229a878ffbb7579d709b28478008f8640f5d1153d8377",
+      "crates/mncs-compiler/tests/module_imports.rs": "675b8d5f689270edb5dc4a1c20712f95f6a53b07612c8474bd0ca0b045d6484f"
+    },
+    "behavior": [
+      "Exported module interface fingerprints cover function and generic signatures, contracts, declared effects and capabilities, nominal declarations, payloads, fields, and import routes while excluding function bodies and source spans.",
+      "Importer cache guards include the current dependency declaration spans and semantic binding table, so a comment shift that moves an imported declaration invalidates cached importer navigation data.",
+      "A cache hit rebuilds imported functions, nominal declarations, and dependency identities from the current linked closure while retaining the module's own cached elaboration.",
+      "Language still validates current function bodies against their actual semantic dependencies after the current program is assembled.",
+      "Cache schema /2 entries are rejected and relinked under /3; they are not interpreted under the new dependency contract."
+    ]
+  },
+  "verification": {
+    "command": "cargo test -p mncs-compiler --test module_imports",
+    "passed": 55,
+    "failed": 0,
+    "test_harness_seconds": 0.59,
+    "resource_measurement": {
+      "command": "/usr/bin/time -f 'wall_seconds=%e user_seconds=%U system_seconds=%S max_rss_kb=%M' cargo test -p mncs-compiler --test module_imports --quiet",
+      "wall_seconds": 0.65,
+      "user_seconds": 2.45,
+      "system_seconds": 0.03,
+      "max_rss_kb": 49856
+    },
+    "focused_observations": {
+      "implementation_only_edit": {
+        "linked_modules": [
+          "lib.fact_leaf"
+        ],
+        "reused_modules": [
+          "lib.fact_mid"
+        ],
+        "body_facts_recomputed": 3,
+        "independent_body_facts_reused": 1,
+        "current_changed_body_fingerprint_checked": true
+      },
+      "imported_signature_edit": {
+        "invalidated_modules": [
+          "lib.fact_leaf",
+          "lib.fact_mid"
+        ],
+        "fresh_diagnostic_returned": true
+      },
+      "transitive_declaration_location_edit": {
+        "invalidated_modules": [
+          "lib.fact_leaf",
+          "lib.fact_mid"
+        ],
+        "declaration_line_before": 4,
+        "declaration_line_after": 5
+      },
+      "previous_cache_schema": {
+        "rejected_entries": 2,
+        "modules_relinked": [
+          "lib.fact_leaf",
+          "lib.fact_mid"
+        ]
+      }
+    },
+    "static_checks": [
+      "cargo fmt --all -- --check",
+      "git diff --check"
+    ],
+    "full_crate_run": {
+      "command": "RUST_TEST_THREADS=2 cargo test -p mncs-compiler",
+      "test_suites": 11,
+      "passed": 144,
+      "failed": 0,
+      "ignored": 0,
+      "wall_seconds": 263.14,
+      "user_seconds": 521.19,
+      "system_seconds": 0.76,
+      "max_rss_kb": 289292,
+      "log": "/tmp/mncs-language-full-test.log"
+    }
+  },
+  "limitations": [
+    "Compiler repository application-build integration and canonical VM parity against this new Language revision remain to be rerun after pinning the delivered Language main commit.",
+    "The resource measurement is for the cached Language module-import test suite; it is not a native application build performance claim."
+  ]
+}

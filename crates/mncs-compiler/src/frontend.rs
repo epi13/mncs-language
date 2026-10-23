@@ -51,20 +51,24 @@ use crate::source_parse_cache::{
 use crate::{fingerprint, native_node_profile, ReferenceCompiler};
 
 pub const MODULE_ELABORATION_CACHE_SCHEMA_VERSION: &str =
-    "mncs.language-module-elaboration-cache/2";
+    "mncs.language-module-elaboration-cache/3";
 pub const MODULE_ELABORATION_CACHE_OBSERVATION_SCHEMA_VERSION: &str =
     "mncs.language-module-elaboration-cache-observation/1";
 /// Bump this identity whenever source-to-Program linking changes without an
 /// AST or Language profile schema change.
-pub const MODULE_ELABORATION_POLICY_IDENTITY: &str = "mncs-language-module-linker/1";
+pub const MODULE_ELABORATION_POLICY_IDENTITY: &str = "mncs-language-module-linker/2";
+
+/// Bump this identity whenever exported module interface extraction changes.
+const MODULE_INTERFACE_POLICY_IDENTITY: &str = "mncs-language-module-interface-extractor/1";
 
 const MODULE_ELABORATION_CACHE_MAX_ENTRIES: usize = 128;
 const MODULE_ELABORATION_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 /// Caller-owned, serializable memoization of successfully linked imported
 /// modules. Entries are reused only when the exact source envelope, profile
-/// registry, parser/linker policy, and transitive import closure all match.
-/// Semantic verification still runs against the assembled current program.
+/// registry, parser/linker policy, and imported declaration interfaces match.
+/// Imported body implementations are validated independently by Language's
+/// verified-fact dependency checks after the current program is assembled.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleElaborationCache {
     #[serde(default = "module_elaboration_cache_schema_version")]
@@ -95,6 +99,9 @@ struct ModuleElaborationCacheEntry {
     parser_policy_identity: String,
     ast_schema_version: String,
     elaboration_policy_identity: String,
+    /// Fingerprint of imported interface closures, deliberately excluding
+    /// dependency bodies so an implementation-only edit does not relink
+    /// unrelated importer declarations.
     dependency_closure_fingerprint: String,
     output_digest: String,
     program: Program,
@@ -687,7 +694,6 @@ impl ReferenceCompiler {
                     cache_observation,
                 ) = elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
                     tree,
-                    Some(&envelope),
                     active_resolver,
                     seeds,
                     module_elaboration_cache.as_deref_mut(),
@@ -1178,14 +1184,13 @@ pub fn elaborate_program_with_resolver_and_modules_and_seeds_with_map(
 ) {
     let (result, resolutions, modules, operation_sources, _) =
         elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
-            ast, None, resolver, seeds, None,
+            ast, resolver, seeds, None,
         );
     (result, resolutions, modules, operation_sources)
 }
 
 fn elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
     ast: &AbstractSyntaxTree,
-    root_source: Option<&SourceEnvelope>,
     resolver: &dyn ModuleResolver,
     seeds: &[mncs_model::HostGenericSeedRequest],
     module_elaboration_cache: Option<&mut ModuleElaborationCache>,
@@ -1207,7 +1212,8 @@ fn elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
     let mut module_profiles = BTreeMap::new();
     let mut visiting = BTreeSet::new();
     let mut module_ceilings = BTreeMap::new();
-    let mut module_closure_fingerprints = BTreeMap::new();
+    let mut module_interface_closure_fingerprints = BTreeMap::new();
+    let mut module_dependency_interface_fingerprints = BTreeMap::new();
     let mut cache_observation = module_elaboration_cache
         .as_ref()
         .map(|_| ModuleElaborationCacheObservation::default());
@@ -1215,14 +1221,14 @@ fn elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
     let mut operation_sources = None;
     let result = if let Err(mut errors) = elaborate_import_closure(
         ast,
-        root_source.map(|source| source.identity.as_str()),
         &recording_resolver,
         &mut elaborated,
         &mut declaration_spans,
         &mut visiting,
         &mut module_ceilings,
         &mut module_profiles,
-        &mut module_closure_fingerprints,
+        &mut module_interface_closure_fingerprints,
+        &mut module_dependency_interface_fingerprints,
         &mut module_elaboration_cache,
         &mut cache_observation,
     ) {
@@ -1377,20 +1383,20 @@ struct MergedContext {
 /// own imports are present in the map.
 fn elaborate_import_closure(
     ast: &AbstractSyntaxTree,
-    source_identity: Option<&str>,
     resolver: &dyn ModuleResolver,
     elaborated: &mut BTreeMap<String, Program>,
     declaration_spans: &mut BTreeMap<String, DeclarationSpans>,
     visiting: &mut BTreeSet<String>,
     module_ceilings: &mut BTreeMap<String, u32>,
     module_profiles: &mut BTreeMap<String, String>,
-    module_closure_fingerprints: &mut BTreeMap<String, String>,
+    module_interface_closure_fingerprints: &mut BTreeMap<String, String>,
+    module_dependency_interface_fingerprints: &mut BTreeMap<String, String>,
     module_elaboration_cache: &mut Option<&mut ModuleElaborationCache>,
     cache_observation: &mut Option<ModuleElaborationCacheObservation>,
 ) -> Result<String, Vec<SourceDiagnostic>> {
     let name = ast.module.text.clone();
-    if let Some(closure_fingerprint) = module_closure_fingerprints.get(&name) {
-        return Ok(closure_fingerprint.clone());
+    if let Some(interface_closure_fingerprint) = module_interface_closure_fingerprints.get(&name) {
+        return Ok(interface_closure_fingerprint.clone());
     }
     // RFC 0036: each module's admitted sequence ceiling travels with the
     // closure so the post-specialization sweep can check every substituted
@@ -1412,7 +1418,7 @@ fn elaborate_import_closure(
             ast.module.span,
         )]);
     }
-    let mut direct_dependency_closures = Vec::new();
+    let mut direct_dependency_interfaces = Vec::new();
     for use_decl in &ast.uses {
         let dependency_name = use_decl.module.text.clone();
         if dependency_name == name {
@@ -1423,10 +1429,11 @@ fn elaborate_import_closure(
             )]);
         }
         if elaborated.contains_key(&dependency_name) {
-            if let Some(closure_fingerprint) =
-                module_closure_fingerprints.get(&dependency_name).cloned()
+            if let Some(interface_closure_fingerprint) = module_interface_closure_fingerprints
+                .get(&dependency_name)
+                .cloned()
             {
-                direct_dependency_closures.push((dependency_name, closure_fingerprint));
+                direct_dependency_interfaces.push((dependency_name, interface_closure_fingerprint));
             }
             continue;
         }
@@ -1484,16 +1491,16 @@ fn elaborate_import_closure(
         // surfacing a span that lives in another file. Non-import errors
         // (cycle, unavailable, incompatible, conflicting) already name
         // their edge and pass through unchanged.
-        let dependency_closure_fingerprint = match elaborate_import_closure(
+        let dependency_interface_closure_fingerprint = match elaborate_import_closure(
             &dependency_ast,
-            Some(&dependency_envelope.identity),
             resolver,
             elaborated,
             declaration_spans,
             visiting,
             module_ceilings,
             module_profiles,
-            module_closure_fingerprints,
+            module_interface_closure_fingerprints,
+            module_dependency_interface_fingerprints,
             module_elaboration_cache,
             cache_observation,
         ) {
@@ -1517,6 +1524,10 @@ fn elaborate_import_closure(
                     .collect())
             }
         };
+        let dependency_import_interface_fingerprint = module_dependency_interface_fingerprints
+            .get(&dependency_ast.module.text)
+            .cloned()
+            .expect("resolved module closure records its direct imported interface fingerprint");
         let cached = match (
             module_elaboration_cache.as_deref_mut(),
             cache_observation.as_mut(),
@@ -1526,19 +1537,33 @@ fn elaborate_import_closure(
                 &dependency_ast.module.text,
                 &dependency_envelope,
                 &dependency_ast.language_version.text,
-                &dependency_closure_fingerprint,
+                &dependency_import_interface_fingerprint,
                 observation,
             ),
             _ => None,
         };
-        if let Some((program, declarations)) = cached {
+        if let Some((program, _cached_declarations)) = cached {
+            let (program, declarations) = refresh_cached_module_program(
+                &dependency_ast,
+                &elaborated,
+                declaration_spans,
+                program,
+            )?;
             elaborated.insert(dependency_name.clone(), program);
             declaration_spans.insert(dependency_name.clone(), declarations);
-            module_closure_fingerprints.insert(
-                dependency_name.clone(),
-                dependency_closure_fingerprint.clone(),
+            let dependency_export_state_fingerprint = module_export_state_fingerprint(
+                &dependency_interface_closure_fingerprint,
+                declaration_spans.get(&dependency_name),
+                elaborated
+                    .get(&dependency_name)
+                    .and_then(|program| program.binding_table.as_ref()),
             );
-            direct_dependency_closures.push((dependency_name, dependency_closure_fingerprint));
+            module_interface_closure_fingerprints.insert(
+                dependency_name.clone(),
+                dependency_export_state_fingerprint.clone(),
+            );
+            direct_dependency_interfaces
+                .push((dependency_name, dependency_export_state_fingerprint));
             continue;
         }
 
@@ -1564,9 +1589,9 @@ fn elaborate_import_closure(
             )]
         })?;
         elaborated.insert(dependency_name.clone(), dependency_program.clone());
-        module_closure_fingerprints.insert(
+        module_interface_closure_fingerprints.insert(
             dependency_name.clone(),
-            dependency_closure_fingerprint.clone(),
+            dependency_interface_closure_fingerprint.clone(),
         );
         let declarations = declaration_spans
             .get(&dependency_name)
@@ -1581,25 +1606,34 @@ fn elaborate_import_closure(
                 &dependency_ast.module.text,
                 &dependency_envelope,
                 &dependency_ast.language_version.text,
-                &dependency_closure_fingerprint,
+                &dependency_import_interface_fingerprint,
                 dependency_program,
                 declarations,
                 observation,
             );
         }
-        direct_dependency_closures.push((dependency_name, dependency_closure_fingerprint));
+        let dependency_export_state_fingerprint = module_export_state_fingerprint(
+            &dependency_interface_closure_fingerprint,
+            declaration_spans.get(&dependency_name),
+            elaborated
+                .get(&dependency_name)
+                .and_then(|program| program.binding_table.as_ref()),
+        );
+        module_interface_closure_fingerprints.insert(
+            dependency_name.clone(),
+            dependency_export_state_fingerprint.clone(),
+        );
+        direct_dependency_interfaces.push((dependency_name, dependency_export_state_fingerprint));
     }
     visiting.remove(&name);
-    let identity = source_identity
-        .map(str::to_owned)
-        .unwrap_or_else(|| fingerprint(ast));
-    let closure_fingerprint = module_dependency_closure_fingerprint(
-        &identity,
-        &ast.language_version.text,
-        &direct_dependency_closures,
+    let interface_closure_fingerprint =
+        module_interface_closure_fingerprint(ast, &direct_dependency_interfaces);
+    module_dependency_interface_fingerprints.insert(
+        name.clone(),
+        module_dependency_interface_fingerprint(&direct_dependency_interfaces),
     );
-    module_closure_fingerprints.insert(name, closure_fingerprint.clone());
-    Ok(closure_fingerprint)
+    module_interface_closure_fingerprints.insert(name, interface_closure_fingerprint.clone());
+    Ok(interface_closure_fingerprint)
 }
 
 /// Links one module against its already-elaborated direct imports.
@@ -1672,6 +1706,101 @@ fn link_module_with_closure_and_source_map(
         program.binding_table = Some(build_binding_table(&program, resolutions, &imported_tables));
     }
     Ok((program, operation_sources))
+}
+
+/// Refresh the imports of a cached module without re-elaborating its own
+/// functions. Module Programs contain the transitive imported declarations
+/// needed by the root, so returning a cached aggregate unchanged would leak
+/// stale dependency bodies after an implementation-only edit.
+fn refresh_cached_module_program(
+    ast: &AbstractSyntaxTree,
+    elaborated: &BTreeMap<String, Program>,
+    declaration_spans: &BTreeMap<String, DeclarationSpans>,
+    mut program: Program,
+) -> Result<(Program, DeclarationSpans), Vec<SourceDiagnostic>> {
+    let mut imported = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut diagnostics = Vec::new();
+    for use_decl in &ast.uses {
+        let name = use_decl.module.text.clone();
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        match elaborated.get(&name) {
+            Some(imported_program) => imported.push(ImportedModule {
+                requested_name: name.clone(),
+                program: imported_program.clone(),
+                declarations: declaration_spans.get(&name).cloned().unwrap_or_default(),
+            }),
+            None => diagnostics.push(elaboration_diagnostic(
+                "MNE173",
+                format!("imported module '{name}' is unavailable to the resolver"),
+                use_decl.module.span,
+            )),
+        }
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    let context = merge_imported_declarations(ast, &imported, &mut diagnostics);
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+
+    let local_function_identities = ast
+        .functions
+        .iter()
+        .map(|function| function_id(&ast.module.text, &function.name.text))
+        .collect::<BTreeSet<_>>();
+    let local_finite_type_identities = ast
+        .finite_types
+        .iter()
+        .map(|finite_type| finite_type_id(&ast.module.text, &finite_type.name.text))
+        .collect::<BTreeSet<_>>();
+    let local_record_type_names = ast
+        .record_types
+        .iter()
+        .map(|record_type| record_type.name.text.as_str())
+        .collect::<BTreeSet<_>>();
+
+    let local_functions = std::mem::take(&mut program.functions)
+        .into_iter()
+        .filter(|function| {
+            local_function_identities.contains(&function_id(
+                function.identity_namespace(&program.module),
+                &function.name,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let local_finite_types = std::mem::take(&mut program.finite_types)
+        .into_iter()
+        .filter(|finite_type| local_finite_type_identities.contains(&finite_type.identity))
+        .collect::<Vec<_>>();
+    let local_record_types = std::mem::take(&mut program.record_types)
+        .into_iter()
+        .filter(|record_type| {
+            semantic_namespace_from_identity(&record_type.identity) == ast.module.text
+                && local_record_type_names.contains(record_type.name.as_str())
+        })
+        .collect::<Vec<_>>();
+
+    program.functions = context.imported_functions;
+    program.functions.extend(local_functions);
+    program.finite_types = context.imported_finite_types;
+    program.finite_types.extend(local_finite_types);
+    program.record_types = context.imported_record_types;
+    program.record_types.extend(local_record_types);
+    let mut dependencies = ast
+        .uses
+        .iter()
+        .map(|use_decl| module_id(&use_decl.module.text))
+        .collect::<BTreeSet<_>>();
+    dependencies.extend(context.imported_dependencies);
+    program.dependencies = dependencies.into_iter().collect();
+
+    let mut declarations = DeclarationSpans::from_ast(ast);
+    declarations.merge_missing(&context.imported_declarations);
+    Ok((program, declarations))
 }
 
 /// Binds imported declarations into this module's namespace. Collisions fail
@@ -3345,35 +3474,228 @@ impl Write for BoundedHashWriter {
     }
 }
 
-fn module_dependency_closure_fingerprint(
-    source_identity: &str,
-    source_profile: &str,
+#[derive(Serialize)]
+struct ModuleInterfaceMaterial<'a> {
+    schema_version: &'a str,
+    module: &'a str,
+    language_profile: &'a str,
+    uses: Vec<(&'a str, Option<&'a str>)>,
+    finite_types: Vec<FiniteTypeInterface<'a>>,
+    record_types: Vec<RecordTypeInterface<'a>>,
+    functions: Vec<FunctionInterface<'a>>,
+}
+
+#[derive(Serialize)]
+struct FiniteTypeInterface<'a> {
+    name: &'a str,
+    variants: Vec<FiniteVariantInterface<'a>>,
+}
+
+#[derive(Serialize)]
+struct FiniteVariantInterface<'a> {
+    name: &'a str,
+    fields: Vec<FieldInterface<'a>>,
+}
+
+#[derive(Serialize)]
+struct RecordTypeInterface<'a> {
+    name: &'a str,
+    fields: Vec<FieldInterface<'a>>,
+}
+
+#[derive(Serialize)]
+struct FieldInterface<'a> {
+    name: &'a str,
+    value_type: &'a str,
+}
+
+#[derive(Serialize)]
+struct FunctionInterface<'a> {
+    is_test: bool,
+    name: &'a str,
+    generic_params: Vec<GenericParameterInterface<'a>>,
+    inputs: Vec<ParameterInterface<'a>>,
+    outputs: Vec<ParameterInterface<'a>>,
+    contracts: Vec<(&'a str, &'a str)>,
+    effects: Vec<(&'a str, &'a str)>,
+    capabilities: Vec<&'a str>,
+}
+
+#[derive(Serialize)]
+struct GenericParameterInterface<'a> {
+    name: &'a str,
+    constraint: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct ParameterInterface<'a> {
+    name: &'a str,
+    value_type: &'a str,
+}
+
+/// Fingerprint only the declarations that determine a module's exported
+/// interface. Source spans and function bodies are intentionally omitted;
+/// callers refresh locations from the current parse and validate body changes
+/// through Language's semantic dependency facts.
+fn module_interface_fingerprint(ast: &AbstractSyntaxTree) -> String {
+    let material = ModuleInterfaceMaterial {
+        schema_version: &ast.schema_version,
+        module: &ast.module.text,
+        language_profile: &ast.language_version.text,
+        uses: ast
+            .uses
+            .iter()
+            .map(|declaration| {
+                (
+                    declaration.module.text.as_str(),
+                    declaration.alias.as_ref().map(|alias| alias.text.as_str()),
+                )
+            })
+            .collect(),
+        finite_types: ast
+            .finite_types
+            .iter()
+            .map(|finite_type| FiniteTypeInterface {
+                name: &finite_type.name.text,
+                variants: finite_type
+                    .variants
+                    .iter()
+                    .map(|variant| FiniteVariantInterface {
+                        name: &variant.name.text,
+                        fields: variant
+                            .fields
+                            .iter()
+                            .map(|field| FieldInterface {
+                                name: &field.name.text,
+                                value_type: &field.value_type.text,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        record_types: ast
+            .record_types
+            .iter()
+            .map(|record| RecordTypeInterface {
+                name: &record.name.text,
+                fields: record
+                    .fields
+                    .iter()
+                    .map(|field| FieldInterface {
+                        name: &field.name.text,
+                        value_type: &field.value_type.text,
+                    })
+                    .collect(),
+            })
+            .collect(),
+        functions: ast
+            .functions
+            .iter()
+            .map(|function| FunctionInterface {
+                is_test: function.is_test,
+                name: &function.name.text,
+                generic_params: function
+                    .generic_params
+                    .iter()
+                    .map(|parameter| GenericParameterInterface {
+                        name: &parameter.name.text,
+                        constraint: parameter
+                            .constraint
+                            .as_ref()
+                            .map(|constraint| constraint.text.as_str()),
+                    })
+                    .collect(),
+                inputs: function
+                    .inputs
+                    .iter()
+                    .map(|parameter| ParameterInterface {
+                        name: &parameter.name.text,
+                        value_type: &parameter.value_type.text,
+                    })
+                    .collect(),
+                outputs: function
+                    .outputs
+                    .iter()
+                    .map(|parameter| ParameterInterface {
+                        name: &parameter.name.text,
+                        value_type: &parameter.value_type.text,
+                    })
+                    .collect(),
+                contracts: function
+                    .contracts
+                    .iter()
+                    .map(|clause| (clause.kind.text.as_str(), clause.name.text.as_str()))
+                    .collect(),
+                effects: function
+                    .effects
+                    .iter()
+                    .map(|effect| (effect.kind.text.as_str(), effect.capability.text.as_str()))
+                    .collect(),
+                capabilities: function
+                    .capabilities
+                    .iter()
+                    .map(|capability| capability.text.as_str())
+                    .collect(),
+            })
+            .collect(),
+    };
+    fingerprint(&material)
+}
+
+fn module_dependency_interface_fingerprint(direct_dependencies: &[(String, String)]) -> String {
+    #[derive(Serialize)]
+    struct DependencyInterfaceMaterial<'a> {
+        cache_schema_version: &'a str,
+        interface_policy_identity: &'a str,
+        direct_dependencies: &'a [(String, String)],
+    }
+    fingerprint(&DependencyInterfaceMaterial {
+        cache_schema_version: MODULE_ELABORATION_CACHE_SCHEMA_VERSION,
+        interface_policy_identity: MODULE_INTERFACE_POLICY_IDENTITY,
+        direct_dependencies,
+    })
+}
+
+fn module_interface_closure_fingerprint(
+    ast: &AbstractSyntaxTree,
     direct_dependencies: &[(String, String)],
 ) -> String {
     #[derive(Serialize)]
-    struct ClosureMaterial<'a> {
+    struct InterfaceClosureMaterial<'a> {
         cache_schema_version: &'a str,
-        source_identity: &'a str,
-        source_profile: &'a str,
-        profile_registry_identity: String,
-        parser_policy_identity: &'a str,
-        ast_schema_version: &'a str,
-        elaboration_policy_identity: &'a str,
+        interface_policy_identity: &'a str,
+        own_interface_fingerprint: String,
         direct_dependencies: &'a [(String, String)],
     }
-    let material = ClosureMaterial {
+    fingerprint(&InterfaceClosureMaterial {
         cache_schema_version: MODULE_ELABORATION_CACHE_SCHEMA_VERSION,
-        source_identity,
-        source_profile,
-        profile_registry_identity: profile_registry_identity(),
-        parser_policy_identity: SOURCE_PARSE_POLICY_IDENTITY,
-        ast_schema_version: AST_SCHEMA_VERSION,
-        elaboration_policy_identity: MODULE_ELABORATION_POLICY_IDENTITY,
+        interface_policy_identity: MODULE_INTERFACE_POLICY_IDENTITY,
+        own_interface_fingerprint: module_interface_fingerprint(ast),
         direct_dependencies,
-    };
-    let bytes =
-        serde_json::to_vec(&material).expect("module elaboration dependency identity serializes");
-    mncs_model::sha256_hex(&bytes)
+    })
+}
+
+fn module_export_state_fingerprint(
+    interface_closure_fingerprint: &str,
+    declarations: Option<&DeclarationSpans>,
+    binding_table: Option<&SemanticBindingTable>,
+) -> String {
+    #[derive(Serialize)]
+    struct ExportStateMaterial<'a> {
+        cache_schema_version: &'a str,
+        interface_policy_identity: &'a str,
+        interface_closure_fingerprint: &'a str,
+        declaration_spans: Option<&'a DeclarationSpans>,
+        binding_table: Option<&'a SemanticBindingTable>,
+    }
+    fingerprint(&ExportStateMaterial {
+        cache_schema_version: MODULE_ELABORATION_CACHE_SCHEMA_VERSION,
+        interface_policy_identity: MODULE_INTERFACE_POLICY_IDENTITY,
+        interface_closure_fingerprint,
+        declaration_spans: declarations,
+        binding_table,
+    })
 }
 
 /// Record type-annotation occurrences (parameter, output, binding, and carried
