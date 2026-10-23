@@ -51,7 +51,7 @@ use crate::source_parse_cache::{
 use crate::{fingerprint, native_node_profile, ReferenceCompiler};
 
 pub const MODULE_ELABORATION_CACHE_SCHEMA_VERSION: &str =
-    "mncs.language-module-elaboration-cache/1";
+    "mncs.language-module-elaboration-cache/2";
 pub const MODULE_ELABORATION_CACHE_OBSERVATION_SCHEMA_VERSION: &str =
     "mncs.language-module-elaboration-cache-observation/1";
 /// Bump this identity whenever source-to-Program linking changes without an
@@ -2960,19 +2960,66 @@ fn build_binding_table(
     SemanticBindingTable::new(namespaces, scopes, bindings, references)
 }
 
+mod tuple_key_source_spans {
+    use std::collections::BTreeMap;
+
+    use mncs_syntax::SourceSpan;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Representation {
+        Entries(Vec<((String, String), SourceSpan)>),
+        LegacyMap(BTreeMap<String, SourceSpan>),
+    }
+
+    pub fn serialize<S>(
+        spans: &BTreeMap<(String, String), SourceSpan>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        spans
+            .iter()
+            .map(|(key, span)| (key.clone(), *span))
+            .collect::<Vec<_>>()
+            .serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<BTreeMap<(String, String), SourceSpan>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Representation::deserialize(deserializer)? {
+            Representation::Entries(entries) => Ok(entries.into_iter().collect()),
+            Representation::LegacyMap(entries) if entries.is_empty() => Ok(BTreeMap::new()),
+            Representation::LegacyMap(_) => Err(serde::de::Error::custom(
+                "legacy tuple-key source spans cannot be represented as JSON object keys",
+            )),
+        }
+    }
+}
+
 /// Source spans of every nominal declaration name, used to point name
 /// occurrences at the exact declaration they resolve to.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct DeclarationSpans {
     functions: BTreeMap<String, SourceSpan>,
     finite_types: BTreeMap<String, SourceSpan>,
+    #[serde(with = "tuple_key_source_spans")]
     finite_variants: BTreeMap<(String, String), SourceSpan>,
     record_types: BTreeMap<String, SourceSpan>,
+    #[serde(with = "tuple_key_source_spans")]
     record_fields: BTreeMap<(String, String), SourceSpan>,
     qualified_functions: BTreeMap<String, SourceSpan>,
     qualified_finite_types: BTreeMap<String, SourceSpan>,
+    #[serde(with = "tuple_key_source_spans")]
     qualified_finite_variants: BTreeMap<(String, String), SourceSpan>,
     qualified_record_types: BTreeMap<String, SourceSpan>,
+    #[serde(with = "tuple_key_source_spans")]
     qualified_record_fields: BTreeMap<(String, String), SourceSpan>,
 }
 
