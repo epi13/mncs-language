@@ -5,11 +5,11 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use mncs_model::{
-    AbiTypeRef, ArtifactRepresentation, BACKEND_ARTIFACT_SCHEMA_VERSION, BackendArtifact,
-    BackendFunctionValueContract, BackendIdentity, BackendResult, BackendValueContract, BodyType,
-    CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind, ExecutionFailure,
-    ExecutionRequest, ExecutionStatus, ExecutionValue, HostExecutionValue, IntegerType, Program,
-    SequenceBound, SsaModule, TransformationStatus,
+    AbiTypeRef, ArtifactRepresentation, BackendArtifact, BackendFunctionValueContract,
+    BackendIdentity, BackendResult, BackendValueContract, BodyType, CompilerArtifactRef,
+    CompilerDiagnostic, CompilerDiagnosticKind, ExecutionFailure, ExecutionRequest,
+    ExecutionStatus, ExecutionValue, HostExecutionValue, IntegerType, Program, SequenceBound,
+    SsaModule, TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 
@@ -1109,17 +1109,16 @@ pub(crate) fn project_host_composite(
             "MNCS_STRUCTURED_PROJECTION ambiguous composite type identity {type_identity}"
         ));
     }
-    if !matches!(contract, BackendValueContract::Record { .. } | BackendValueContract::Finite { .. }) {
+    if !matches!(
+        contract,
+        BackendValueContract::Record { .. } | BackendValueContract::Finite { .. }
+    ) {
         return Err(format!(
             "MNCS_STRUCTURED_PROJECTION type identity {type_identity} is not a declared record or finite type"
         ));
     }
-    let resolved = resolve_host_value(
-        contract,
-        host,
-        &artifact.composite_value_contracts,
-        "value",
-    )?;
+    let resolved =
+        resolve_host_value(contract, host, &artifact.composite_value_contracts, "value")?;
     check_contract_value(
         contract,
         &resolved,
@@ -1173,7 +1172,11 @@ fn execution_value_json(
         ExecutionValue::Integer { value, .. } | ExecutionValue::Byte { value } => {
             serde_json::Number::from_i128(*value)
                 .map(Value::Number)
-                .ok_or_else(|| format!("MNCS_STRUCTURED_PROJECTION {path}: integer is outside JSON number range"))
+                .ok_or_else(|| {
+                    format!(
+                        "MNCS_STRUCTURED_PROJECTION {path}: integer is outside JSON number range"
+                    )
+                })
         }
         ExecutionValue::Float { bits, .. } => serde_json::Number::from_f64(f64::from_bits(*bits))
             .map(Value::Number)
@@ -1196,7 +1199,9 @@ fn execution_value_json(
                     "MNCS_STRUCTURED_PROJECTION {path}: finite contract {type_identity} is missing"
                 ));
             };
-            if expected_type != type_identity || variants.get(discriminant) != Some(variant_identity) {
+            if expected_type != type_identity
+                || variants.get(discriminant) != Some(variant_identity)
+            {
                 return Err(format!(
                     "MNCS_STRUCTURED_PROJECTION {path}: finite identity does not match its artifact contract"
                 ));
@@ -1258,7 +1263,9 @@ fn execution_value_json(
         ExecutionValue::Sequence { values } | ExecutionValue::Vector { values } => values
             .iter()
             .enumerate()
-            .map(|(index, value)| execution_value_json(value, composites, &format!("{path}[{index}]")))
+            .map(|(index, value)| {
+                execution_value_json(value, composites, &format!("{path}[{index}]"))
+            })
             .collect::<Result<Vec<_>, _>>()
             .map(Value::Array),
         ExecutionValue::Mask { lanes } => Ok(Value::Array(

@@ -19,7 +19,10 @@ use crate::{
     ObligationRecord, ObligationStatus, Program, SemanticId, VerifierResult,
 };
 
-pub const SSA_SCHEMA_VERSION: &str = "0.5";
+pub const SSA_SCHEMA_VERSION: &str = "0.6";
+/// Previous typed SSA schema. It remains executable, but does not carry the
+/// finite-type declarations needed for Language-owned external projection.
+pub const SSA_SCHEMA_VERSION_PRE_FINITE_TYPES: &str = "0.5";
 /// The previous SSA schema version. Artifacts carrying `"0.4"` store
 /// non-nominal types as `IrType::Named` spellings; they deserialize via
 /// the `BodyType` tag aliases and must pass through
@@ -30,7 +33,7 @@ pub const SSA_FUNCTION_VERIFICATION_FACT_SCHEMA_VERSION: &str =
 pub const SSA_FUNCTION_VERIFICATION_FACT_VERIFIER_ID: &str =
     "mncs-language-ssa-function-validator/1";
 pub const SSA_FUNCTION_VERIFICATION_FACT_POLICY_ID: &str = "mncs-language-ssa-function-policy/1";
-pub const SSA_FUNCTION_VERIFICATION_LANGUAGE_PROFILE: &str = "mncs-language-ssa-profile/0.5";
+pub const SSA_FUNCTION_VERIFICATION_LANGUAGE_PROFILE: &str = "mncs-language-ssa-profile/0.6";
 pub const SSA_FUNCTION_ARTIFACT_CACHE_SCHEMA_VERSION: &str =
     "mncs.language-ssa-function-artifact-cache/1";
 pub const SSA_FUNCTION_ARTIFACT_CACHE_OBSERVATION_SCHEMA_VERSION: &str =
@@ -375,6 +378,24 @@ pub struct SsaRecordType {
     pub fields: Vec<(String, crate::BodyType)>,
 }
 
+/// Finite type declaration preserved in selected SSA. Payload types are
+/// resolved before lowering so runtimes can apply Language-owned typed
+/// external projections without reconstructing source declarations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsaFiniteType {
+    pub identity: SemanticId,
+    pub name: String,
+    pub variants: Vec<SsaFiniteVariant>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsaFiniteVariant {
+    pub identity: SemanticId,
+    pub name: String,
+    pub discriminant: u32,
+    pub payload: Vec<(String, crate::BodyType)>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SsaModule {
     pub schema_version: String,
@@ -385,6 +406,10 @@ pub struct SsaModule {
     pub binding_table: Option<crate::SemanticBindingTable>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub record_types: Vec<SsaRecordType>,
+    /// Omitted for legacy 0.5 artifacts. New artifacts bind all finite
+    /// declarations used by their typed runtime operations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub finite_types: Vec<SsaFiniteType>,
     pub functions: Vec<SsaFunction>,
     pub obligations: Vec<ObligationRecord>,
     pub trace: SsaTraceMap,
@@ -847,10 +872,12 @@ impl SsaModule {
     /// tables, and generic specialization arguments. Structural spellings
     /// normalize deterministically; nominal short names that cannot resolve
     /// stay `Named` so the lowering-boundary check rejects them explicitly.
-    /// Idempotent: current typed modules are unchanged except for the schema
-    /// upgrade stamp. [`SsaExecutionSession::from_shared`] applies this to
-    /// 0.4 modules automatically; direct [`SsaModule::validate`] callers must
-    /// normalize first (0.4 fails `SSA000` explicitly).
+    /// Idempotent: 0.4 spellings become typed and are stamped as 0.5. A 0.5
+    /// module keeps that version because it predates the finite-type table;
+    /// stamping it 0.6 would claim metadata it does not carry.
+    /// [`SsaExecutionSession::from_shared`] applies this to 0.4 modules
+    /// automatically; direct [`SsaModule::validate`] callers must normalize
+    /// first (0.4 fails `SSA000` explicitly).
     pub fn normalize_legacy_types(&mut self) {
         fn normalize_value(value: &mut SsaValue) {
             value.ty.normalize_legacy_ir_named();
@@ -896,7 +923,9 @@ impl SsaModule {
                 }
             }
         }
-        self.schema_version = SSA_SCHEMA_VERSION.to_owned();
+        if self.schema_version == SSA_SCHEMA_VERSION_PRE_TYPED {
+            self.schema_version = SSA_SCHEMA_VERSION_PRE_FINITE_TYPES.to_owned();
+        }
     }
 
     pub fn validate(&self) -> SsaValidationReport {
@@ -913,12 +942,80 @@ impl SsaModule {
         request: &SsaFunctionFactRequest,
     ) -> SsaFunctionFactValidation {
         let mut errors = Vec::new();
-        if self.schema_version != SSA_SCHEMA_VERSION {
+        if !matches!(
+            self.schema_version.as_str(),
+            SSA_SCHEMA_VERSION | SSA_SCHEMA_VERSION_PRE_FINITE_TYPES
+        ) {
             errors.push(diagnostic(
                 "SSA000",
                 "schema_version",
                 "unsupported SSA schema version",
             ));
+        }
+        let mut declared_type_ids = BTreeSet::new();
+        for (index, record) in self.record_types.iter().enumerate() {
+            if !declared_type_ids.insert(record.identity.clone()) {
+                errors.push(diagnostic(
+                    "SSA050",
+                    &format!("record_types[{index}].identity"),
+                    "duplicate nominal type identity",
+                ));
+            }
+            let mut field_names = BTreeSet::new();
+            for (field_index, (name, ty)) in record.fields.iter().enumerate() {
+                let path = format!("record_types[{index}].fields[{field_index}]");
+                if name.is_empty() || !field_names.insert(name) {
+                    errors.push(diagnostic(
+                        "SSA051",
+                        &path,
+                        "record field names must be non-empty and unique",
+                    ));
+                }
+                check_body_type(ty, &BTreeSet::new(), &format!("{path}.type"), &mut errors);
+            }
+        }
+        let mut variant_ids = BTreeSet::new();
+        for (index, finite) in self.finite_types.iter().enumerate() {
+            if !declared_type_ids.insert(finite.identity.clone()) {
+                errors.push(diagnostic(
+                    "SSA050",
+                    &format!("finite_types[{index}].identity"),
+                    "duplicate nominal type identity",
+                ));
+            }
+            let mut variant_names = BTreeSet::new();
+            let mut discriminants = BTreeSet::new();
+            for (variant_index, variant) in finite.variants.iter().enumerate() {
+                let path = format!("finite_types[{index}].variants[{variant_index}]");
+                if variant.name.is_empty()
+                    || !variant_names.insert(variant.name.as_str())
+                    || !variant_ids.insert(variant.identity.clone())
+                    || !discriminants.insert(variant.discriminant)
+                {
+                    errors.push(diagnostic(
+                        "SSA052",
+                        &path,
+                        "finite variant names, identities, and discriminants must be unique",
+                    ));
+                }
+                let mut payload_names = BTreeSet::new();
+                for (field_index, (name, ty)) in variant.payload.iter().enumerate() {
+                    let field_path = format!("{path}.payload[{field_index}]");
+                    if name.is_empty() || !payload_names.insert(name) {
+                        errors.push(diagnostic(
+                            "SSA053",
+                            &field_path,
+                            "finite payload field names must be non-empty and unique",
+                        ));
+                    }
+                    check_body_type(
+                        ty,
+                        &BTreeSet::new(),
+                        &format!("{field_path}.type"),
+                        &mut errors,
+                    );
+                }
+            }
         }
         let mut function_ids = BTreeSet::new();
         let semantic_function_ids = self
@@ -1699,6 +1796,32 @@ impl Program {
                     .collect(),
             })
             .collect();
+        let finite_types = self
+            .finite_types
+            .iter()
+            .map(|finite| SsaFiniteType {
+                identity: finite.identity.clone(),
+                name: finite.name.clone(),
+                variants: finite
+                    .variants
+                    .iter()
+                    .map(|variant| SsaFiniteVariant {
+                        identity: variant.identity.clone(),
+                        name: variant.name.clone(),
+                        discriminant: variant.discriminant,
+                        payload: variant
+                            .payload
+                            .iter()
+                            .map(|field| {
+                                let field_type = crate::TypeSyntax::from(field.field_type.as_str())
+                                    .resolve_against(self);
+                                (field.name.clone(), field_type)
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            })
+            .collect();
         let module = SsaModule {
             schema_version: SSA_SCHEMA_VERSION.to_owned(),
             identity,
@@ -1706,6 +1829,7 @@ impl Program {
             hir_fingerprint,
             binding_table: self.binding_table.clone(),
             record_types,
+            finite_types,
             functions,
             obligations: ir.obligations.clone(),
             trace: SsaTraceMap {

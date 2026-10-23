@@ -5,11 +5,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mncs_compiler::{ReferenceCompiler, bundle::pinned_bundle};
+use mncs_compiler::{bundle::pinned_bundle, ReferenceCompiler};
 use mncs_embed::{Artifact, CallOptions, Grant, Session};
 use mncs_model::{ArtifactRepresentation, ExecutionValue, PROCESS_LAUNCH_VECTOR_CAPACITY};
 use mncs_syntax::{SourceArtifactKind, SourceEnvelope};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 const SOURCE: &str = r#"
 mncs 0.18;

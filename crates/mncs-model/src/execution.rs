@@ -19,8 +19,9 @@ use crate::process::{MAX_CAPTURE_BYTES, PROCESS_LAUNCH_VECTOR_CAPACITY};
 use crate::structured::canonical_external_value;
 use crate::{
     ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator,
-    BodyType, BoundsEvidence, FloatType, Function, FunctionBody, IntegerType, Program,
-    SequenceBound, MAX_SEQUENCE_BOUND,
+    BodyType, BoundsEvidence, FiniteType, FiniteVariant, FloatType, Function, FunctionBody,
+    IntegerType, Program, RecordField, RecordType, SequenceBound, SsaModule, MAX_SEQUENCE_BOUND,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 /// Recover the `f64` of a float boundary value.
@@ -938,6 +939,86 @@ pub(crate) fn structured_digest_value(
         ));
     }
     Ok(Sha256::digest(canonical.as_bytes()).into())
+}
+
+/// Language-owned canonical digest over a typed value from a selected SSA
+/// artifact. The SSA module carries the nominal type declarations needed to
+/// produce the same external projection as source-level structured values.
+/// Older SSA artifacts without finite-type declarations remain executable,
+/// but cannot digest a value whose external representation needs those facts.
+pub fn structured_digest_ssa_value(
+    module: &SsaModule,
+    expected: &BodyType,
+    value: &ExecutionValue,
+) -> Result<[u8; 32], String> {
+    let program = Program {
+        schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
+        module: module.semantic_identity.0.clone(),
+        dependencies: Vec::new(),
+        finite_types: module
+            .finite_types
+            .iter()
+            .map(|finite| FiniteType {
+                identity: finite.identity.clone(),
+                name: finite.name.clone(),
+                variants: finite
+                    .variants
+                    .iter()
+                    .map(|variant| FiniteVariant {
+                        identity: variant.identity.clone(),
+                        name: variant.name.clone(),
+                        discriminant: variant.discriminant,
+                        payload: variant
+                            .payload
+                            .iter()
+                            .map(|(name, ty)| RecordField {
+                                name: name.clone(),
+                                field_type: ssa_type_reference(ty),
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        record_types: module
+            .record_types
+            .iter()
+            .map(|record| RecordType {
+                identity: record.identity.clone(),
+                name: record.name.clone(),
+                fields: record
+                    .fields
+                    .iter()
+                    .map(|(name, ty)| RecordField {
+                        name: name.clone(),
+                        field_type: ssa_type_reference(ty),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        assumptions: Vec::new(),
+        binding_table: module.binding_table.clone(),
+        functions: Vec::new(),
+        generic_specializations: module.generic_specializations.clone(),
+    };
+    structured_digest_value(&program, expected, value)
+}
+
+fn ssa_type_reference(ty: &BodyType) -> String {
+    match ty {
+        BodyType::Record { identity, .. } | BodyType::Finite { identity, .. } => identity.0.clone(),
+        BodyType::Sequence { element, bound } => {
+            format!(
+                "[{}; {}]",
+                ssa_type_reference(element),
+                bound.canonical_text()
+            )
+        }
+        BodyType::Vector { element, lanes } => {
+            format!("vec<{}, {lanes}>", ssa_type_reference(element))
+        }
+        other => other.semantic_name(),
+    }
 }
 
 fn record_field<'a>(value: &'a ExecutionValue, name: &str) -> Option<&'a ExecutionValue> {
@@ -8804,7 +8885,85 @@ fn subject(program: &Program, target: &Option<ExecutionTarget>) -> ExecutionSubj
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RecordType;
+    use crate::{RecordType, SsaFiniteType, SsaFiniteVariant, SsaTraceMap};
+
+    #[test]
+    fn selected_ssa_digest_uses_language_owned_finite_projection() {
+        let finite_identity = SemanticId("mncs:0.2:finite-type:test::Verdict::".to_owned());
+        let pass_identity = SemanticId("mncs:0.2:finite-variant:test::Verdict::PASS::".to_owned());
+        let finite_type = FiniteType {
+            identity: finite_identity.clone(),
+            name: "Verdict".to_owned(),
+            variants: vec![FiniteVariant {
+                identity: pass_identity.clone(),
+                name: "PASS".to_owned(),
+                discriminant: 0,
+                payload: Vec::new(),
+            }],
+        };
+        let module = SsaModule {
+            schema_version: crate::SSA_SCHEMA_VERSION.to_owned(),
+            identity: SemanticId("mncs:test:ssa".to_owned()),
+            semantic_identity: SemanticId("mncs:test:program".to_owned()),
+            hir_fingerprint: "00".repeat(32),
+            binding_table: None,
+            record_types: Vec::new(),
+            finite_types: vec![SsaFiniteType {
+                identity: finite_identity.clone(),
+                name: "Verdict".to_owned(),
+                variants: vec![SsaFiniteVariant {
+                    identity: pass_identity.clone(),
+                    name: "PASS".to_owned(),
+                    discriminant: 0,
+                    payload: Vec::new(),
+                }],
+            }],
+            functions: Vec::new(),
+            obligations: Vec::new(),
+            trace: SsaTraceMap {
+                entries: Vec::new(),
+            },
+            transformations: Vec::new(),
+            generic_specializations: Vec::new(),
+            proof_relationships: Vec::new(),
+        };
+        let program = Program {
+            schema_version: crate::SUPPORTED_SCHEMA_VERSION.to_owned(),
+            module: "test".to_owned(),
+            dependencies: Vec::new(),
+            finite_types: vec![finite_type],
+            record_types: Vec::new(),
+            assumptions: Vec::new(),
+            binding_table: None,
+            functions: Vec::new(),
+            generic_specializations: Vec::new(),
+        };
+        let expected = BodyType::Finite {
+            identity: finite_identity.clone(),
+            name: "Verdict".to_owned(),
+        };
+        let value = ExecutionValue::Finite {
+            type_identity: finite_identity,
+            variant_identity: pass_identity,
+            discriminant: 0,
+            payload: Arc::new(Vec::new()),
+        };
+
+        assert_eq!(
+            structured_digest_ssa_value(&module, &expected, &value).unwrap(),
+            structured_digest_value(&program, &expected, &value).unwrap(),
+        );
+        let legacy_module = SsaModule {
+            schema_version: crate::SSA_SCHEMA_VERSION_PRE_FINITE_TYPES.to_owned(),
+            finite_types: Vec::new(),
+            ..module
+        };
+        assert!(
+            structured_digest_ssa_value(&legacy_module, &expected, &value)
+                .unwrap_err()
+                .contains("is not linked")
+        );
+    }
 
     #[test]
     fn body_runtime_profile_attributes_nested_steps_to_the_callee() {

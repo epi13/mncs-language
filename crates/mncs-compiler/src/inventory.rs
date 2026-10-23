@@ -8,13 +8,13 @@
 use std::collections::BTreeSet;
 
 use mncs_model::{
-    Effect, GenericParam, GenericParamKind, SemanticId, Value, finite_type_id, function_id,
-    module_id, program_id, record_type_id, test_case_id, test_declaration_id,
+    finite_type_id, function_id, module_id, program_id, record_type_id, test_case_id,
+    test_declaration_id, Effect, GenericParam, GenericParamKind, SemanticId, Value,
 };
-use mncs_syntax::{SourceSpan, source_profile_registry_snapshot};
+use mncs_syntax::{source_profile_registry_snapshot, SourceSpan};
 use serde::Serialize;
 
-use crate::{SourceFrontEndResult, fingerprint};
+use crate::{fingerprint, SourceFrontEndResult};
 
 pub const LANGUAGE_INVENTORY_SCHEMA_VERSION: &str = "mncs.language-inventory/1";
 pub const DECLARATION_INVENTORY_SCHEMA_VERSION: &str = "mncs.declaration-inventory/1";
@@ -804,11 +804,10 @@ mod tests {
         let left = language_inventory();
         let right = language_inventory();
         assert_eq!(left, right);
-        assert!(
-            left.intrinsics
+        assert!(left
+            .intrinsics
             .iter()
-                .all(|intrinsic| !intrinsic.name.starts_with("elaborate_"))
-        );
+            .all(|intrinsic| !intrinsic.name.starts_with("elaborate_")));
         assert_eq!(
             left.current_profile,
             left.profiles.last().expect("registry is non-empty").version

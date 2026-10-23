@@ -14,15 +14,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use mncs_model::{
     BackendArtifact, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
     BackendIdentity, BackendResult, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SSA_SCHEMA_VERSION,
-    SsaModule, TargetContractRef, TargetLoweringPlan, TransformationStatus,
+    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SsaModule,
+    TargetContractRef, TargetLoweringPlan, TransformationStatus, SSA_SCHEMA_VERSION,
 };
 
 use crate::support::{
     artifact_ref, empty_execution, execution_failure, failed, function_names, unknown,
     validate_realizable_ssa, validate_selected_ssa,
 };
-use crate::{BackendAdapter, BackendExecutionResult, support};
+use crate::{support, BackendAdapter, BackendExecutionResult};
 
 /// Static description of one externally realized target family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -847,7 +847,7 @@ mod concurrency_tests {
 
     use std::collections::HashSet;
 
-    use super::{RISCV32_SPEC, RealizeError};
+    use super::{RealizeError, RISCV32_SPEC};
 
     /// Minimal IR accepted by `llc -mtriple=riscv32 -mattr=+m -filetype=obj`.
     const PROBE_IR: &str = "define i32 @probe_min(i32 %a, i32 %b) {\nentry:\n  %c = icmp sgt i32 %a, %b\n  %m = select i1 %c, i32 %b, i32 %a\n  ret i32 %m\n}\n";

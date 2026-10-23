@@ -838,62 +838,61 @@ impl Program {
                     body_fingerprint_result.as_ref().and_then(|fingerprint| {
                         function_semantic_fingerprint(function, &interface_fingerprint, fingerprint)
                     });
-                let (calls, assumptions, nominal_types, specializations) = if let Some(body) =
-                    function.body.as_ref()
-                {
-                    let body_subject =
-                        body.identity(function.identity_namespace(&self.module), &function.name);
-                    let prior_fact = prior_facts_by_subject
-                        .and_then(|facts| facts.get(&body_subject))
-                        .and_then(|facts| match facts.as_slice() {
-                            [fact] => Some(*fact),
-                            _ => None,
-                        });
-                    let summary = match dependency_summary_cache.as_deref_mut() {
-                        Some(cache) => cache.body_summary(
-                            &nominal_types,
-                            identity,
-                            function,
-                            body,
-                            body_fingerprint.as_deref(),
-                            &interface_fingerprint,
-                            &body_subject,
-                            prior_fact,
-                            &mut dependency_summary_observation,
-                        ),
-                        None => {
-                            let mut assumptions = body_assumption_references(body);
-                            assumptions.extend(function.assumptions.iter().cloned());
-                            CachedBodyDependencySummary {
-                                calls: body_call_references(body),
-                                assumptions,
-                                nominal_types: body_nominal_type_references(
-                                    &nominal_types,
-                                    function,
-                                    body,
-                                ),
+                let (calls, assumptions, nominal_types, specializations) =
+                    if let Some(body) = function.body.as_ref() {
+                        let body_subject = body
+                            .identity(function.identity_namespace(&self.module), &function.name);
+                        let prior_fact = prior_facts_by_subject
+                            .and_then(|facts| facts.get(&body_subject))
+                            .and_then(|facts| match facts.as_slice() {
+                                [fact] => Some(*fact),
+                                _ => None,
+                            });
+                        let summary = match dependency_summary_cache.as_deref_mut() {
+                            Some(cache) => cache.body_summary(
+                                &nominal_types,
+                                identity,
+                                function,
+                                body,
+                                body_fingerprint.as_deref(),
+                                &interface_fingerprint,
+                                &body_subject,
+                                prior_fact,
+                                &mut dependency_summary_observation,
+                            ),
+                            None => {
+                                let mut assumptions = body_assumption_references(body);
+                                assumptions.extend(function.assumptions.iter().cloned());
+                                CachedBodyDependencySummary {
+                                    calls: body_call_references(body),
+                                    assumptions,
+                                    nominal_types: body_nominal_type_references(
+                                        &nominal_types,
+                                        function,
+                                        body,
+                                    ),
+                                }
                             }
-                        }
+                        };
+                        let specializations = select_relevant_specializations(
+                            identity,
+                            &summary.calls,
+                            specialization_index,
+                        );
+                        (
+                            summary.calls,
+                            summary.assumptions,
+                            summary.nominal_types,
+                            specializations,
+                        )
+                    } else {
+                        (
+                            BTreeSet::new(),
+                            BTreeSet::new(),
+                            BTreeSet::new(),
+                            BTreeMap::new(),
+                        )
                     };
-                    let specializations = select_relevant_specializations(
-                        identity,
-                        &summary.calls,
-                        specialization_index,
-                    );
-                    (
-                        summary.calls,
-                        summary.assumptions,
-                        summary.nominal_types,
-                        specializations,
-                    )
-                } else {
-                    (
-                        BTreeSet::new(),
-                        BTreeSet::new(),
-                        BTreeSet::new(),
-                        BTreeMap::new(),
-                    )
-                };
                 let mut effect_and_capability_dependencies = BTreeSet::new();
                 let effect_and_capability_dependencies = self
                     .add_effect_and_capability_dependencies(

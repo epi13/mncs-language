@@ -10,26 +10,26 @@ use std::fmt::Write;
 use mncs_model::{
     ArithmeticIntent, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
     BackendIdentity, BackendResult, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SSA_SCHEMA_VERSION,
-    SsaModule, TargetContractRef, TargetLoweringPlan, TransformationStatus,
+    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SsaModule,
+    TargetContractRef, TargetLoweringPlan, TransformationStatus, SSA_SCHEMA_VERSION,
 };
 
 #[path = "c11/native_ssa.rs"]
 mod native_ssa;
-pub use native_ssa::{emit_verified_native_ssa_c11, NativeSsaScalarModule};
 use crate::composite::SlotWidth;
 use crate::native::{
-    NativeExecutable, ToolchainIdentity, argv_from_request, compile_and_run_with_call_file_full,
-    probe_clang, probe_gcc,
+    argv_from_request, compile_and_run_with_call_file_full, probe_clang, probe_gcc,
+    NativeExecutable, ToolchainIdentity,
 };
 use crate::scalar::{
-    ScalarFunction, ScalarInst, ScalarModule, ScalarTerm, ScalarTy, c_type, lower_to_scalar,
+    c_type, lower_to_scalar, ScalarFunction, ScalarInst, ScalarModule, ScalarTerm, ScalarTy,
 };
 use crate::support::{
     artifact_ref, empty_execution, execution_failure, function_names, function_value_contracts,
     unknown, validate_realizable_ssa, validate_selected_ssa,
 };
 use crate::{BackendAdapter, BackendExecutionResult};
+pub use native_ssa::{emit_verified_native_ssa_c11, NativeSsaScalarModule};
 
 pub const C11_BACKEND_NAME: &str = "mncs-c11";
 pub const C11_BACKEND_VERSION: &str = "0.1";

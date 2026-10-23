@@ -435,6 +435,7 @@ mod tests {
             hir_fingerprint: "00".repeat(32),
             binding_table: None,
             record_types: Vec::new(),
+            finite_types: Vec::new(),
             functions: Vec::new(),
             obligations: Vec::new(),
             trace: crate::SsaTraceMap {
