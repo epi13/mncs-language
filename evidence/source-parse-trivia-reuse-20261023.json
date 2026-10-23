@@ -1,0 +1,90 @@
+{
+  "schema_version": "mncs.language.source-parse-trivia-reuse-evidence/1",
+  "identity": "ev_language_source_parse_trivia_reuse_20261023",
+  "campaign": {
+    "identity": "cmp_mncs_native_application_readiness_compiler_20261013",
+    "task_identity": "mncs-native-compiler-language-tooling-20261023",
+    "session_id": "ses_164edc158d9b1637",
+    "checkpoint_before_change": "chk_49e8d78bec2b25f4",
+    "checkpoint_after_change": null,
+    "checkpoint_status": "not_published",
+    "checkpoint_failure": "The mncs-environment MCP operation returned Transport closed; no local Store or authenticated principal override was used."
+  },
+  "repository": {
+    "name": "mncs-language",
+    "branch": "main",
+    "revision": "bddafa800b9bde182fcca7ee1c63419521434abd",
+    "implementation_commit": "12ac5de",
+    "merge_commit": "8ddfcd12a5114a58be09ca6e8290c440e0963fe1",
+    "remote_ref": "origin/main",
+    "status": "pushed"
+  },
+  "contract": {
+    "source_parse_cache": "mncs.language-source-parse-cache/3",
+    "observation": "mncs.language-source-parse-cache-observation/3",
+    "parser_policy_identity": "mncs-language-source-parser/1",
+    "reuse_rule": "Fresh lexical output must have no diagnostics and the same complete significant-token sequence, language profile, artifact kind, source-envelope schema, parser policy, profile registry, and syntax schemas as one integrity-checked valid cached parse."
+  },
+  "implementation": {
+    "behavior": [
+      "Comment and whitespace edits freshly lex the current source and can reuse the previous valid syntax tree when significant tokens are identical.",
+      "Current lexical tokens and CST token indexes are rebuilt; AST, CST, and diagnostic spans are remapped to current byte offsets, lines, and Unicode columns.",
+      "Any missing, ambiguous, or unmappable span fails closed to a fresh parse; invalid parses are never reused across changed text.",
+      "A fresh parser API accepts the freshly lexed document so cache misses do not lex changed source a second time."
+    ],
+    "source_files": {
+      "crates/mncs-compiler/src/source_parse_cache.rs": "ed659a8c02ea585b148a33d922105ac484f34a20c626bcfb0c06ee4ec56934a5",
+      "crates/mncs-compiler/tests/module_imports.rs": "f6b25d88ea059a12d823146f655f605788a90ba2ea8b443634371119482bf192",
+      "crates/mncs-syntax/src/source.rs": "7356d99c32bd0fc7939f91914323f1cd779e0e92594af9e7e5ce144aaf3abda7",
+      "docs/source-parse-cache.md": "7ec8866e886a92ff4f30fe2e3af181db1eb64086e69a6ea8125a4683fe06fcc4"
+    }
+  },
+  "verification": {
+    "commands": [
+      "cargo test -p mncs-compiler --lib source_parse_cache",
+      "cargo test -p mncs-compiler --test module_imports",
+      "cargo test -p mncs-syntax",
+      "cargo fmt --all -- --check",
+      "git diff --check"
+    ],
+    "results": {
+      "source_parse_cache_unit_tests": {"passed": 8, "failed": 0},
+      "compiler_module_import_integration_tests": {"passed": 55, "failed": 0},
+      "syntax_unit_tests": {"passed": 29, "failed": 0},
+      "format_and_diff_checks": "passed"
+    },
+    "comment_edit_after_serialized_restart": {
+      "same_significant_token_parse_reuses": 1,
+      "source_parse_invocations": 0,
+      "cache_entries_published": 0,
+      "reused_output_equals_fresh_parse": true,
+      "fresh_lexical_and_cst_text": true,
+      "current_ast_spans_and_cst_token_indexes": true
+    },
+    "linked_frontend_root_comment_edit": {
+      "exact_unchanged_import_parses_reused": 1,
+      "same_significant_token_root_parses_reused": 1,
+      "source_parse_invocations": 0,
+      "cache_entries_published": 0,
+      "verified_function_facts_reused": 2
+    },
+    "profile_assumption_change": {
+      "same_token_sequence": true,
+      "syntax_tree_reused": false,
+      "fresh_diagnostic_matches_parser": true
+    }
+  },
+  "resource_measurement": {
+    "cache_test_body_wall_seconds": 0.27,
+    "module_import_test_wall_seconds": 0.55,
+    "syntax_test_wall_seconds": 0.01,
+    "incremental_compile_speedup_measured": false,
+    "peak_rss_bytes": null,
+    "peak_rss_status": "not measured"
+  },
+  "limitations": [
+    "This evidence establishes Language parser work avoided and source-location correctness; it is not a wall-time or memory performance claim.",
+    "The native mncs-test digest_app application-build harness has not yet consumed this Language revision.",
+    "The registered nested Compiler Language checkout received the new commit in FETCH_HEAD, but its origin/main ref update failed with 'couldn't set refs/remotes/origin/main'; its refs and worktree were left unchanged."
+  ]
+}
