@@ -121,6 +121,11 @@ to:
 
 Semantically required intent must not survive only as discardable debugging metadata.
 
+SSA schema 0.6 also carries resolved finite type declarations and payload types. A runtime can use
+those declarations with `structured_digest_ssa_value` to apply the Language-owned canonical external
+projection to values from the exact admitted artifact. Schema 0.5 remains executable, but a digest
+that needs finite variant names fails closed when its declaration metadata is unavailable.
+
 ## Layer 5: conventional backend
 
 LLVM, Cranelift, WebAssembly, C, or another backend performs target lowering, register allocation, scheduling, and emission. Backend-facing optimization claims should be conservative:

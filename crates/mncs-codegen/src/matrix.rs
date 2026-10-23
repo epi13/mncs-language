@@ -128,6 +128,10 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
                 // the reference bytecode runtime realizes their bounded
                 // decoder/encoder and publication semantics.
                 realized("0.18"),
+                // Profile 0.19 raises bounded sequence capacity to 4096.
+                // Admission is implemented, but executable 4096-capacity
+                // conformance has not yet been established for this backend.
+                support("0.19", "partial", &["sequence_capacity_4096_execution"]),
             ])
             .collect(),
         "mncs-portable-wasm-mvp" | "mncs-c11" | "mncs-llvm-ir" | "mncs-cranelift" => core
@@ -164,6 +168,17 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
                     "partial",
                     &["fs_mutation", "structured_artifact_effects"],
                 ),
+                // The wider type bound is admitted by the frontend; compiled
+                // 4096-capacity execution still needs conformance evidence.
+                support(
+                    "0.19",
+                    "partial",
+                    &[
+                        "fs_mutation",
+                        "structured_artifact_effects",
+                        "sequence_capacity_4096_execution",
+                    ],
+                ),
             ])
             .collect(),
         "mncs-riscv32" | "mncs-ebpf" | "mncs-ptx64" => ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6"]
@@ -172,7 +187,7 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
             .chain(
                 [
                     "0.7", "0.8", "0.9", "0.10", "0.11", "0.12", "0.13", "0.14", "0.15", "0.16",
-                    "0.17", "0.18",
+                    "0.17", "0.18", "0.19",
                 ]
                 .iter()
                 .map(|profile| {

@@ -108,7 +108,8 @@ fn main() {
     if let Some(head) = git(&root, &["rev-parse", "--git-path", "HEAD"]) {
         println!("cargo:rerun-if-changed={}", root.join(&head).display());
         if let Some(reference) = git(&root, &["symbolic-ref", "-q", "HEAD"]) {
-            let path = git(&root, &["rev-parse", "--git-path", reference.as_str()]).unwrap_or(reference);
+            let path =
+                git(&root, &["rev-parse", "--git-path", reference.as_str()]).unwrap_or(reference);
             if root.join(&path) != root.join(&head) {
                 println!("cargo:rerun-if-changed={}", root.join(&path).display());
             }

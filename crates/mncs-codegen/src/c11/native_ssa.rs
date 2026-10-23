@@ -1,8 +1,8 @@
 use super::*;
-use serde::Deserialize;
-use mncs_model::{ArithmeticIntent, BackendPromise, IntegerType, SemanticId};
 use crate::promises::withheld;
 use crate::scalar::{ScalarBlock, ScalarValue};
+use mncs_model::{ArithmeticIntent, BackendPromise, IntegerType, SemanticId};
+use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Verified native SSA normalized into the scalar boundary shared with
@@ -54,8 +54,15 @@ pub struct NativeSsaScalarBlock {
 pub enum NativeSsaScalarInstruction {
     // u64, not i128: the bool/u64 envelope has no wider constant, and the
     // CLI JSON layer cannot deserialize i128 without arbitrary precision.
-    Constant { dest: NativeSsaScalarValue, value: u64 },
-    Call { dest: NativeSsaScalarValue, callee: String, args: Vec<String> },
+    Constant {
+        dest: NativeSsaScalarValue,
+        value: u64,
+    },
+    Call {
+        dest: NativeSsaScalarValue,
+        callee: String,
+        args: Vec<String>,
+    },
     Integer {
         dest: NativeSsaScalarValue,
         operator: String,
@@ -68,8 +75,13 @@ pub enum NativeSsaScalarInstruction {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NativeSsaScalarTerminator {
-    Return { value: String },
-    Jump { target: u32, args: Vec<String> },
+    Return {
+        value: String,
+    },
+    Jump {
+        target: u32,
+        args: Vec<String>,
+    },
     Branch {
         condition: String,
         then_target: u32,
@@ -94,17 +106,25 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
 
     let mut signatures = BTreeMap::new();
     for function in &native.functions {
-        if !function.identity.starts_with("mncs:0.2:function:")
-            || function.blocks.is_empty()
-        {
+        if !function.identity.starts_with("mncs:0.2:function:") || function.blocks.is_empty() {
             return Err(format!("malformed native function {}", function.identity));
         }
         let symbol = native_function_symbol(&function.identity)?;
-        if signatures.insert(function.identity.clone(), (
-            function.params.iter().map(|value| value.ty).collect::<Vec<_>>(),
-            function.result_type,
-            symbol,
-        )).is_some() {
+        if signatures
+            .insert(
+                function.identity.clone(),
+                (
+                    function
+                        .params
+                        .iter()
+                        .map(|value| value.ty)
+                        .collect::<Vec<_>>(),
+                    function.result_type,
+                    symbol,
+                ),
+            )
+            .is_some()
+        {
             return Err(format!("duplicate native function {}", function.identity));
         }
     }
@@ -115,23 +135,41 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
         let value_id = |id: &str| SemanticId(format!("{}#value:{id}", function.identity));
         let scalar_ty = |ty| match ty {
             NativeSsaScalarType::Bool => ScalarTy::Bool,
-            NativeSsaScalarType::U64 => ScalarTy::Int(IntegerType { bits: 64, signed: false }),
+            NativeSsaScalarType::U64 => ScalarTy::Int(IntegerType {
+                bits: 64,
+                signed: false,
+            }),
         };
 
         let mut definitions = BTreeMap::new();
         for value in &function.params {
             if definitions.insert(value.id.clone(), value.ty).is_some() {
-                return Err(format!("duplicate SSA value {} in {}", value.id, function.identity));
+                return Err(format!(
+                    "duplicate SSA value {} in {}",
+                    value.id, function.identity
+                ));
             }
         }
         let mut block_ids = BTreeMap::new();
         for block in &function.blocks {
-            if block_ids.insert(block.id, SemanticId(format!("{}#block:{}", function.identity, block.id))).is_some() {
-                return Err(format!("duplicate SSA block {} in {}", block.id, function.identity));
+            if block_ids
+                .insert(
+                    block.id,
+                    SemanticId(format!("{}#block:{}", function.identity, block.id)),
+                )
+                .is_some()
+            {
+                return Err(format!(
+                    "duplicate SSA block {} in {}",
+                    block.id, function.identity
+                ));
             }
             for value in &block.params {
                 if definitions.insert(value.id.clone(), value.ty).is_some() {
-                    return Err(format!("duplicate SSA value {} in {}", value.id, function.identity));
+                    return Err(format!(
+                        "duplicate SSA value {} in {}",
+                        value.id, function.identity
+                    ));
                 }
             }
             for instruction in &block.instructions {
@@ -141,12 +179,19 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
                     | NativeSsaScalarInstruction::Integer { dest, .. } => dest,
                 };
                 if definitions.insert(dest.id.clone(), dest.ty).is_some() {
-                    return Err(format!("duplicate SSA value {} in {}", dest.id, function.identity));
+                    return Err(format!(
+                        "duplicate SSA value {} in {}",
+                        dest.id, function.identity
+                    ));
                 }
             }
         }
-        let type_of = |id: &str| definitions.get(id).copied()
-            .ok_or_else(|| format!("undefined SSA value {id} in {}", function.identity));
+        let type_of = |id: &str| {
+            definitions
+                .get(id)
+                .copied()
+                .ok_or_else(|| format!("undefined SSA value {id} in {}", function.identity))
+        };
 
         let mut scalar_blocks = Vec::new();
         let mut decisions = Vec::new();
@@ -156,7 +201,10 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
                 match instruction {
                     NativeSsaScalarInstruction::Constant { dest, value } => {
                         instructions.push(ScalarInst::Const {
-                            dest: ScalarValue { id: value_id(&dest.id), ty: scalar_ty(dest.ty) },
+                            dest: ScalarValue {
+                                id: value_id(&dest.id),
+                                ty: scalar_ty(dest.ty),
+                            },
                             value: i128::from(*value),
                         });
                     }
@@ -173,24 +221,48 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
                             }
                         }
                         instructions.push(ScalarInst::Call {
-                            dest: ScalarValue { id: value_id(&dest.id), ty: scalar_ty(dest.ty) },
+                            dest: ScalarValue {
+                                id: value_id(&dest.id),
+                                ty: scalar_ty(dest.ty),
+                            },
                             callee: symbol.clone(),
                             args: args.iter().map(|id| value_id(id)).collect(),
                         });
                     }
-                    NativeSsaScalarInstruction::Integer { dest, operator, intent, lhs, rhs } => {
+                    NativeSsaScalarInstruction::Integer {
+                        dest,
+                        operator,
+                        intent,
+                        lhs,
+                        rhs,
+                    } => {
                         match operator.as_str() {
-                            "add" | "sub" | "mul" | "div" | "mod" | "and" | "or" | "xor" | "shl" | "shr" => {}
-                            _ => return Err(format!("integer operator {operator} is outside the scalar envelope")),
+                            "add" | "sub" | "mul" | "div" | "mod" | "and" | "or" | "xor"
+                            | "shl" | "shr" => {}
+                            _ => {
+                                return Err(format!(
+                                    "integer operator {operator} is outside the scalar envelope"
+                                ))
+                            }
                         }
                         if matches!(intent, ArithmeticIntent::Widening { .. }) {
-                            return Err("widening arithmetic intent is outside the scalar envelope".into());
+                            return Err(
+                                "widening arithmetic intent is outside the scalar envelope".into(),
+                            );
                         }
                         if dest.ty != NativeSsaScalarType::U64 {
-                            return Err(format!("integer arithmetic requires a u64 destination in {}", function.identity));
+                            return Err(format!(
+                                "integer arithmetic requires a u64 destination in {}",
+                                function.identity
+                            ));
                         }
-                        if type_of(lhs)? != NativeSsaScalarType::U64 || type_of(rhs)? != NativeSsaScalarType::U64 {
-                            return Err(format!("integer arithmetic requires u64 operands in {}", function.identity));
+                        if type_of(lhs)? != NativeSsaScalarType::U64
+                            || type_of(rhs)? != NativeSsaScalarType::U64
+                        {
+                            return Err(format!(
+                                "integer arithmetic requires u64 operands in {}",
+                                function.identity
+                            ));
                         }
                         // The adapter carries no range evidence, so the
                         // no-overflow promise stays withheld: wrapping is
@@ -208,7 +280,10 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
                         let promise = withheld(promise_kind, value_id(&dest.id), reason);
                         decisions.push(promise.decision.clone());
                         instructions.push(ScalarInst::Integer {
-                            dest: ScalarValue { id: value_id(&dest.id), ty: scalar_ty(dest.ty) },
+                            dest: ScalarValue {
+                                id: value_id(&dest.id),
+                                ty: scalar_ty(dest.ty),
+                            },
                             operator: operator.clone(),
                             intent: *intent,
                             lhs: value_id(lhs),
@@ -218,58 +293,90 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
                     }
                 }
             }
-            let check_edge = |target: &u32, args: &[String]| -> Result<(SemanticId, Vec<SemanticId>), String> {
-                let Some(target_id) = block_ids.get(target) else {
-                    return Err(format!("SSA edge targets missing block {target}"));
-                };
-                let target_block = function.blocks.iter().find(|candidate| candidate.id == *target).unwrap();
-                if args.len() != target_block.params.len() {
-                    return Err(format!("SSA edge arity mismatch at block {target}"));
-                }
-                for (argument, parameter) in args.iter().zip(&target_block.params) {
-                    if type_of(argument)? != parameter.ty {
-                        return Err(format!("SSA edge type mismatch at block {target}"));
+            let check_edge =
+                |target: &u32, args: &[String]| -> Result<(SemanticId, Vec<SemanticId>), String> {
+                    let Some(target_id) = block_ids.get(target) else {
+                        return Err(format!("SSA edge targets missing block {target}"));
+                    };
+                    let target_block = function
+                        .blocks
+                        .iter()
+                        .find(|candidate| candidate.id == *target)
+                        .unwrap();
+                    if args.len() != target_block.params.len() {
+                        return Err(format!("SSA edge arity mismatch at block {target}"));
                     }
-                }
-                Ok((target_id.clone(), args.iter().map(|id| value_id(id)).collect()))
-            };
+                    for (argument, parameter) in args.iter().zip(&target_block.params) {
+                        if type_of(argument)? != parameter.ty {
+                            return Err(format!("SSA edge type mismatch at block {target}"));
+                        }
+                    }
+                    Ok((
+                        target_id.clone(),
+                        args.iter().map(|id| value_id(id)).collect(),
+                    ))
+                };
             let terminator = match &block.terminator {
                 NativeSsaScalarTerminator::Return { value } => {
                     if type_of(value)? != result_type {
                         return Err(format!("return type mismatch in {}", function.identity));
                     }
-                    ScalarTerm::Return { value: value_id(value) }
+                    ScalarTerm::Return {
+                        value: value_id(value),
+                    }
                 }
                 NativeSsaScalarTerminator::Jump { target, args } => {
                     let (target, args) = check_edge(target, args)?;
                     ScalarTerm::Jump { target, args }
                 }
-                NativeSsaScalarTerminator::Branch { condition, then_target, then_args, else_target, else_args } => {
+                NativeSsaScalarTerminator::Branch {
+                    condition,
+                    then_target,
+                    then_args,
+                    else_target,
+                    else_args,
+                } => {
                     if type_of(condition)? != NativeSsaScalarType::Bool {
-                        return Err(format!("branch condition must be bool in {}", function.identity));
+                        return Err(format!(
+                            "branch condition must be bool in {}",
+                            function.identity
+                        ));
                     }
                     let (then_target, then_args) = check_edge(then_target, then_args)?;
                     let (else_target, else_args) = check_edge(else_target, else_args)?;
                     ScalarTerm::Branch {
                         cond: value_id(condition),
-                        then_target, then_args, else_target, else_args,
+                        then_target,
+                        then_args,
+                        else_target,
+                        else_args,
                     }
                 }
             };
             scalar_blocks.push(ScalarBlock {
                 id: block_ids[&block.id].clone(),
-                params: block.params.iter().map(|value| ScalarValue {
-                    id: value_id(&value.id), ty: scalar_ty(value.ty),
-                }).collect(),
+                params: block
+                    .params
+                    .iter()
+                    .map(|value| ScalarValue {
+                        id: value_id(&value.id),
+                        ty: scalar_ty(value.ty),
+                    })
+                    .collect(),
                 insts: instructions,
                 term: terminator,
             });
         }
         scalar_functions.push(ScalarFunction {
             export_name,
-            params: function.params.iter().map(|value| ScalarValue {
-                id: value_id(&value.id), ty: scalar_ty(value.ty),
-            }).collect(),
+            params: function
+                .params
+                .iter()
+                .map(|value| ScalarValue {
+                    id: value_id(&value.id),
+                    ty: scalar_ty(value.ty),
+                })
+                .collect(),
             result: ScalarValue {
                 id: SemanticId(format!("{}#result", function.identity)),
                 ty: scalar_ty(result_type),
@@ -285,12 +392,15 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
         for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
             if let NativeSsaScalarInstruction::Call { callee, .. } = instruction {
                 if !identities.contains(callee) {
-                    return Err(format!("call target {callee} is outside the verified module"));
+                    return Err(format!(
+                        "call target {callee} is outside the verified module"
+                    ));
                 }
             }
         }
     }
-    let module_decisions: Vec<_> = scalar_functions.iter()
+    let module_decisions: Vec<_> = scalar_functions
+        .iter()
         .flat_map(|function| function.promise_decisions.iter().cloned())
         .collect();
     Ok(emit_module(&ScalarModule {
@@ -302,9 +412,11 @@ pub fn emit_verified_native_ssa_c11(native: &NativeSsaScalarModule) -> Result<St
 }
 
 fn native_function_symbol(identity: &str) -> Result<String, String> {
-    let body = identity.strip_prefix("mncs:0.2:function:")
+    let body = identity
+        .strip_prefix("mncs:0.2:function:")
         .ok_or_else(|| format!("invalid canonical function identity {identity}"))?;
-    let (module, function) = body.rsplit_once("::")
+    let (module, function) = body
+        .rsplit_once("::")
         .filter(|(module, function)| !module.is_empty() && !function.is_empty())
         .ok_or_else(|| format!("invalid canonical function identity {identity}"))?;
     Ok(crate::support::qualified_c_symbol(module, function))
@@ -325,7 +437,10 @@ mod tests {
             functions: vec![
                 NativeSsaScalarFunction {
                     identity: "mncs:0.2:function:dep::echo".into(),
-                    params: vec![NativeSsaScalarValue { id: "0".into(), ty: NativeSsaScalarType::U64 }],
+                    params: vec![NativeSsaScalarValue {
+                        id: "0".into(),
+                        ty: NativeSsaScalarType::U64,
+                    }],
                     result_type: NativeSsaScalarType::U64,
                     blocks: vec![NativeSsaScalarBlock {
                         id: 0,
@@ -337,8 +452,14 @@ mod tests {
                 NativeSsaScalarFunction {
                     identity: "mncs:0.2:function:app::run".into(),
                     params: vec![
-                        NativeSsaScalarValue { id: "0".into(), ty: NativeSsaScalarType::Bool },
-                        NativeSsaScalarValue { id: "1".into(), ty: NativeSsaScalarType::U64 },
+                        NativeSsaScalarValue {
+                            id: "0".into(),
+                            ty: NativeSsaScalarType::Bool,
+                        },
+                        NativeSsaScalarValue {
+                            id: "1".into(),
+                            ty: NativeSsaScalarType::U64,
+                        },
                     ],
                     result_type: NativeSsaScalarType::U64,
                     blocks: vec![
@@ -346,7 +467,10 @@ mod tests {
                             id: 0,
                             params: vec![],
                             instructions: vec![NativeSsaScalarInstruction::Call {
-                                dest: NativeSsaScalarValue { id: "2".into(), ty: NativeSsaScalarType::U64 },
+                                dest: NativeSsaScalarValue {
+                                    id: "2".into(),
+                                    ty: NativeSsaScalarType::U64,
+                                },
                                 callee: "mncs:0.2:function:dep::echo".into(),
                                 args: vec!["1".into()],
                             }],
@@ -360,19 +484,34 @@ mod tests {
                         },
                         NativeSsaScalarBlock {
                             id: 1,
-                            params: vec![NativeSsaScalarValue { id: "3".into(), ty: NativeSsaScalarType::U64 }],
+                            params: vec![NativeSsaScalarValue {
+                                id: "3".into(),
+                                ty: NativeSsaScalarType::U64,
+                            }],
                             instructions: vec![],
-                            terminator: NativeSsaScalarTerminator::Jump { target: 3, args: vec!["3".into()] },
+                            terminator: NativeSsaScalarTerminator::Jump {
+                                target: 3,
+                                args: vec!["3".into()],
+                            },
                         },
                         NativeSsaScalarBlock {
                             id: 2,
-                            params: vec![NativeSsaScalarValue { id: "4".into(), ty: NativeSsaScalarType::U64 }],
+                            params: vec![NativeSsaScalarValue {
+                                id: "4".into(),
+                                ty: NativeSsaScalarType::U64,
+                            }],
                             instructions: vec![],
-                            terminator: NativeSsaScalarTerminator::Jump { target: 3, args: vec!["4".into()] },
+                            terminator: NativeSsaScalarTerminator::Jump {
+                                target: 3,
+                                args: vec!["4".into()],
+                            },
                         },
                         NativeSsaScalarBlock {
                             id: 3,
-                            params: vec![NativeSsaScalarValue { id: "5".into(), ty: NativeSsaScalarType::U64 }],
+                            params: vec![NativeSsaScalarValue {
+                                id: "5".into(),
+                                ty: NativeSsaScalarType::U64,
+                            }],
                             instructions: vec![],
                             terminator: NativeSsaScalarTerminator::Return { value: "5".into() },
                         },
@@ -388,14 +527,22 @@ mod tests {
         assert!(source.contains("mncs_dep__echo"));
         assert!(source.contains("mncs_app__run"));
 
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let dir = std::env::temp_dir().join(format!("mncs-native-ssa-c11-{}-{nonce}", std::process::id()));
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "mncs-native-ssa-c11-{}-{nonce}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let module_path = dir.join("module.c");
         let driver_path = dir.join("driver.c");
         let executable_path = dir.join("run");
         std::fs::write(&module_path, source).unwrap();
-        std::fs::write(&driver_path, r#"#include <stdint.h>
+        std::fs::write(
+            &driver_path,
+            r#"#include <stdint.h>
 extern void mncs_app__run(uint8_t, uint64_t, int32_t *, int64_t *, uint64_t);
 int main(void) {
   int32_t status = 0;
@@ -406,9 +553,15 @@ int main(void) {
   if (status || value != 81) return 2;
   return 0;
 }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-        let compiler = if std::process::Command::new("clang").arg("--version").output().is_ok() {
+        let compiler = if std::process::Command::new("clang")
+            .arg("--version")
+            .output()
+            .is_ok()
+        {
             "clang"
         } else {
             "cc"
@@ -422,8 +575,14 @@ int main(void) {
             .arg(&executable_path)
             .output()
             .unwrap();
-        assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
-        let executed = std::process::Command::new(&executable_path).status().unwrap();
+        assert!(
+            compiled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
+        let executed = std::process::Command::new(&executable_path)
+            .status()
+            .unwrap();
         assert!(executed.success());
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -447,8 +606,14 @@ int main(void) {
         module.functions.push(NativeSsaScalarFunction {
             identity: "mncs:0.2:function:app::arith".into(),
             params: vec![
-                NativeSsaScalarValue { id: "0".into(), ty: NativeSsaScalarType::U64 },
-                NativeSsaScalarValue { id: "1".into(), ty: NativeSsaScalarType::U64 },
+                NativeSsaScalarValue {
+                    id: "0".into(),
+                    ty: NativeSsaScalarType::U64,
+                },
+                NativeSsaScalarValue {
+                    id: "1".into(),
+                    ty: NativeSsaScalarType::U64,
+                },
             ],
             result_type: NativeSsaScalarType::U64,
             blocks: vec![NativeSsaScalarBlock {
@@ -456,14 +621,20 @@ int main(void) {
                 params: vec![],
                 instructions: vec![
                     NativeSsaScalarInstruction::Integer {
-                        dest: NativeSsaScalarValue { id: "2".into(), ty: NativeSsaScalarType::U64 },
+                        dest: NativeSsaScalarValue {
+                            id: "2".into(),
+                            ty: NativeSsaScalarType::U64,
+                        },
                         operator: "add".into(),
                         intent: ArithmeticIntent::Checked,
                         lhs: "0".into(),
                         rhs: "1".into(),
                     },
                     NativeSsaScalarInstruction::Integer {
-                        dest: NativeSsaScalarValue { id: "3".into(), ty: NativeSsaScalarType::U64 },
+                        dest: NativeSsaScalarValue {
+                            id: "3".into(),
+                            ty: NativeSsaScalarType::U64,
+                        },
                         operator: "mul".into(),
                         intent: ArithmeticIntent::Wrapping,
                         lhs: "2".into(),
@@ -484,14 +655,22 @@ int main(void) {
         // withheld no-overflow promise never trims it.
         assert!(source.contains("mncs_wide"));
 
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let dir = std::env::temp_dir().join(format!("mncs-native-ssa-arith-{}-{nonce}", std::process::id()));
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "mncs-native-ssa-arith-{}-{nonce}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let module_path = dir.join("module.c");
         let driver_path = dir.join("driver.c");
         let executable_path = dir.join("run");
         std::fs::write(&module_path, source).unwrap();
-        std::fs::write(&driver_path, r#"#include <stdint.h>
+        std::fs::write(
+            &driver_path,
+            r#"#include <stdint.h>
 extern void mncs_app__arith(uint64_t, uint64_t, int32_t *, int64_t *, uint64_t);
 int main(void) {
   int32_t status = 0;
@@ -511,9 +690,15 @@ int main(void) {
   if (!status) return 4;
   return 0;
 }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-        let compiler = if std::process::Command::new("clang").arg("--version").output().is_ok() {
+        let compiler = if std::process::Command::new("clang")
+            .arg("--version")
+            .output()
+            .is_ok()
+        {
             "clang"
         } else {
             "cc"
@@ -527,8 +712,14 @@ int main(void) {
             .arg(&executable_path)
             .output()
             .unwrap();
-        assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
-        let executed = std::process::Command::new(&executable_path).status().unwrap();
+        assert!(
+            compiled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
+        let executed = std::process::Command::new(&executable_path)
+            .status()
+            .unwrap();
         assert!(executed.success());
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -538,7 +729,10 @@ int main(void) {
         // Unknown operator.
         let mut module = arithmetic_module();
         module.functions[2].blocks[0].instructions[0] = NativeSsaScalarInstruction::Integer {
-            dest: NativeSsaScalarValue { id: "2".into(), ty: NativeSsaScalarType::U64 },
+            dest: NativeSsaScalarValue {
+                id: "2".into(),
+                ty: NativeSsaScalarType::U64,
+            },
             operator: "pow".into(),
             intent: ArithmeticIntent::Checked,
             lhs: "0".into(),
@@ -549,7 +743,10 @@ int main(void) {
         // Widening intent cannot ride the fixed-cell scalar envelope.
         let mut module = arithmetic_module();
         module.functions[2].blocks[0].instructions[0] = NativeSsaScalarInstruction::Integer {
-            dest: NativeSsaScalarValue { id: "2".into(), ty: NativeSsaScalarType::U64 },
+            dest: NativeSsaScalarValue {
+                id: "2".into(),
+                ty: NativeSsaScalarType::U64,
+            },
             operator: "add".into(),
             intent: ArithmeticIntent::Widening { bits: 128 },
             lhs: "0".into(),
@@ -560,7 +757,10 @@ int main(void) {
         // Non-u64 destination.
         let mut module = arithmetic_module();
         module.functions[2].blocks[0].instructions[0] = NativeSsaScalarInstruction::Integer {
-            dest: NativeSsaScalarValue { id: "2".into(), ty: NativeSsaScalarType::Bool },
+            dest: NativeSsaScalarValue {
+                id: "2".into(),
+                ty: NativeSsaScalarType::Bool,
+            },
             operator: "add".into(),
             intent: ArithmeticIntent::Checked,
             lhs: "0".into(),

@@ -515,15 +515,17 @@ impl Session {
         }
         Ok(unique
             .into_iter()
-            .map(|(type_identity, (_contract, name, kind, variants))| CompositeTypeInfo {
-                reference: CompositeReference {
-                    artifact_identity: artifact.identity.clone(),
-                    type_identity,
+            .map(
+                |(type_identity, (_contract, name, kind, variants))| CompositeTypeInfo {
+                    reference: CompositeReference {
+                        artifact_identity: artifact.identity.clone(),
+                        type_identity,
+                    },
+                    name: name.clone(),
+                    kind,
+                    variants: variants.clone(),
                 },
-                name: name.clone(),
-                kind,
-                variants: variants.clone(),
-            })
+            )
             .collect())
     }
 
@@ -590,12 +592,8 @@ impl Session {
         value: &HostExecutionValue,
     ) -> Result<ExecutionValue, EmbedError> {
         let artifact = self.verify_composite_reference(reference)?;
-        mncs_codegen::project_host_value_for_artifact(
-            artifact,
-            &reference.type_identity,
-            value,
-        )
-        .map_err(|error| EmbedError::new("bad_structured_projection", error))
+        mncs_codegen::project_host_value_for_artifact(artifact, &reference.type_identity, value)
+            .map_err(|error| EmbedError::new("bad_structured_projection", error))
     }
 
     /// Publish a typed nominal value as deterministic structured JSON using
@@ -644,9 +642,7 @@ impl Session {
         let Some(contract) = matches.next() else {
             return Err(EmbedError::new(
                 "unknown_composite_identity",
-                format!(
-                    "composite identity {type_identity} is not present in the loaded artifact"
-                ),
+                format!("composite identity {type_identity} is not present in the loaded artifact"),
             ));
         };
         if matches.any(|candidate| candidate != contract) {
@@ -1337,9 +1333,7 @@ pub unsafe extern "C" fn mncs_session_info(handle: *const Session) -> *mut CallR
 ///
 /// `handle` must be NULL or a live session handle.
 #[no_mangle]
-pub unsafe extern "C" fn mncs_session_composite_types(
-    handle: *const Session,
-) -> *mut CallResponse {
+pub unsafe extern "C" fn mncs_session_composite_types(handle: *const Session) -> *mut CallResponse {
     if handle.is_null() {
         stash_error("null session handle".to_owned());
         return ptr::null_mut();
@@ -1389,7 +1383,9 @@ pub unsafe extern "C" fn mncs_session_project_value(
     let request: ProjectionRequest = match serde_json::from_str(&text) {
         Ok(request) => request,
         Err(error) => {
-            stash_error(format!("structured projection request JSON rejected: {error}"));
+            stash_error(format!(
+                "structured projection request JSON rejected: {error}"
+            ));
             return ptr::null_mut();
         }
     };
@@ -1442,7 +1438,9 @@ pub unsafe extern "C" fn mncs_session_serialize_value(
     let request: SerializationRequest = match serde_json::from_str(&text) {
         Ok(request) => request,
         Err(error) => {
-            stash_error(format!("structured serialization request JSON rejected: {error}"));
+            stash_error(format!(
+                "structured serialization request JSON rejected: {error}"
+            ));
             return ptr::null_mut();
         }
     };

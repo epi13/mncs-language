@@ -358,7 +358,7 @@ fn declaration_only_record_short_name_keeps_identity_in_ssa() {
         ssa.functions[0].inputs[0].ty, expected,
         "SSA keeps nominal identity"
     );
-    assert_eq!(ssa.schema_version, "0.5");
+    assert_eq!(ssa.schema_version, mncs_model::SSA_SCHEMA_VERSION);
     assert!(ssa.validate().valid);
     assert!(ssa.validate_lowering_boundary(&program).valid);
 }
@@ -378,27 +378,48 @@ fn both(a: i32, flag: bool) -> (result: i32) {
     )
     .expect("legacy fixture elaborates");
     let mut module = program.lower_to_ssa().expect("SSA lowers");
-    assert_eq!(module.schema_version, "0.5");
+    assert_eq!(module.schema_version, mncs_model::SSA_SCHEMA_VERSION);
     let mut legacy_json = serde_json::to_string(&module).expect("SSA serializes");
-    // Rewrite current typed shapes into pre-0.5 `IrType::Named` spellings.
+    // Rewrite current typed shapes and schema into the pre-typed 0.4 form.
     assert!(legacy_json.contains(r#""ty":"bool""#));
     legacy_json = legacy_json.replace(r#""ty":"bool""#, r#""ty":{"Named":"bool"}"#);
-    assert!(legacy_json.contains(r#""schema_version":"0.5""#));
-    legacy_json = legacy_json.replace(r#""schema_version":"0.5""#, r#""schema_version":"0.4""#);
+    let current_schema = format!(r#""schema_version":"{}""#, mncs_model::SSA_SCHEMA_VERSION);
+    let legacy_schema = format!(
+        r#""schema_version":"{}""#,
+        mncs_model::SSA_SCHEMA_VERSION_PRE_TYPED
+    );
+    assert!(legacy_json.contains(&current_schema));
+    legacy_json = legacy_json.replace(&current_schema, &legacy_schema);
     let mut legacy: mncs_model::SsaModule =
         serde_json::from_str(&legacy_json).expect("legacy SSA still deserializes");
-    assert_eq!(legacy.schema_version, "0.4");
-    legacy.normalize_legacy_types();
-    assert_eq!(legacy.schema_version, "0.5");
     assert_eq!(
-        legacy, module,
-        "normalization round-trips to the emitted module"
+        legacy.schema_version,
+        mncs_model::SSA_SCHEMA_VERSION_PRE_TYPED
+    );
+    legacy.normalize_legacy_types();
+    assert_eq!(
+        legacy.schema_version,
+        mncs_model::SSA_SCHEMA_VERSION_PRE_FINITE_TYPES
+    );
+    let mut expected_module = module.clone();
+    expected_module.schema_version = mncs_model::SSA_SCHEMA_VERSION_PRE_FINITE_TYPES.to_owned();
+    assert_eq!(
+        legacy, expected_module,
+        "normalization round-trips while preserving the previous schema contract"
     );
     assert!(legacy.validate().valid);
     assert!(legacy.validate_lowering_boundary(&program).valid);
+    let mut pre_finite = module.clone();
+    pre_finite.schema_version = mncs_model::SSA_SCHEMA_VERSION_PRE_FINITE_TYPES.to_owned();
+    pre_finite.normalize_legacy_types();
+    assert_eq!(
+        pre_finite.schema_version,
+        mncs_model::SSA_SCHEMA_VERSION_PRE_FINITE_TYPES,
+        "older typed SSA must not claim the finite-type metadata contract"
+    );
     // Normalization is idempotent on current modules.
     module.normalize_legacy_types();
-    assert_eq!(module.schema_version, "0.5");
+    assert_eq!(module.schema_version, mncs_model::SSA_SCHEMA_VERSION);
 }
 
 #[test]

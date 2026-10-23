@@ -943,7 +943,10 @@ impl SsaExecutionSession {
         } else {
             module
         };
-        if module.schema_version != crate::SSA_SCHEMA_VERSION {
+        if !matches!(
+            module.schema_version.as_str(),
+            crate::SSA_SCHEMA_VERSION | crate::SSA_SCHEMA_VERSION_PRE_FINITE_TYPES
+        ) {
             return Err("unsupported SSA schema version".to_owned());
         }
         let program_identity = program_id(&program.module);
@@ -1163,7 +1166,12 @@ fn execute_ssa_module_with_validation(
             ),
         );
     }
-    if validate_artifact && module.schema_version != crate::SSA_SCHEMA_VERSION {
+    if validate_artifact
+        && !matches!(
+            module.schema_version.as_str(),
+            crate::SSA_SCHEMA_VERSION | crate::SSA_SCHEMA_VERSION_PRE_FINITE_TYPES
+        )
+    {
         return SsaExecutionResult::invalid(request, "unsupported SSA schema version");
     }
     if validate_artifact && module.semantic_identity != program_id(&program.module) {

@@ -111,8 +111,10 @@ fn source_impact_exposes_subject_identity_without_test_inventory() {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system clock")
         .as_nanos();
-    let source = std::env::temp_dir()
-        .join(format!("mncs-impact-subject-{}-{stamp}.mncs", std::process::id()));
+    let source = std::env::temp_dir().join(format!(
+        "mncs-impact-subject-{}-{stamp}.mncs",
+        std::process::id()
+    ));
     std::fs::write(
         &source,
         "mncs 0.18; module test.subject; fn hello() -> (result: u64) { return 1; }",
@@ -122,10 +124,7 @@ fn source_impact_exposes_subject_identity_without_test_inventory() {
     let output = binary()
         .arg("impact")
         .arg(&source)
-        .args([
-            "--root",
-            "mncs:0.18:function:test.subject::hello",
-        ])
+        .args(["--root", "mncs:0.18:function:test.subject::hello"])
         .output()
         .expect("run source impact without test inventory");
     let _ = std::fs::remove_file(&source);
@@ -138,8 +137,17 @@ fn source_impact_exposes_subject_identity_without_test_inventory() {
     let report: Value = serde_json::from_slice(&output.stdout).expect("impact JSON");
     assert_eq!(report["source_subject"]["module"], "test.subject");
     assert_eq!(report["source_subject"]["source_profile"], "0.18");
-    assert_eq!(report["source_subject"]["subject_identity"], "mncs:0.2:program:test.subject");
-    assert_eq!(report["source_subject"]["subject_fingerprint"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        report["source_subject"]["subject_identity"],
+        "mncs:0.2:program:test.subject"
+    );
+    assert_eq!(
+        report["source_subject"]["subject_fingerprint"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
     assert!(report["source_test_inventory"].is_null());
 }
 
@@ -704,7 +712,7 @@ fn executable_body_trace_and_verifier_artifact_commands_are_bound() {
         .expect("run body SSA");
     assert!(ssa.status.success());
     let ssa_json: Value = serde_json::from_slice(&ssa.stdout).expect("SSA JSON");
-    assert_eq!(ssa_json["schema_version"], "0.5");
+    assert_eq!(ssa_json["schema_version"], mncs_model::SSA_SCHEMA_VERSION);
     assert_eq!(ssa_json["functions"].as_array().unwrap().len(), 1);
     assert!(!ssa_json["trace"]["entries"].as_array().unwrap().is_empty());
 

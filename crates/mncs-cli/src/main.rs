@@ -31,15 +31,14 @@ use mncs_embed::{
     ProviderRegistry, Session as EmbedSession,
 };
 use mncs_model::{
-    process::MAX_ENVIRONMENT_BYTES, compare_body_and_ssa, compare_execution, execute_observed,
-    execute_ssa, execute_with_policy,
-    ArtifactRepresentation, CandidateEvaluation, CausalSlice, ComparisonStatus, CompilationResult,
-    CompilationStatus, CompilationStudyRequest, CompilationStudyResult, Confidence,
-    DeterministicVerifier, DiagnosticCategory, DiagnosticObligation, EvidenceFreshness,
-    EvidenceManifest, EvidenceState, ExecutionComparison, ExecutionCorpus,
-    ExecutionObservationPolicy, ExecutionProperty, ExecutionRequest, ExecutionStatus,
-    ExecutionValue, FunctionBody, HostExecutionValue, HostGrant, LanguageExperimentCaseObservation,
-    LanguageExperimentComparison, LanguageExperimentDefinition,
+    compare_body_and_ssa, compare_execution, execute_observed, execute_ssa, execute_with_policy,
+    process::MAX_ENVIRONMENT_BYTES, ArtifactRepresentation, CandidateEvaluation, CausalSlice,
+    ComparisonStatus, CompilationResult, CompilationStatus, CompilationStudyRequest,
+    CompilationStudyResult, Confidence, DeterministicVerifier, DiagnosticCategory,
+    DiagnosticObligation, EvidenceFreshness, EvidenceManifest, EvidenceState, ExecutionComparison,
+    ExecutionCorpus, ExecutionObservationPolicy, ExecutionProperty, ExecutionRequest,
+    ExecutionStatus, ExecutionValue, FunctionBody, HostExecutionValue, HostGrant,
+    LanguageExperimentCaseObservation, LanguageExperimentComparison, LanguageExperimentDefinition,
     LanguageExperimentPropertyObservation, LanguageExperimentResult,
     LanguageExperimentStatefulCaseObservation, LoweringExecutionComparison,
     LoweringExecutionStatus, ObligationStatus, ObservationCapturePolicy, ObservedExecutionResult,
@@ -94,7 +93,13 @@ const CLI_WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 fn main() -> ExitCode {
     if env::args().nth(1).as_deref() == Some("--build-info") && env::args().nth(2).is_none() {
-        println!("{}", include_str!(concat!(env!("OUT_DIR"), "/mncs-language-build-receipt.json")));
+        println!(
+            "{}",
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/mncs-language-build-receipt.json"
+            ))
+        );
         return ExitCode::SUCCESS;
     }
     std::thread::Builder::new()

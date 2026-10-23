@@ -10,17 +10,17 @@ use std::fmt::Write;
 use mncs_model::{
     ArithmeticIntent, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
     BackendIdentity, BackendResult, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SSA_SCHEMA_VERSION,
-    SsaModule, TargetContractRef, TargetLoweringPlan, TransformationStatus,
+    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SsaModule,
+    TargetContractRef, TargetLoweringPlan, TransformationStatus, SSA_SCHEMA_VERSION,
 };
 
 use crate::native::{
-    NativeExecutable, ToolchainIdentity, argv_from_request, compile_and_run_with_call_file_full,
-    host_matches_triple, host_triple, probe_clang, probe_llc,
+    argv_from_request, compile_and_run_with_call_file_full, host_matches_triple, host_triple,
+    probe_clang, probe_llc, NativeExecutable, ToolchainIdentity,
 };
 use crate::scalar::{
-    ScalarBlock, ScalarFunction, ScalarInst, ScalarModule, ScalarTerm, ScalarTy, ScalarValue,
-    abi_bits, llvm_type, lower_to_scalar,
+    abi_bits, llvm_type, lower_to_scalar, ScalarBlock, ScalarFunction, ScalarInst, ScalarModule,
+    ScalarTerm, ScalarTy, ScalarValue,
 };
 use crate::support::NATIVE_ARENA_BYTES as NATIVE_ARENA_LEN;
 use crate::support::{

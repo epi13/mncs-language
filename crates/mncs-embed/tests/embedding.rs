@@ -90,8 +90,8 @@ fn typed_batch_calls_share_one_retained_session() {
 #[test]
 fn cold_warm_retained_and_batch_costs_are_reported() {
     let compile_started = Instant::now();
-    let artifact = Artifact::from_source(SOURCE, "mncs-research-bytecode")
-        .expect("compile probe artifact");
+    let artifact =
+        Artifact::from_source(SOURCE, "mncs-research-bytecode").expect("compile probe artifact");
     let compile_ms = compile_started.elapsed().as_secs_f64() * 1000.0;
 
     let open_started = Instant::now();

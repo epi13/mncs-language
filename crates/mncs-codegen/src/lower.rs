@@ -452,9 +452,10 @@ pub(crate) fn cell_copy_shape_for_ty(
             if !visiting.insert(key.clone()) {
                 return false;
             }
-            let found = record.fields.iter().any(|field| {
-                contains_view(&field.field_type, program, visiting)
-            });
+            let found = record
+                .fields
+                .iter()
+                .any(|field| contains_view(&field.field_type, program, visiting));
             visiting.remove(&key);
             return found;
         }
@@ -468,9 +469,10 @@ pub(crate) fn cell_copy_shape_for_ty(
                 return false;
             }
             let found = finite.variants.iter().any(|variant| {
-                variant.payload.iter().any(|field| {
-                    contains_view(&field.field_type, program, visiting)
-                })
+                variant
+                    .payload
+                    .iter()
+                    .any(|field| contains_view(&field.field_type, program, visiting))
             });
             visiting.remove(&key);
             return found;

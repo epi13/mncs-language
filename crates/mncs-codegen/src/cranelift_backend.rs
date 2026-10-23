@@ -2318,9 +2318,9 @@ fn clif_flatten_cell<M: cranelift_module::Module>(
     scratch: cranelift_codegen::ir::StackSlot,
     base: u32,
 ) -> Result<u32, String> {
+    use crate::lower::CopyShape;
     use cranelift_codegen::ir::condcodes::IntCC;
     use cranelift_codegen::ir::{BlockArg, InstBuilder};
-    use crate::lower::CopyShape;
     match shape {
         CopyShape::Word(_) => {
             clif_scratch_store(builder, scratch, base, cell);
@@ -2329,13 +2329,7 @@ fn clif_flatten_cell<M: cranelift_module::Module>(
         CopyShape::Record(fields) => {
             let mut used = 0;
             for (index, (width, nested)) in fields.iter().enumerate() {
-                let loaded = clif_slot_load(
-                    module,
-                    builder,
-                    cell,
-                    index as u32 * 8,
-                    *width,
-                );
+                let loaded = clif_slot_load(module, builder, cell, index as u32 * 8, *width);
                 match nested {
                     CopyShape::Word(_) => {
                         clif_scratch_store(builder, scratch, base + used, loaded);
@@ -2358,13 +2352,7 @@ fn clif_flatten_cell<M: cranelift_module::Module>(
             Ok(used)
         }
         CopyShape::Finite(variants) => {
-            let tag = clif_slot_load(
-                module,
-                builder,
-                cell,
-                0,
-                crate::composite::SlotWidth::W32,
-            );
+            let tag = clif_slot_load(module, builder, cell, 0, crate::composite::SlotWidth::W32);
             clif_scratch_store(builder, scratch, base, tag);
             let join = builder.create_block();
             let mut max_payload = 0;
@@ -2384,13 +2372,8 @@ fn clif_flatten_cell<M: cranelift_module::Module>(
                 builder.switch_to_block(case);
                 let mut used = 0;
                 for (field_index, (width, nested)) in payload.iter().enumerate() {
-                    let loaded = clif_slot_load(
-                        module,
-                        builder,
-                        cell,
-                        (field_index as u32 + 1) * 8,
-                        *width,
-                    );
+                    let loaded =
+                        clif_slot_load(module, builder, cell, (field_index as u32 + 1) * 8, *width);
                     match nested {
                         CopyShape::Word(_) => {
                             clif_scratch_store(builder, scratch, base + 1 + used, loaded);
@@ -2469,9 +2452,9 @@ fn clif_rebuild_cell<M: cranelift_module::Module>(
     scratch: cranelift_codegen::ir::StackSlot,
     base: u32,
 ) -> Result<cranelift_codegen::ir::Value, String> {
+    use crate::lower::CopyShape;
     use cranelift_codegen::ir::condcodes::IntCC;
     use cranelift_codegen::ir::{types, BlockArg, InstBuilder};
-    use crate::lower::CopyShape;
     match shape {
         CopyShape::Word(_) => Ok(clif_scratch_load(builder, scratch, base)),
         CopyShape::Record(fields) => {
@@ -2492,13 +2475,8 @@ fn clif_rebuild_cell<M: cranelift_module::Module>(
                         // The first scratch word is the old reference. It is
                         // intentionally ignored; the rebuilt child is new.
                         used += 1;
-                        let child = clif_rebuild_cell(
-                            module,
-                            builder,
-                            nested,
-                            scratch,
-                            base + used,
-                        )?;
+                        let child =
+                            clif_rebuild_cell(module, builder, nested, scratch, base + used)?;
                         clif_slot_store(module, builder, cell, index as u32 * 8, *width, child);
                         used += crate::lower::flatten_words(nested);
                     }
@@ -2590,21 +2568,9 @@ fn clif_rebuild_cell<M: cranelift_module::Module>(
                     }
                     nested => {
                         used += 1;
-                        let child = clif_rebuild_cell(
-                            module,
-                            builder,
-                            nested,
-                            scratch,
-                            base + used,
-                        )?;
-                        clif_slot_store(
-                            module,
-                            builder,
-                            cell,
-                            offset,
-                            lane_width,
-                            child,
-                        );
+                        let child =
+                            clif_rebuild_cell(module, builder, nested, scratch, base + used)?;
+                        clif_slot_store(module, builder, cell, offset, lane_width, child);
                         used += crate::lower::flatten_words(nested);
                     }
                 }
@@ -2669,9 +2635,7 @@ where
                     .iter()
                     .flat_map(|block| flatten_scalar(&block.insts))
                     .filter_map(|inst| match inst {
-                        ScalarInst::Call { dest, callee, .. }
-                            if dest.ty == ScalarTy::Cell =>
-                        {
+                        ScalarInst::Call { dest, callee, .. } if dest.ty == ScalarTy::Cell => {
                             call_copy_shapes
                                 .get(callee)
                                 .map(crate::lower::flatten_words)
@@ -2683,13 +2647,11 @@ where
                 None
             };
             let call_copy_scratch = call_copy_words.map(|words| {
-                builder.create_sized_stack_slot(
-                    cranelift_codegen::ir::StackSlotData::new(
-                        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                        words.max(1).saturating_mul(8),
-                        0,
-                    ),
-                )
+                builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                    cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                    words.max(1).saturating_mul(8),
+                    0,
+                ))
             });
             let mut blocks = BTreeMap::new();
             let mut values: BTreeMap<SemanticId, Value> = BTreeMap::new();
@@ -3972,8 +3934,7 @@ where
                                 && (dest.ty != ScalarTy::Cell || result_shape.is_some())
                                 && dest.ty != ScalarTy::View
                             {
-                                let cursor =
-                                    cell_libcall(module, builder.func, "mncs_cell_cursor");
+                                let cursor = cell_libcall(module, builder.func, "mncs_cell_cursor");
                                 let call = builder.ins().call(cursor, &[]);
                                 Some(builder.inst_results(call)[0])
                             } else {
@@ -4008,11 +3969,7 @@ where
                             );
                             builder.switch_to_block(propagate);
                             if let Some(mark) = region_mark {
-                                let reset = cell_libcall(
-                                    module,
-                                    builder.func,
-                                    "mncs_cell_reset",
-                                );
+                                let reset = cell_libcall(module, builder.func, "mncs_cell_reset");
                                 builder.ins().call(reset, &[mark]);
                             }
                             builder.seal_block(propagate);
@@ -4040,19 +3997,14 @@ where
                                         &[] as &[BlockArg],
                                     );
                                     builder.switch_to_block(keep_block);
-                                    let reset = cell_libcall(
-                                        module,
-                                        builder.func,
-                                        "mncs_cell_reset",
-                                    );
+                                    let reset =
+                                        cell_libcall(module, builder.func, "mncs_cell_reset");
                                     builder.ins().call(reset, &[mark]);
-                                    builder.ins().jump(
-                                        merge_block,
-                                        &[BlockArg::Value(loaded)],
-                                    );
+                                    builder.ins().jump(merge_block, &[BlockArg::Value(loaded)]);
                                     builder.switch_to_block(copy_block);
                                     let scratch = call_copy_scratch.ok_or_else(|| {
-                                        "cell call-result copy has no bounded scratch slot".to_owned()
+                                        "cell call-result copy has no bounded scratch slot"
+                                            .to_owned()
                                     })?;
                                     let words = crate::lower::flatten_words(shape);
                                     let zero = builder.ins().iconst(types::I64, 0);
@@ -4072,23 +4024,12 @@ where
                                             "cell copy shape scratch mismatch: flattened {flattened} word(s), expected {words}"
                                         ));
                                     }
-                                    let reset = cell_libcall(
-                                        module,
-                                        builder.func,
-                                        "mncs_cell_reset",
-                                    );
+                                    let reset =
+                                        cell_libcall(module, builder.func, "mncs_cell_reset");
                                     builder.ins().call(reset, &[mark]);
-                                    let copied = clif_rebuild_cell(
-                                        module,
-                                        &mut builder,
-                                        shape,
-                                        scratch,
-                                        0,
-                                    )?;
-                                    builder.ins().jump(
-                                        merge_block,
-                                        &[BlockArg::Value(copied)],
-                                    );
+                                    let copied =
+                                        clif_rebuild_cell(module, &mut builder, shape, scratch, 0)?;
+                                    builder.ins().jump(merge_block, &[BlockArg::Value(copied)]);
                                     builder.switch_to_block(merge_block);
                                     builder.seal_block(copy_block);
                                     builder.seal_block(keep_block);
@@ -4097,11 +4038,8 @@ where
                                     values.insert(dest.id.clone(), rebased);
                                 }
                                 (Some(mark), None) => {
-                                    let reset = cell_libcall(
-                                        module,
-                                        builder.func,
-                                        "mncs_cell_reset",
-                                    );
+                                    let reset =
+                                        cell_libcall(module, builder.func, "mncs_cell_reset");
                                     builder.ins().call(reset, &[mark]);
                                     values.insert(dest.id.clone(), loaded);
                                 }
@@ -5087,9 +5025,7 @@ mod call_region_tests {
                 id: id(&format!("{name}.entry")),
                 params: Vec::new(),
                 insts,
-                term: ScalarTerm::Return {
-                    value: result.id,
-                },
+                term: ScalarTerm::Return { value: result.id },
             }],
             promises: Vec::new(),
             promise_decisions: Vec::new(),
@@ -5234,13 +5170,8 @@ mod call_region_tests {
         if let Some(linker) = crate::native::probe_clang().or_else(crate::native::probe_gcc) {
             let object = aot_object_bytes_with_call_regions(&scalar, &copy_shapes, true)
                 .expect("emit AOT object with call regions");
-            let driver = crate::support::process_driver_cell_runtime(
-                "mncs_main",
-                &[],
-                None,
-                0,
-                4_096,
-            );
+            let driver =
+                crate::support::process_driver_cell_runtime("mncs_main", &[], None, 0, 4_096);
             let run = crate::native::compile_object_and_run_full(
                 "mncs.o",
                 &object,
