@@ -679,15 +679,23 @@ impl SourceLocationMap {
         lines: &SourceLineIndex,
     ) -> Option<SourceSpan> {
         let is_document_span = span.start == 0 && span.end == old_source_length;
-        let start = if is_document_span {
-            0
+        let (start, end) = if is_document_span {
+            (0, new_source.len())
+        } else if span.start == span.end {
+            let position = if span.start == old_source_length {
+                new_source.len()
+            } else {
+                self.starts
+                    .get(&span.start)
+                    .or_else(|| self.ends.get(&span.start))
+                    .copied()?
+            };
+            (position, position)
         } else {
-            self.starts.get(&span.start).copied()?
-        };
-        let end = if is_document_span {
-            new_source.len()
-        } else {
-            self.ends.get(&span.end).copied()?
+            (
+                self.starts.get(&span.start).copied()?,
+                self.ends.get(&span.end).copied()?,
+            )
         };
         if start > end
             || end > new_source.len()
@@ -881,7 +889,14 @@ fn rebase_span_values(
     match value {
         serde_json::Value::Object(object) => {
             let span_fields = ["start", "end", "line", "column"];
-            if span_fields.iter().any(|field| object.contains_key(*field)) {
+            let is_source_span = object.len() == span_fields.len()
+                && span_fields.iter().all(|field| {
+                    object
+                        .get(*field)
+                        .and_then(serde_json::Value::as_u64)
+                        .is_some()
+                });
+            if is_source_span {
                 let read_usize = |field: &str| {
                     object
                         .get(field)
@@ -1262,6 +1277,47 @@ mod tests {
         assert_eq!(
             serialized_sha256_with_limit(output, exact_output_size - 1),
             None
+        );
+    }
+
+    #[test]
+    fn parse_cache_reuses_comment_only_edit_in_digest_app_root_source() {
+        // Regression fixture from mncs-test digest.mncs at source SHA-256
+        // fa45534cdebb4de683675bfb70eed15cfa177a5198f036c0e3b7fcab68b91c30.
+        let source = include_str!("../tests/fixtures/digest-app-root.mncs");
+        let original =
+            SourceEnvelope::inline(SourceArtifactKind::Program, "mncs.test.digest", source);
+        let mut cache = SourceParseCache::default();
+        let mut cold_observation = SourceParseCacheObservation::default();
+        let previous = cache.parse(&original, &mut cold_observation);
+        assert!(previous.is_valid(), "{:?}", previous.diagnostics);
+
+        let changed = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "mncs.test.digest",
+            format!("// π root-only source location refresh\n{source}\n// trailing comment\n"),
+        );
+        let mut observation = SourceParseCacheObservation::default();
+        let reused = cache.parse(&changed, &mut observation);
+        let freshly_parsed = mncs_syntax::parse(&changed);
+
+        assert!(reused.is_valid(), "{:?}", reused.diagnostics);
+        assert_eq!(reused, freshly_parsed);
+        assert_eq!(
+            observation.reused_same_significant_tokens_source_identities,
+            [changed.identity.clone()]
+        );
+        assert!(observation.reused_source_identities.is_empty());
+        assert!(observation.parsed_source_identities.is_empty());
+        assert_eq!(observation.published_entry_count, 0);
+        assert_eq!(reused.lexical.reconstruct(), changed.text);
+        assert_eq!(reused.cst.reconstruct(), changed.text);
+        assert_eq!(reused.cst.source_identity, changed.identity);
+        assert_eq!(reused.cst.source_length, changed.text.len());
+        assert_eq!(reused.cst.tokens, reused.lexical.tokens);
+        assert_ne!(
+            reused.ast.as_ref().expect("valid AST").functions[0].span,
+            previous.ast.as_ref().expect("valid original AST").functions[0].span
         );
     }
 }

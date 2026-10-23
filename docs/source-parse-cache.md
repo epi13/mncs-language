@@ -15,11 +15,14 @@ identity on the returned lexical, CST, and AST artifacts. For changed source
 text, Language freshly lexes and compares every non-trivia token. If the token
 stream and all parser assumptions are unchanged, it reuses the saved syntax
 tree while rebuilding current lexical tokens, CST token indexes, and AST and
-diagnostic source spans. An unmappable location or incomplete cache evidence
-falls back to a full parse. Invalid syntax can be reused only for identical
-parser inputs and returns the same diagnostics under the current source
-identity. A changed parser policy or damaged output digest causes a fresh
-parse.
+diagnostic source spans. Span rebasing recognizes the four numeric
+`SourceSpan` coordinates, so AST fields named `start` and `end` that hold
+expressions are traversed as ordinary AST values. Empty source points map to
+the next significant token start, the prior token end, or the new end of file;
+an unresolved point still falls back to a full parse. Invalid syntax can be
+reused only for identical parser inputs and returns the same diagnostics
+under the current source identity. A changed parser policy or damaged output
+digest causes a fresh parse.
 
 The caller-owned cache is bounded to 256 entries and 32 MiB. Least-recently
 used entries are evicted first, including when a restored cache exceeds the
