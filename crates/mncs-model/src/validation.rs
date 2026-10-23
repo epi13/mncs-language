@@ -642,7 +642,6 @@ impl Program {
                 };
                 let Some(basis) = self.body_fact_basis_with_dependency_index(
                     function,
-                    fact_identities.expect("request has semantic identities"),
                     fact_dependency_index
                         .as_ref()
                         .expect("request has semantic dependency index"),

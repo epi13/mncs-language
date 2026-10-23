@@ -7,7 +7,7 @@
 //! skips a body check. Source locations are carried separately and refreshed
 //! for every source snapshot.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -631,6 +631,36 @@ pub(crate) struct VerificationFactDependencyIndex<'a> {
     pub(crate) nominal_types: VerificationNominalTypeIndex<'a>,
     assumptions_by_name: BTreeMap<String, Vec<VerificationFactDependency>>,
     functions: BTreeMap<SemanticId, VerificationFunctionDependencySummary<'a>>,
+    specialization_fingerprints: BTreeMap<SemanticId, String>,
+}
+
+/// Fast per-snapshot access to semantic fingerprints. `SemanticIdentities`
+/// keeps its canonical ordered vector as the serialized contract, while
+/// dependency construction performs many point lookups across that vector.
+/// Keeping the index local avoids changing the public artifact shape or
+/// allocating copies of the identity strings.
+struct SemanticIdentityFingerprintIndex<'a> {
+    fingerprints: HashMap<&'a str, &'a str>,
+}
+
+impl<'a> SemanticIdentityFingerprintIndex<'a> {
+    fn new(identities: &'a SemanticIdentities) -> Self {
+        let mut fingerprints = HashMap::with_capacity(identities.objects.len());
+        for record in &identities.objects {
+            // `SemanticIdentities::fingerprint` returns the first record for
+            // duplicate identities. Preserve that behavior for invalid or
+            // partially elaborated programs while keeping lookup constant
+            // time for the normal unique-identity case.
+            fingerprints
+                .entry(record.identity.as_str())
+                .or_insert(record.fingerprint.as_str());
+        }
+        Self { fingerprints }
+    }
+
+    fn fingerprint(&self, identity: &SemanticId) -> Option<&'a str> {
+        self.fingerprints.get(identity.as_str()).copied()
+    }
 }
 
 /// Semantic references extracted once from one function body. A program-wide
@@ -762,6 +792,7 @@ impl Program {
         Option<VerificationDependencySummaryCacheObservation>,
     ) {
         let cache_enabled = dependency_summary_cache.is_some();
+        let identity_fingerprints = SemanticIdentityFingerprintIndex::new(identities);
         let mut dependency_summary_observation =
             VerificationDependencySummaryCacheObservation::default();
         let mut assumption_fingerprints = BTreeMap::<SemanticId, Vec<String>>::new();
@@ -867,7 +898,7 @@ impl Program {
                 let effect_and_capability_dependencies = self
                     .add_effect_and_capability_dependencies(
                         function,
-                        identities,
+                        &identity_fingerprints,
                         &mut effect_and_capability_dependencies,
                     )
                     .map(|()| effect_and_capability_dependencies);
@@ -887,7 +918,32 @@ impl Program {
                     },
                 )
             })
-            .collect();
+            .collect::<BTreeMap<SemanticId, VerificationFunctionDependencySummary<'a>>>();
+
+        // Specialization fingerprints depend only on this immutable program
+        // snapshot. Compute them once rather than searching the full identity
+        // vector again while each caller fact builds its dependency closure.
+        let mut relevant_specializations = BTreeMap::new();
+        for summary in functions.values() {
+            for (identity, specialization) in &summary.specializations {
+                relevant_specializations
+                    .entry(identity.clone())
+                    .or_insert(*specialization);
+            }
+        }
+        let mut specialization_fingerprints = BTreeMap::new();
+        for (identity, specialization) in relevant_specializations {
+            if let Some(fingerprint) = self.generic_specialization_fingerprint(
+                specialization,
+                &identity,
+                &identity_fingerprints,
+                &functions,
+            ) {
+                specialization_fingerprints
+                    .entry(identity)
+                    .or_insert(fingerprint);
+            }
+        }
 
         let dependency_summary_cache = cache_enabled.then(|| {
             dependency_summary_observation
@@ -906,6 +962,7 @@ impl Program {
                 nominal_types,
                 assumptions_by_name,
                 functions,
+                specialization_fingerprints,
             },
             dependency_summary_cache,
         )
@@ -1139,13 +1196,12 @@ impl Program {
             &function_index,
             &specialization_index,
         );
-        self.body_fact_basis_with_dependency_index(function, identities, &dependency_index)
+        self.body_fact_basis_with_dependency_index(function, &dependency_index)
     }
 
     pub(crate) fn body_fact_basis_with_dependency_index(
         &self,
         function: &Function,
-        identities: &SemanticIdentities,
         dependency_index: &VerificationFactDependencyIndex<'_>,
     ) -> Option<BodyFactBasis> {
         let body = function.body.as_ref()?;
@@ -1273,17 +1329,12 @@ impl Program {
             }
         }
 
-        for (identity, specialization) in relevant_specializations {
-            if let Some(fingerprint) = self.generic_specialization_fingerprint(
-                specialization,
-                &identity,
-                identities,
-                &dependency_index.functions,
-            ) {
+        for identity in relevant_specializations.keys() {
+            if let Some(fingerprint) = dependency_index.specialization_fingerprints.get(identity) {
                 dependencies.insert(VerificationFactDependency {
                     role: VerificationDependencyRole::GenericSpecialization,
-                    identity,
-                    fingerprint,
+                    identity: identity.clone(),
+                    fingerprint: fingerprint.clone(),
                 });
             }
         }
@@ -1310,7 +1361,7 @@ impl Program {
     fn add_effect_and_capability_dependencies(
         &self,
         function: &Function,
-        identities: &SemanticIdentities,
+        identities: &SemanticIdentityFingerprintIndex<'_>,
         dependencies: &mut BTreeSet<VerificationFactDependency>,
     ) -> Option<()> {
         let namespace = function.identity_namespace(&self.module);
@@ -1345,7 +1396,7 @@ impl Program {
         &self,
         specialization: &GenericSpecializationRecord,
         identity: &SemanticId,
-        identities: &SemanticIdentities,
+        identities: &SemanticIdentityFingerprintIndex<'_>,
         function_summaries: &BTreeMap<SemanticId, VerificationFunctionDependencySummary<'_>>,
     ) -> Option<String> {
         let record_fingerprint = identities.fingerprint(identity)?;
@@ -1958,6 +2009,37 @@ mod tests {
         BodyOperationKind, BodyTerminator, BodyType, BodyValue, FiniteVariant, RecordField,
         RecordType, Value,
     };
+
+    #[test]
+    fn fingerprint_index_matches_first_identity_record_for_sorted_and_unsorted_inputs() {
+        let first = crate::IdentityRecord {
+            identity: SemanticId("mncs:test:function:first".to_owned()),
+            kind: crate::IdentityKind::Function,
+            fingerprint: "first".to_owned(),
+        };
+        let duplicate = crate::IdentityRecord {
+            identity: first.identity.clone(),
+            kind: crate::IdentityKind::Function,
+            fingerprint: "duplicate".to_owned(),
+        };
+        let other = crate::IdentityRecord {
+            identity: SemanticId("mncs:test:function:other".to_owned()),
+            kind: crate::IdentityKind::Function,
+            fingerprint: "other".to_owned(),
+        };
+        let identities = SemanticIdentities {
+            schema_version: "test".to_owned(),
+            objects: vec![other, first.clone(), duplicate],
+        };
+        let index = SemanticIdentityFingerprintIndex::new(&identities);
+
+        assert_eq!(
+            index.fingerprint(&first.identity),
+            identities.fingerprint(&first.identity)
+        );
+        assert_eq!(index.fingerprint(&first.identity), Some("first"));
+        assert_eq!(index.fingerprint(&SemanticId("missing".to_owned())), None);
+    }
 
     fn request(profile: &str, prior_facts: Vec<VerificationFact>) -> VerificationFactRequest {
         VerificationFactRequest {
