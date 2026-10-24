@@ -2922,9 +2922,16 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(
             recomputed,
-            BTreeSet::from([caller_subject, callee_subject, downstream_subject,])
+            BTreeSet::from([caller_subject, callee_subject, downstream_subject.clone(),])
         );
         assert_eq!(result.reuse.reused, vec![independent_subject]);
+        assert!(
+            result
+                .facts
+                .iter()
+                .all(|fact| fact.subject != downstream_subject),
+            "a failed body must not return its prior successful verification fact"
+        );
     }
 
     #[test]
