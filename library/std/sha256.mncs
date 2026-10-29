@@ -198,6 +198,39 @@ fn finalize(st: DigestState, k: [u32; 64]) -> (result: [byte; 32]) {
     return state_to_bytes(h2);
 }
 
+// SHA-256's round constants are part of the standard algorithm, not caller
+// policy. Keep the canonical table in MNCS so consumers do not reproduce it
+// in their host adapters.
+fn standard_round_constants() -> (result: [u32; 64]) {
+    return [
+        1116352408, 1899447441, 3049323471, 3921009573,
+        961987163, 1508970993, 2453635748, 2870763221,
+        3624381080, 310598401, 607225278, 1426881987,
+        1925078388, 2162078206, 2614888103, 3248222580,
+        3835390401, 4022224774, 264347078, 604807628,
+        770255983, 1249150122, 1555081692, 1996064986,
+        2554220882, 2821834349, 2952996808, 3210313671,
+        3336571891, 3584528711, 113926993, 338241895,
+        666307205, 773529912, 1294757372, 1396182291,
+        1695183700, 1986661051, 2177026350, 2456956037,
+        2730485921, 2820302411, 3259730800, 3345764771,
+        3516065817, 3600352804, 4094571909, 275423344,
+        430227734, 506948616, 659060556, 883997877,
+        958139571, 1322822218, 1537002063, 1747873779,
+        1955562222, 2024104815, 2227730452, 2361852424,
+        2428436474, 2756734187, 3204031479, 3329325298
+    ];
+}
+
+// Standard SHA-256 entry points keep the algorithm constants inside MNCS.
+fn update_standard(st: DigestState, chunk: [byte; up_to 64], chunk_length: u64) -> (result: DigestState) {
+    return update(st, chunk, chunk_length, standard_round_constants());
+}
+
+fn finalize_standard(st: DigestState) -> (result: [byte; 32]) {
+    return finalize(st, standard_round_constants());
+}
+
 // Eight words to 32 big-endian bytes.
 fn state_to_bytes(h: [u32; 8]) -> (result: [byte; 32]) {
     let seed: [byte; 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -216,6 +249,13 @@ fn candidate_sha256_abc(chunk: [byte; up_to 64], chunk_length: u64, k: [u32; 64]
     let s0: DigestState = init();
     let s1: DigestState = update(s0, chunk, chunk_length, k);
     return finalize(s1, k);
+}
+
+// The standard-constant SHA-256("abc") entry point used by production consumers.
+fn candidate_sha256_abc_standard(chunk: [byte; up_to 64], chunk_length: u64) -> (result: [byte; 32]) {
+    let s0: DigestState = init();
+    let s1: DigestState = update_standard(s0, chunk, chunk_length);
+    return finalize_standard(s1);
 }
 
 // SHA-256 over three chunks (64 + 64 + remainder): the multi-block

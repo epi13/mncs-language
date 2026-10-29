@@ -3970,6 +3970,217 @@
      }
     }
    ]
+  },
+  {
+   "id": "sha256-abc-standard-constants",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.sha256.v1",
+     "function": "candidate_sha256_abc_standard"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 1000000
+   },
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 186
+        }
+       },
+       {
+        "byte": {
+         "value": 120
+        }
+       },
+       {
+        "byte": {
+         "value": 22
+        }
+       },
+       {
+        "byte": {
+         "value": 191
+        }
+       },
+       {
+        "byte": {
+         "value": 143
+        }
+       },
+       {
+        "byte": {
+         "value": 1
+        }
+       },
+       {
+        "byte": {
+         "value": 207
+        }
+       },
+       {
+        "byte": {
+         "value": 234
+        }
+       },
+       {
+        "byte": {
+         "value": 65
+        }
+       },
+       {
+        "byte": {
+         "value": 65
+        }
+       },
+       {
+        "byte": {
+         "value": 64
+        }
+       },
+       {
+        "byte": {
+         "value": 222
+        }
+       },
+       {
+        "byte": {
+         "value": 93
+        }
+       },
+       {
+        "byte": {
+         "value": 174
+        }
+       },
+       {
+        "byte": {
+         "value": 34
+        }
+       },
+       {
+        "byte": {
+         "value": 35
+        }
+       },
+       {
+        "byte": {
+         "value": 176
+        }
+       },
+       {
+        "byte": {
+         "value": 3
+        }
+       },
+       {
+        "byte": {
+         "value": 97
+        }
+       },
+       {
+        "byte": {
+         "value": 163
+        }
+       },
+       {
+        "byte": {
+         "value": 150
+        }
+       },
+       {
+        "byte": {
+         "value": 23
+        }
+       },
+       {
+        "byte": {
+         "value": 122
+        }
+       },
+       {
+        "byte": {
+         "value": 156
+        }
+       },
+       {
+        "byte": {
+         "value": 180
+        }
+       },
+       {
+        "byte": {
+         "value": 16
+        }
+       },
+       {
+        "byte": {
+         "value": 255
+        }
+       },
+       {
+        "byte": {
+         "value": 97
+        }
+       },
+       {
+        "byte": {
+         "value": 242
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 21
+        }
+       },
+       {
+        "byte": {
+         "value": 173
+        }
+       }
+      ]
+     }
+    }
+   ]
   }
  ]
 }

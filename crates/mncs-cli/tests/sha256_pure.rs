@@ -79,7 +79,7 @@ fn sha256_vectors_agree_on_every_executable_backend() {
     for backend in EXECUTABLE_BACKENDS {
         let result = run(backend);
         let cases = result["cases"].as_array().unwrap();
-        assert_eq!(cases.len(), 3, "{backend}: corpus drift");
+        assert_eq!(cases.len(), 4, "{backend}: corpus drift");
         for case in cases {
             assert_eq!(case["status"], "returned", "{backend}: {case}");
             assert_eq!(case["expectation_met"], true, "{backend}: {case}");
