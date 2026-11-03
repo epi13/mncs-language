@@ -116,7 +116,7 @@ def build(executable: Path, cargo: str):
     expected = (ROOT / "target/release/mncs").resolve()
     if Path(executable).resolve() != expected:
         raise RuntimeError("provider build is bound to target/release/mncs")
-    result = subprocess.run([cargo, "build", "--offline", "--locked", "--release", "-p", "mncs-cli"],
+    result = subprocess.run([cargo, "build", "--offline", "--locked", "--release", "-p", "mncs-cli", "-p", "mncs-embed"],
         cwd=ROOT, capture_output=True, text=True, timeout=1800, check=False,
         env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
     if result.returncode:
@@ -127,7 +127,7 @@ def build(executable: Path, cargo: str):
         raise RuntimeError("rebuilt Stage-0/reference executable does not match its embedded inputs: "
                            + json.dumps(origin.get("mismatches", []), sort_keys=True))
     return {"schema_version": "mncs.language.build-operation/1", "status": "built-and-verified-locally",
-            "build_command": [cargo, "build", "--offline", "--locked", "--release", "-p", "mncs-cli"],
+            "build_command": [cargo, "build", "--offline", "--locked", "--release", "-p", "mncs-cli", "-p", "mncs-embed"],
             "runtime_identity": runtime, "build_stderr_tail": result.stderr[-1000:]}
 
 
