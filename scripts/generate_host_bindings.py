@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 
-GENERATOR_VERSION = "mncs-host-bindings/0.2"
+GENERATOR_VERSION = "mncs-host-bindings/0.3"
 
 
 def binding_content_identity(abi: dict[str, Any], language: str) -> str:
@@ -293,7 +293,14 @@ def python_binding(abi: dict[str, Any]) -> str:
         "    if isinstance(pairs, dict):",
         "        return pairs",
         "    if isinstance(pairs, list):",
-        "        return {pair[0]: pair[1] for pair in pairs if isinstance(pair, list) and len(pair) == 2 and isinstance(pair[0], str)}",
+        "        fields: dict[str, Any] = {}",
+        "        for pair in pairs:",
+        "            if not isinstance(pair, list) or len(pair) != 2 or not isinstance(pair[0], str):",
+        "                raise BindingError('typed record contains a malformed field pair')",
+        "            if pair[0] in fields:",
+        "                raise BindingError(f'typed record contains duplicate field {pair[0]!r}')",
+        "            fields[pair[0]] = pair[1]",
+        "        return fields",
         "    raise BindingError('returned value is not a typed record')",
         "",
         "def _variant(value: Any) -> str:",
@@ -634,9 +641,18 @@ def rust_binding(abi: dict[str, Any]) -> str:
         "    }",
         "    finite.get(\"variant\").and_then(Value::as_str).ok_or_else(|| EmbedError::new(\"binding_decode\", \"typed finite has no variant identity\"))",
         "}",
-        "fn record_fields<'a>(value: &'a Value) -> Result<&'a Map<String, Value>, EmbedError> {",
+        "fn record_fields(value: &Value) -> Result<Map<String, Value>, EmbedError> {",
         "    let record = decode_object(value, \"record\")?.get(\"record\").and_then(Value::as_object).ok_or_else(|| EmbedError::new(\"binding_decode\", \"typed record is malformed\"))?;",
-        "    record.get(\"fields\").and_then(Value::as_object).ok_or_else(|| EmbedError::new(\"binding_decode\", \"typed record fields are malformed\"))",
+        "    let fields = record.get(\"fields\").ok_or_else(|| EmbedError::new(\"binding_decode\", \"typed record fields are missing\"))?;",
+        "    if let Some(fields) = fields.as_object() { return Ok(fields.clone()); }",
+        "    let pairs = fields.as_array().ok_or_else(|| EmbedError::new(\"binding_decode\", \"typed record fields are malformed\"))?;",
+        "    let mut normalized = Map::new();",
+        "    for pair in pairs {",
+        "        let pair = pair.as_array().filter(|pair| pair.len() == 2).ok_or_else(|| EmbedError::new(\"binding_decode\", \"typed record contains a malformed field pair\"))?;",
+        "        let name = pair[0].as_str().ok_or_else(|| EmbedError::new(\"binding_decode\", \"typed record field name is not text\"))?;",
+        "        if normalized.insert(name.to_owned(), pair[1].clone()).is_some() { return Err(EmbedError::new(\"binding_decode\", format!(\"typed record contains duplicate field {name}\"))); }",
+        "    }",
+        "    Ok(normalized)",
         "}",
         "fn returned_value(output: &mncs_embed::CallOutput) -> Result<Value, EmbedError> {",
         "    if output.status != \"returned\" { return Err(EmbedError::new(\"binding_call\", format!(\"typed call returned {}\", output.status))); }",

@@ -53,6 +53,19 @@ class HostBindingGenerationTests(unittest.TestCase):
         self.assertIn("'call', str(self._config.source)", rendered)
         self.assertIn("return bytes(decoded) if element_descriptor == 'byte' else decoded", rendered)
 
+    def test_rust_record_decoder_accepts_object_and_typed_pair_fields(self) -> None:
+        rendered = rust_binding(ABI)
+        self.assertIn("if let Some(fields) = fields.as_object()", rendered)
+        self.assertIn("let pairs = fields.as_array()", rendered)
+        self.assertIn("typed record contains a malformed field pair", rendered)
+        self.assertIn("typed record contains duplicate field", rendered)
+
+    def test_python_record_decoder_rejects_malformed_and_duplicate_pairs(self) -> None:
+        rendered = python_binding(ABI)
+        self.assertIn("for pair in pairs:", rendered)
+        self.assertIn("typed record contains a malformed field pair", rendered)
+        self.assertIn("typed record contains duplicate field", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()
