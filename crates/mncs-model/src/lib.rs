@@ -112,8 +112,8 @@ pub use evidence::{
     EvidenceState, EvidenceStatusReport, EVIDENCE_RECEIPT_SCHEMA_VERSION,
 };
 pub use execution::{
-    compare as compare_execution, compare_floats, compare_stateful_results, evaluate_float,
-    execute, execute_observed, execute_stateful_case, execute_stateful_case_owned,
+    compare as compare_execution, compare_floats, compare_stateful_results, convert_scalar_value,
+    evaluate_float, execute, execute_observed, execute_stateful_case, execute_stateful_case_owned,
     execute_stateful_case_with_checkpoint, execute_stateful_case_with_checkpoint_scoped,
     execute_with_policy, execution_corpus_schema_supported, float_value,
     generic_entry_failure_reason, host_seed_requests, lint_corpus, parse_host_generic_args,

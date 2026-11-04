@@ -7912,11 +7912,13 @@ fn constant_value(value: i128, ty: &BodyType) -> Option<ExecutionValue> {
     }
 }
 
-/// Shared scalar conversion for both interpreters (Profile 0.12 adds the
-/// float edges). `Ok` is the converted value; `Err(status)` is either
-/// `Unsupported` (no such conversion) or `RuntimeFailure` (the float
-/// fail-closed trap: non-finite or out-of-range).
-pub(crate) fn convert_scalar_value(
+/// Applies the Language-owned scalar conversion rules (Profile 0.12 adds
+/// the float edges). Downstream runtimes use this contract to preserve
+/// conversion meaning without defining a second version. `Ok` is the
+/// converted value; `Err(status)` is either `Unsupported` (no such
+/// conversion) or `RuntimeFailure` (the float fail-closed trap: non-finite
+/// or out-of-range).
+pub fn convert_scalar_value(
     operand_value: &ExecutionValue,
     from: &BodyType,
     to: &BodyType,
