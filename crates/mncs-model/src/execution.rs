@@ -1773,7 +1773,7 @@ fn validate_standard_process_record_type(
                     })
                 }
                 "resources" => standard_record("ProcessResourceEnvelope"),
-                "stdin" => Some(byte_view(SequenceBound::UpTo(1024))),
+                "stdin" => Some(byte_view(SequenceBound::UpTo(MAX_SEQUENCE_BOUND))),
                 "argv_count" | "environment_count" | "stdout_limit" | "stderr_limit"
                 | "deadline_ms" => Some(u64_type.clone()),
                 _ => None,

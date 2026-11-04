@@ -31,6 +31,9 @@ record ProcessResourceEnvelope {
 // 64 KiB aggregate environment limit. This capacity must
 // agree with mncs.std.application.v1 and the language runtime's process
 // launch validation.
+// Standard input is bounded at the active source-profile ceiling of 4096
+// bytes, enough for structured tool requests while staying within the
+// language's bounded-sequence contract.
 record ProcessRequest {
     program: [byte; up_to 1024],
     argv: [[byte; up_to 1024]; up_to 256],
@@ -39,7 +42,7 @@ record ProcessRequest {
     environment: [EnvironmentEntry; up_to 256],
     environment_count: u64,
     resources: ProcessResourceEnvelope,
-    stdin: [byte; up_to 1024],
+    stdin: [byte; up_to 4096],
     stdout_limit: u64,
     stderr_limit: u64,
     deadline_ms: u64

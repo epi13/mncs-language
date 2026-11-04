@@ -7,7 +7,9 @@ use std::{
 
 use mncs_compiler::{bundle::pinned_bundle, ReferenceCompiler};
 use mncs_embed::{Artifact, CallOptions, Grant, Session};
-use mncs_model::{ArtifactRepresentation, ExecutionValue, PROCESS_LAUNCH_VECTOR_CAPACITY};
+use mncs_model::{
+    ArtifactRepresentation, ExecutionValue, MAX_SEQUENCE_BOUND, PROCESS_LAUNCH_VECTOR_CAPACITY,
+};
 use mncs_syntax::{SourceArtifactKind, SourceEnvelope};
 use serde_json::{json, Value};
 
@@ -116,6 +118,18 @@ fn process_request(program: &str, argv: &[&str], environment: &[(&str, &str)]) -
         1024,
         1024,
     )
+}
+
+fn process_request_with_stdin(
+    program: &str,
+    argv: &[&str],
+    environment: &[(&str, &str)],
+    stdin: &[u8],
+) -> String {
+    let mut request: Value = serde_json::from_str(&process_request(program, argv, environment))
+        .expect("process request JSON");
+    request[0]["record"]["fields"]["stdin"] = byte_sequence(stdin);
+    serde_json::to_string(&request).expect("process request JSON with stdin")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -235,6 +249,16 @@ fn observation_bool(observation: &ExecutionValue, name: &str) -> bool {
     }
 }
 
+fn observation_signed(observation: &ExecutionValue, name: &str) -> Option<i64> {
+    let ExecutionValue::Record { fields, .. } = observation else {
+        panic!("ProcessObservation expected, got {observation:?}");
+    };
+    match field(fields, name) {
+        Some(ExecutionValue::Integer { value, ty }) if ty.signed => i64::try_from(*value).ok(),
+        _ => None,
+    }
+}
+
 fn observe_until_terminal(
     session: &Session,
     handle: &ExecutionValue,
@@ -260,6 +284,24 @@ fn observation_bytes_len(observation: &ExecutionValue, name: &str) -> usize {
         Some(ExecutionValue::Sequence { values }) => values.len(),
         other => panic!("byte-sequence field {name} expected, got {other:?}"),
     }
+}
+
+fn observation_bytes(observation: &ExecutionValue, name: &str) -> Vec<u8> {
+    let ExecutionValue::Record { fields, .. } = observation else {
+        panic!("ProcessObservation expected, got {observation:?}");
+    };
+    let Some(ExecutionValue::Sequence { values }) = field(fields, name) else {
+        panic!("byte-sequence field {name} expected");
+    };
+    values
+        .iter()
+        .map(|value| match value {
+            ExecutionValue::Byte { value } => {
+                u8::try_from(*value).unwrap_or_else(|_| panic!("byte in {name} is in range"))
+            }
+            other => panic!("byte value in {name} expected, got {other:?}"),
+        })
+        .collect()
 }
 
 fn observation_unsigned(observation: &ExecutionValue, name: &str) -> Option<u64> {
@@ -585,6 +627,57 @@ fn process_launch_vectors_accept_capacity_and_reject_capacity_plus_one() {
     assert!(
         rejected.message.contains("capacity"),
         "capacity diagnosed: {rejected:?}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn process_stdin_accepts_profile_capacity_and_rejects_one_byte_over() {
+    let session = open_session();
+    let options = process_grant("/usr/bin/wc");
+    let at_limit = vec![b'x'; MAX_SEQUENCE_BOUND as usize];
+    let started = session
+        .call_typed_json(
+            "app.process_lifecycle_embed",
+            "start_owned",
+            &process_request_with_stdin("/usr/bin/wc", &["-c"], &[], &at_limit),
+            &options,
+        )
+        .expect("stdin at the MNCS profile capacity is a valid typed request");
+    assert_eq!(started.status, "returned", "{:?}", started.failure_reason);
+    let handle = process_handle(&started.returned[0]);
+    let completed = call_observation(&session, "reap_owned", handle, &options);
+    assert!(observation_bool(&completed, "has_exit_code"));
+    assert_eq!(observation_signed(&completed, "exit_code"), Some(0));
+    assert_eq!(
+        observation_bytes(&completed, "stdout"),
+        format!("{}\n", MAX_SEQUENCE_BOUND).into_bytes(),
+        "the process receives every input byte"
+    );
+    match observation_status(&completed) {
+        1 => assert!(observation_bool(&completed, "success")),
+        7 => {
+            assert!(
+                !observation_bool(&completed, "containment_supported"),
+                "UNKNOWN is retained when the provider cannot prove containment"
+            );
+            assert!(!observation_bool(&completed, "observation_complete"));
+        }
+        status => panic!("wc exits or remains explicitly UNKNOWN, got {status}: {completed:?}"),
+    }
+
+    let over_limit = vec![b'x'; MAX_SEQUENCE_BOUND as usize + 1];
+    let rejected = session
+        .call_typed_json(
+            "app.process_lifecycle_embed",
+            "start_owned",
+            &process_request_with_stdin("/usr/bin/wc", &["-c"], &[], &over_limit),
+            &options,
+        )
+        .expect_err("stdin beyond the MNCS profile capacity is rejected before launch");
+    assert!(
+        rejected.message.contains("4096"),
+        "the declared capacity is reported: {rejected:?}"
     );
 }
 

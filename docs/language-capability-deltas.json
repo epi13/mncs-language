@@ -10,200 +10,6 @@
         "added": [],
         "removed": []
       },
-      "current_content_identity": "sha256:307b1d3ede7b1bfa30b9b19bb149a1fc831716f41b0b39f0365456bc2fb81370",
-      "effects": {
-        "added": [],
-        "removed": []
-      },
-      "exports": {
-        "added": [
-          "mncs.std.process.v1::ProcessHandle",
-          "mncs.std.process.v1::ProcessObservation",
-          "mncs.std.process.v1::ProcessResourceEnvelope",
-          "mncs.std.process.v1::ProcessStartResult",
-          "mncs.std.process.v1::ProcessStatus",
-          "mncs.std.process.v1::cancel",
-          "mncs.std.process.v1::observe",
-          "mncs.std.process.v1::reap",
-          "mncs.std.process.v1::start"
-        ],
-        "removed": []
-      },
-      "from_profile": "0.18",
-      "intrinsics": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "modules": {
-        "added": [],
-        "changed": [
-          "mncs.std.process.v1"
-        ],
-        "removed": []
-      },
-      "previous_content_identity": "sha256:d9de82516aff2f3a85c5392341fbd29e0d4c2e41c20a5acb8cdcf80ebc65b35f",
-      "profiles": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "to_profile": "0.18"
-    },
-    {
-      "canonical_examples": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "capabilities": {
-        "added": [],
-        "removed": []
-      },
-      "current_content_identity": "sha256:a502671f67e5654f880b10984368c70486c2d681f863ef9f6b4eb42e46d6bfff",
-      "effects": {
-        "added": [],
-        "removed": []
-      },
-      "exports": {
-        "added": [],
-        "removed": []
-      },
-      "from_profile": "0.18",
-      "intrinsics": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "modules": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "previous_content_identity": "sha256:307b1d3ede7b1bfa30b9b19bb149a1fc831716f41b0b39f0365456bc2fb81370",
-      "profiles": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "to_profile": "0.18"
-    },
-    {
-      "canonical_examples": {
-        "added": [],
-        "changed": [
-          "mncs.example/applications/1",
-          "mncs.example/bounded-collections/1",
-          "mncs.example/effects/1",
-          "mncs.example/identity/1",
-          "mncs.example/structured-artifacts/1"
-        ],
-        "removed": []
-      },
-      "capabilities": {
-        "added": [],
-        "removed": []
-      },
-      "current_content_identity": "sha256:20d4abe5f9e2db66eb641ae66da2b92a2cddec375982a948de2981da50779524",
-      "effects": {
-        "added": [],
-        "removed": []
-      },
-      "exports": {
-        "added": [],
-        "removed": []
-      },
-      "from_profile": "0.18",
-      "intrinsics": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "modules": {
-        "added": [],
-        "changed": [
-          "mncs.core.bounds.v1",
-          "mncs.core.bytes.v1",
-          "mncs.core.contracts.v1",
-          "mncs.core.geometry.v1",
-          "mncs.core.identity.v1",
-          "mncs.core.image.v1",
-          "mncs.core.lineage.v1",
-          "mncs.core.logic.v1",
-          "mncs.core.mask.v1",
-          "mncs.core.numeric.v1",
-          "mncs.core.ordering.v1",
-          "mncs.core.partition.v1",
-          "mncs.core.proof_admit.v1",
-          "mncs.core.proof_check.v1",
-          "mncs.core.proof_dep.v2",
-          "mncs.core.proof_term.v1",
-          "mncs.core.random.v1",
-          "mncs.core.result.v1",
-          "mncs.core.sequences.v1",
-          "mncs.core.status.v1",
-          "mncs.core.vector.v1",
-          "mncs.core.version.v1",
-          "mncs.core.vision.v1",
-          "mncs.family.coherence.v01",
-          "mncs.family.journal.v1",
-          "mncs.family.rfc_status.v1",
-          "mncs.jit.binding.v1",
-          "mncs.jit.depends.v1",
-          "mncs.jit.lifecycle.v1",
-          "mncs.jit.plan.v1",
-          "mncs.jit.profile.v1",
-          "mncs.jit.proof.v1",
-          "mncs.jit.session.v1",
-          "mncs.jit.types.v1",
-          "mncs.std.ansi.v1",
-          "mncs.std.application.v1",
-          "mncs.std.channel.v1",
-          "mncs.std.chunk.v1",
-          "mncs.std.clock.v1",
-          "mncs.std.encoding.v1",
-          "mncs.std.fixed.v1",
-          "mncs.std.fnv1a.v1",
-          "mncs.std.json.v1",
-          "mncs.std.json_cursor.v1",
-          "mncs.std.json_emit.v1",
-          "mncs.std.json_projection.v1",
-          "mncs.std.json_stream.v1",
-          "mncs.std.platform.v1",
-          "mncs.std.process.v1",
-          "mncs.std.relation.v1",
-          "mncs.std.scope.v1",
-          "mncs.std.sha256.v1",
-          "mncs.std.simd.v1",
-          "mncs.std.sort.v1",
-          "mncs.std.store.v1",
-          "mncs.std.task.v1",
-          "mncs.std.text_map.v1",
-          "mncs.std.text_scan.v1",
-          "mncs.std.text_utf8.v1",
-          "mncs.std.text_view.v1",
-          "mncs.std.token_set.v1"
-        ],
-        "removed": []
-      },
-      "previous_content_identity": "sha256:a502671f67e5654f880b10984368c70486c2d681f863ef9f6b4eb42e46d6bfff",
-      "profiles": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "to_profile": "0.18"
-    },
-    {
-      "canonical_examples": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "capabilities": {
-        "added": [],
-        "removed": []
-      },
       "current_content_identity": "sha256:a016970cc4065b2a3eca272faca4b3231398935941f62798bb082a361ed83867",
       "effects": {
         "added": [],
@@ -397,9 +203,137 @@
         "removed": []
       },
       "to_profile": "0.19"
+    },
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [],
+        "removed": []
+      },
+      "current_content_identity": "sha256:e44dd2b94f02e4d1bd0dd1747e18bc36319926375043349f1b1807838fca3fd5",
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "exports": {
+        "added": [
+          "mncs.std.sha256.v1::candidate_sha256_abc_standard",
+          "mncs.std.sha256.v1::finalize_standard",
+          "mncs.std.sha256.v1::standard_round_constants",
+          "mncs.std.sha256.v1::update_standard"
+        ],
+        "removed": []
+      },
+      "from_profile": "0.19",
+      "intrinsics": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "modules": {
+        "added": [],
+        "changed": [
+          "mncs.std.application.v1",
+          "mncs.std.process.v1",
+          "mncs.std.sha256.v1"
+        ],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:fdac575826ecbb5cfb8f945c7e31afeb70b720f2c5efd6ad299174a3d83f0819",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "to_profile": "0.19"
+    },
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [],
+        "removed": []
+      },
+      "current_content_identity": "sha256:1b150ed233ee68ab3a2f62c13ecff5ca9357432a0f894fc263977b2a043e2737",
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "exports": {
+        "added": [],
+        "removed": []
+      },
+      "from_profile": "0.19",
+      "intrinsics": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "modules": {
+        "added": [],
+        "changed": [
+          "mncs.std.application.v1",
+          "mncs.std.process.v1"
+        ],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:e44dd2b94f02e4d1bd0dd1747e18bc36319926375043349f1b1807838fca3fd5",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "to_profile": "0.19"
+    },
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [],
+        "removed": []
+      },
+      "current_content_identity": "sha256:869f4de01acaec8c911444c0539fa788b934b4b623476d2666d67524538e3191",
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "exports": {
+        "added": [],
+        "removed": []
+      },
+      "from_profile": "0.19",
+      "intrinsics": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "modules": {
+        "added": [],
+        "changed": [
+          "mncs.std.application.v1"
+        ],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:1b150ed233ee68ab3a2f62c13ecff5ca9357432a0f894fc263977b2a043e2737",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "to_profile": "0.19"
     }
   ],
-  "history_identity": "sha256:c0389e01e5ecd03f7549567e66a2b82bff0d5612a308b5f959fa4106ac9a631a",
+  "history_identity": "sha256:42e79153f13db56408aced04d3f5862b7c54cfd5e7e5974382e35f7ef58a3293",
   "retention": 8,
   "schema_version": "mncs.language-capability-deltas/1"
 }
