@@ -573,7 +573,7 @@ def rust_decode_result_expression(descriptor: str, expression: str) -> str:
         )
     if descriptor.startswith("mask:"):
         return f"mask_values({expression})"
-    return f"Ok({expression})"
+    return f"Ok((*{expression}).clone())"
 
 
 def rust_decode_expression(descriptor: str, expression: str) -> str:

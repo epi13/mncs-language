@@ -60,6 +60,25 @@ class HostBindingGenerationTests(unittest.TestCase):
         self.assertIn("typed record contains a malformed field pair", rendered)
         self.assertIn("typed record contains duplicate field", rendered)
 
+    def test_rust_binding_clones_opaque_json_returns_into_owned_values(self) -> None:
+        abi = {
+            **ABI,
+            "functions": {
+                **ABI["functions"],
+                "opaque": {
+                    "declaring_module": "probe.bindings.v1",
+                    "inputs": [],
+                    "outputs": [{"scalar": {"semantic_type": "opaque"}}],
+                },
+            },
+        }
+        rendered = rust_binding(abi)
+        self.assertIn(
+            "pub fn opaque(session: &Session, options: CallOptions) -> Result<serde_json::Value, EmbedError>",
+            rendered,
+        )
+        self.assertIn("Ok((*&value).clone())", rendered)
+
     def test_python_record_decoder_rejects_malformed_and_duplicate_pairs(self) -> None:
         rendered = python_binding(ABI)
         self.assertIn("for pair in pairs:", rendered)
