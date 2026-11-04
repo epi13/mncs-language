@@ -68,6 +68,16 @@ obligations, and evidence:
 A literal index at or beyond an exact bound fails at elaboration (`MNE192`)
 instead of deferring a guaranteed runtime failure.
 
+For exact, nonempty sequences, obligation generation also recognizes the
+same-sequence clamp `slot = select(index < xs.len, index, 0)` when the
+comparison and selection are in one block. The `index` expression may be
+repeated with distinct lowering IDs when both forms are the same u64 wrapping
+addition tree. The compiler records the length, comparison, fallback, and
+selection identities as current evidence and discharges the projection's
+bounds obligation. The runtime check remains in the realization. Empty
+sequences, runtime-length views, cross-sequence clamps, and other guard shapes
+remain `UNKNOWN`.
+
 ### Views, lengths, ranges
 
 - `xs[start..end]` derives a view under checked semantics: `start ≤ end`,

@@ -292,11 +292,15 @@ fn checksum(data: [byte; 8]) -> (result: u64) {
 }
 ```
 
-Bounds facts survive body, HIR, SSA, obligations, and backend lowering;
-runtime-checked accesses keep explicit UNKNOWN obligations rather than
-erasing them. All five executable backends agree over the bounded-data
-and serialization corpora; see `docs/source-profile-0.7.md`, RFC 0044, and
-the [bounded-data evidence record](docs/development-evidence/bounded-data-2026-08.md).
+Bounds facts survive body, HIR, SSA, obligations, and backend lowering.
+Runtime-checked accesses generally keep explicit UNKNOWN obligations; for an
+exact, nonempty sequence, obligation generation also discharges the
+same-sequence `select(index < xs.len, index, 0)` clamp pattern while retaining
+the runtime check. Empty sequences, runtime-length views, cross-sequence
+clamps, and unsupported guard shapes remain UNKNOWN. All five executable
+backends agree over the bounded-data and serialization corpora; see
+`docs/source-profile-0.7.md`, RFC 0044, and the [bounded-data evidence
+record](docs/development-evidence/bounded-data-2026-08.md).
 RAVEL's new `ravel.identity.v1` module is the first family consumer of
 the substrate.
 

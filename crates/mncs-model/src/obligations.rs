@@ -216,6 +216,14 @@ impl Program {
                 // Computed once per body; the per-operation arm below only
                 // reads it.
                 let body_ranges = collect_body_ranges(body);
+                // An exact, nonempty sequence projection can also be
+                // discharged when its index is the true arm of a strict
+                // `index < sequence.len` clamp and zero is the false arm.
+                // The relation is collected per block and retains its source
+                // operation identities as obligation dependencies.
+                let body_clamped_indices =
+                    collect_exact_clamped_indices(body, namespace, &function.name);
+                let body_sequence_bounds = collect_body_sequence_bounds(body);
                 for iteration in &body.bounded_iterations {
                     let subject =
                         crate::identity::iteration_id(namespace, &function.name, &iteration.id);
@@ -291,7 +299,7 @@ impl Program {
                     }
                 }
                 for block in &body.blocks {
-                    for operation in &block.operations {
+                    for (operation_index, operation) in block.operations.iter().enumerate() {
                         let subject = operation.identity(namespace, &function.name, &block.id);
                         match &operation.kind {
                             BodyOperationKind::RecordConstruct { .. }
@@ -424,30 +432,83 @@ impl Program {
                             // traversal-domain evidence discharges it by
                             // semantics instead.
                             BodyOperationKind::SequenceProject {
+                                bound,
                                 evidence:
                                     crate::BoundsEvidence::RuntimeChecked { failure: _ },
-                                ..
                             } => {
-                                let requirement =
-                                    requirement_id("sequence-index-bounds", &subject);
-                                obligations.push(ObligationRecord {
-                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
-                                    identity: body_obligation_id(
-                                        "sequence-index-bounds",
-                                        &subject,
-                                    ),
-                                    subject: subject.clone(),
-                                    requirement,
-                                    status: ObligationStatus::Unknown,
-                                    method: "runtime-checked-sequence-index".to_owned(),
-                                    assumptions: Vec::new(),
-                                    dependencies: vec![subject],
-                                    freshness: EvidenceFreshness::Unknown,
-                                    fallback: Some(
-                                        "the element is available only on the successful bounds-check path"
-                                            .to_owned(),
-                                    ),
-                                });
+                                let clamp = operation
+                                    .operands
+                                    .get(1)
+                                    .and_then(|index| {
+                                        body_clamped_indices.get(&(block.id.clone(), index.clone()))
+                                    })
+                                    .filter(|clamp| {
+                                        clamp.position < operation_index
+                                            && operation.operands.first()
+                                                == Some(&clamp.sequence)
+                                            && &clamp.bound == bound
+                                            && operation
+                                                .operands
+                                                .first()
+                                                .and_then(|sequence| {
+                                                    body_sequence_bounds.get(sequence)
+                                                })
+                                                == Some(bound)
+                                    });
+                                if let Some(clamp) = clamp {
+                                    let mut dependencies = vec![
+                                        function_identity.clone(),
+                                        subject.clone(),
+                                    ];
+                                    dependencies.extend(clamp.evidence.iter().cloned());
+                                    dependencies.sort();
+                                    dependencies.dedup();
+                                    obligations.push(ObligationRecord {
+                                        schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                        identity: body_obligation_id(
+                                            "sequence-index-bounds",
+                                            &subject,
+                                        ),
+                                        subject: subject.clone(),
+                                        requirement: requirement_id(
+                                            "sequence-index-bounds",
+                                            &subject,
+                                        ),
+                                        status: ObligationStatus::Pass,
+                                        method: "language-exact-sequence-clamp".to_owned(),
+                                        assumptions: function
+                                            .assumptions
+                                            .iter()
+                                            .map(|assumption| {
+                                                assumption_id(namespace, assumption)
+                                            })
+                                            .collect(),
+                                        dependencies,
+                                        freshness: EvidenceFreshness::Current,
+                                        fallback: None,
+                                    });
+                                } else {
+                                    let requirement =
+                                        requirement_id("sequence-index-bounds", &subject);
+                                    obligations.push(ObligationRecord {
+                                        schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                        identity: body_obligation_id(
+                                            "sequence-index-bounds",
+                                            &subject,
+                                        ),
+                                        subject: subject.clone(),
+                                        requirement,
+                                        status: ObligationStatus::Unknown,
+                                        method: "runtime-checked-sequence-index".to_owned(),
+                                        assumptions: Vec::new(),
+                                        dependencies: vec![subject],
+                                        freshness: EvidenceFreshness::Unknown,
+                                        fallback: Some(
+                                            "the element is available only on the successful bounds-check path"
+                                                .to_owned(),
+                                        ),
+                                    });
+                                }
                             }
                             // Statically established, traversal-domain, and
                             // checked-bound projection evidence all discharge
@@ -842,6 +903,327 @@ pub(crate) fn body_obligation_id(kind: &str, subject: &SemanticId) -> SemanticId
     ))
 }
 
+#[derive(Debug, Clone)]
+struct ExactClampedIndex {
+    sequence: String,
+    bound: crate::SequenceBound,
+    evidence: Vec<SemanticId>,
+    position: usize,
+}
+
+#[derive(Debug, Clone)]
+struct ExactLengthFact {
+    sequence: String,
+    bound: crate::SequenceBound,
+    identity: SemanticId,
+}
+
+#[derive(Debug, Clone)]
+struct ExactLengthGuard {
+    sequence: String,
+    bound: crate::SequenceBound,
+    index_key: String,
+    evidence: Vec<SemanticId>,
+}
+
+fn is_unsigned_u64(ty: &crate::BodyType) -> bool {
+    matches!(
+        ty,
+        crate::BodyType::Integer(int_ty) if int_ty.bits == 64 && !int_ty.signed
+    )
+}
+
+/// Canonicalize the small set of pure u64 expressions needed to match a
+/// repeated source expression across comparison and select lowering. The
+/// frontend may lower `i +% 1` twice with distinct result IDs; identical
+/// wrapping-add trees still denote the same value. Unsupported operations
+/// remain identity-keyed, and redefined values fail closed.
+fn unsigned_u64_value_key(
+    value: &str,
+    definitions: &BTreeMap<String, &crate::BodyOperation>,
+    definition_counts: &BTreeMap<String, usize>,
+    active: &mut BTreeSet<String>,
+    depth: usize,
+) -> Option<String> {
+    if depth > 32 || definition_counts.get(value).copied().unwrap_or(0) > 1 {
+        return None;
+    }
+    let Some(operation) = definitions.get(value) else {
+        return Some(format!("value:{value}"));
+    };
+    match &operation.kind {
+        BodyOperationKind::Constant { value, ty } if is_unsigned_u64(ty) => {
+            Some(format!("u64:{value}"))
+        }
+        BodyOperationKind::Integer {
+            operator,
+            operand_type,
+            intent: crate::ArithmeticIntent::Wrapping,
+        } if operator == "add"
+            && *operand_type
+                == (crate::IntegerType {
+                    bits: 64,
+                    signed: false,
+                })
+            && operation.operands.len() == 2 =>
+        {
+            if !active.insert(value.to_owned()) {
+                return None;
+            }
+            let lhs = unsigned_u64_value_key(
+                &operation.operands[0],
+                definitions,
+                definition_counts,
+                active,
+                depth + 1,
+            );
+            let rhs = unsigned_u64_value_key(
+                &operation.operands[1],
+                definitions,
+                definition_counts,
+                active,
+                depth + 1,
+            );
+            active.remove(value);
+            Some(format!("wrapping-add:{}:{}", lhs?, rhs?))
+        }
+        _ => Some(format!("value:{value}")),
+    }
+}
+
+/// Recognize the narrow clamp pattern that proves a projection index belongs
+/// to the same exact, nonempty sequence whose length guards it:
+///
+/// ```text
+/// len = sequence.len
+/// inside = index < len
+/// slot = select(inside, index, 0)
+/// sequence[slot]
+/// ```
+///
+/// The false arm is in bounds because `Exact(n)` with `n > 0` contains index
+/// zero. The true arm is in bounds by the comparison. The scan is local to a
+/// block, requires unique definitions for the compared length, condition,
+/// zero, and selected index, and records all four source operations so the
+/// resulting obligation stays traceable. It does not infer facts for empty,
+/// runtime-length, cross-sequence, or more elaborate control-flow patterns.
+fn collect_exact_clamped_indices(
+    body: &crate::FunctionBody,
+    namespace: &str,
+    function_name: &str,
+) -> BTreeMap<(String, String), ExactClampedIndex> {
+    let mut selected_indices = BTreeMap::new();
+    let u64_type = crate::IntegerType {
+        bits: 64,
+        signed: false,
+    };
+    let sequence_bounds = collect_body_sequence_bounds(body);
+    for block in &body.blocks {
+        let mut definition_counts = BTreeMap::<String, usize>::new();
+        for parameter in &body.parameters {
+            *definition_counts.entry(parameter.id.clone()).or_default() += 1;
+        }
+        for parameter in &block.parameters {
+            *definition_counts.entry(parameter.id.clone()).or_default() += 1;
+        }
+        for operation in &block.operations {
+            for result in &operation.results {
+                *definition_counts.entry(result.id.clone()).or_default() += 1;
+            }
+        }
+        let definitions: BTreeMap<String, &crate::BodyOperation> = block
+            .operations
+            .iter()
+            .filter_map(|operation| {
+                let result = operation.results.first()?;
+                (definition_counts.get(&result.id).copied() == Some(1))
+                    .then(|| (result.id.clone(), operation))
+            })
+            .collect();
+        let mut lengths = BTreeMap::<String, ExactLengthFact>::new();
+        let mut comparisons = BTreeMap::<String, ExactLengthGuard>::new();
+        let mut zeroes = BTreeMap::<String, SemanticId>::new();
+
+        for (position, operation) in block.operations.iter().enumerate() {
+            let identity = operation.identity(namespace, function_name, &block.id);
+            match &operation.kind {
+                BodyOperationKind::SequenceLength { bound }
+                    if matches!(bound, crate::SequenceBound::Exact(length) if *length > 0)
+                        && operation.operands.len() == 1
+                        && operation
+                            .results
+                            .first()
+                            .is_some_and(|result| is_unsigned_u64(&result.ty)) =>
+                {
+                    if operation
+                        .operands
+                        .first()
+                        .and_then(|sequence| sequence_bounds.get(sequence))
+                        != Some(bound)
+                    {
+                        continue;
+                    }
+                    let result = &operation.results[0];
+                    if definition_counts.get(&result.id).copied() == Some(1) {
+                        lengths.insert(
+                            result.id.clone(),
+                            ExactLengthFact {
+                                sequence: operation.operands[0].clone(),
+                                bound: bound.clone(),
+                                identity,
+                            },
+                        );
+                    }
+                }
+                BodyOperationKind::IntegerCompare {
+                    predicate,
+                    operand_type,
+                } if predicate == "lt"
+                    && *operand_type == u64_type
+                    && operation.operands.len() == 2
+                    && operation
+                        .results
+                        .first()
+                        .is_some_and(|result| matches!(result.ty, crate::BodyType::Bool)) =>
+                {
+                    let Some(length) = lengths.get(&operation.operands[1]) else {
+                        continue;
+                    };
+                    let Some(index_key) = unsigned_u64_value_key(
+                        &operation.operands[0],
+                        &definitions,
+                        &definition_counts,
+                        &mut BTreeSet::new(),
+                        0,
+                    ) else {
+                        continue;
+                    };
+                    let result = &operation.results[0];
+                    if definition_counts.get(&result.id).copied() == Some(1) {
+                        comparisons.insert(
+                            result.id.clone(),
+                            ExactLengthGuard {
+                                sequence: length.sequence.clone(),
+                                bound: length.bound.clone(),
+                                index_key,
+                                evidence: vec![length.identity.clone(), identity],
+                            },
+                        );
+                    }
+                }
+                BodyOperationKind::Constant { value: 0, ty }
+                    if is_unsigned_u64(ty)
+                        && operation
+                            .results
+                            .first()
+                            .is_some_and(|result| is_unsigned_u64(&result.ty)) =>
+                {
+                    let result = &operation.results[0];
+                    if definition_counts.get(&result.id).copied() == Some(1) {
+                        zeroes.insert(result.id.clone(), identity);
+                    }
+                }
+                BodyOperationKind::Select { operand_type }
+                    if is_unsigned_u64(operand_type)
+                        && operation.operands.len() == 3
+                        && operation
+                            .results
+                            .first()
+                            .is_some_and(|result| is_unsigned_u64(&result.ty)) =>
+                {
+                    let Some(guard) = comparisons.get(&operation.operands[0]) else {
+                        continue;
+                    };
+                    let Some(zero_identity) = zeroes.get(&operation.operands[2]) else {
+                        continue;
+                    };
+                    let Some(candidate_key) = unsigned_u64_value_key(
+                        &operation.operands[1],
+                        &definitions,
+                        &definition_counts,
+                        &mut BTreeSet::new(),
+                        0,
+                    ) else {
+                        continue;
+                    };
+                    let result = &operation.results[0];
+                    if guard.index_key == candidate_key
+                        && definition_counts.get(&result.id).copied() == Some(1)
+                    {
+                        let mut evidence = guard.evidence.clone();
+                        evidence.push(zero_identity.clone());
+                        evidence.push(identity);
+                        evidence.sort();
+                        evidence.dedup();
+                        selected_indices.insert(
+                            (block.id.clone(), result.id.clone()),
+                            ExactClampedIndex {
+                                sequence: guard.sequence.clone(),
+                                bound: guard.bound.clone(),
+                                evidence,
+                                position,
+                            },
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    selected_indices
+}
+
+/// Static sequence bounds by body value identity. Conflicting definitions
+/// fail closed; a length observation must agree with the actual sequence
+/// value type before it can support a projection discharge.
+fn collect_body_sequence_bounds(
+    body: &crate::FunctionBody,
+) -> BTreeMap<String, crate::SequenceBound> {
+    fn record(
+        identity: &str,
+        ty: &crate::BodyType,
+        observed: &mut BTreeMap<String, Option<crate::SequenceBound>>,
+        conflicting: &mut BTreeSet<String>,
+    ) {
+        let bound = match ty {
+            crate::BodyType::Sequence { bound, .. } => Some(bound.clone()),
+            _ => None,
+        };
+        if let Some(prior) = observed.get(identity) {
+            if prior != &bound {
+                conflicting.insert(identity.to_owned());
+            }
+        } else {
+            observed.insert(identity.to_owned(), bound);
+        }
+    }
+
+    let mut observed = BTreeMap::new();
+    let mut conflicting = BTreeSet::new();
+    for value in &body.parameters {
+        record(&value.id, &value.ty, &mut observed, &mut conflicting);
+    }
+    for block in &body.blocks {
+        for value in &block.parameters {
+            record(&value.id, &value.ty, &mut observed, &mut conflicting);
+        }
+        for operation in &block.operations {
+            for value in &operation.results {
+                record(&value.id, &value.ty, &mut observed, &mut conflicting);
+            }
+        }
+    }
+    observed
+        .into_iter()
+        .filter_map(|(identity, bound)| {
+            if conflicting.contains(&identity) {
+                return None;
+            }
+            bound.map(|bound| (identity, bound))
+        })
+        .collect()
+}
+
 /// Compiler-known integer literals by result value identity, covering one
 /// function body. Used only to route literal-operand facts (notably
 /// nonzero literal divisors) to static discharge; it decides no proof.
@@ -1221,10 +1603,11 @@ fn push_single_obligation(
 mod tests {
     use crate::validation::tests::valid_program;
     use crate::{
-        ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyTerminator, BodyType,
-        BodyValue, BoundsEvidence, EvidenceFreshness, Function, FunctionBody, IntegerOperation,
-        IntegerType, Intent, MachineIntentExpression, ObligationStatus, Program, Requirement,
-        SemanticId, SequenceBound, SUPPORTED_SCHEMA_VERSION,
+        ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyParameter,
+        BodyTerminator, BodyType, BodyValue, BoundsEvidence, EvidenceFreshness, Function,
+        FunctionBody, IntegerOperation, IntegerType, Intent, MachineIntentExpression,
+        ObligationStatus, Program, Requirement, SemanticId, SequenceBound, Value,
+        SUPPORTED_SCHEMA_VERSION,
     };
 
     fn div_program(divisor: Option<i128>, dividend: Option<i128>, signed: bool) -> Program {
@@ -1555,6 +1938,183 @@ mod tests {
         }
     }
 
+    fn body_operation(
+        id: &str,
+        kind: BodyOperationKind,
+        operands: &[&str],
+        result: BodyValue,
+    ) -> BodyOperation {
+        BodyOperation {
+            id: id.to_owned(),
+            kind,
+            operands: operands
+                .iter()
+                .map(|operand| (*operand).to_owned())
+                .collect(),
+            results: vec![result],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        }
+    }
+
+    fn clamped_projection_program(
+        sequence_length: u32,
+        projected_sequence: &str,
+        predicate: &str,
+        fallback: i128,
+    ) -> Program {
+        let sequence_type = BodyType::Sequence {
+            element: Box::new(BodyType::Byte),
+            bound: SequenceBound::Exact(sequence_length),
+        };
+        let mut sequence_parameters = vec!["seq"];
+        if projected_sequence == "other" {
+            sequence_parameters.push("other");
+        }
+        let parameters = sequence_parameters
+            .iter()
+            .map(|name| BodyParameter {
+                id: (*name).to_owned(),
+                name: (*name).to_owned(),
+                ty: sequence_type.clone(),
+            })
+            .collect::<Vec<_>>();
+        let inputs = sequence_parameters
+            .iter()
+            .map(|name| Value {
+                name: (*name).to_owned(),
+                value_type: format!("[byte; {sequence_length}]"),
+            })
+            .collect::<Vec<_>>();
+        let u64_ty = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        let operations = vec![
+            body_operation(
+                "len",
+                BodyOperationKind::SequenceLength {
+                    bound: SequenceBound::Exact(sequence_length),
+                },
+                &["seq"],
+                BodyValue {
+                    id: "len".to_owned(),
+                    ty: u64_ty.clone(),
+                },
+            ),
+            body_operation(
+                "idx",
+                BodyOperationKind::Constant {
+                    value: 1,
+                    ty: u64_ty.clone(),
+                },
+                &[],
+                BodyValue {
+                    id: "idx".to_owned(),
+                    ty: u64_ty.clone(),
+                },
+            ),
+            body_operation(
+                "inside",
+                BodyOperationKind::IntegerCompare {
+                    predicate: predicate.to_owned(),
+                    operand_type: IntegerType {
+                        bits: 64,
+                        signed: false,
+                    },
+                },
+                &["idx", "len"],
+                BodyValue {
+                    id: "inside".to_owned(),
+                    ty: BodyType::Bool,
+                },
+            ),
+            body_operation(
+                "fallback",
+                BodyOperationKind::Constant {
+                    value: fallback,
+                    ty: u64_ty.clone(),
+                },
+                &[],
+                BodyValue {
+                    id: "fallback".to_owned(),
+                    ty: u64_ty.clone(),
+                },
+            ),
+            body_operation(
+                "slot",
+                BodyOperationKind::Select {
+                    operand_type: Box::new(u64_ty.clone()),
+                },
+                &["inside", "idx", "fallback"],
+                BodyValue {
+                    id: "slot".to_owned(),
+                    ty: u64_ty,
+                },
+            ),
+            body_operation(
+                "proj",
+                BodyOperationKind::SequenceProject {
+                    bound: SequenceBound::Exact(sequence_length),
+                    evidence: BoundsEvidence::RuntimeChecked {
+                        failure: crate::FailureMode::Isolated,
+                    },
+                },
+                &[projected_sequence, "slot"],
+                BodyValue {
+                    id: "proj".to_owned(),
+                    ty: BodyType::Byte,
+                },
+            ),
+        ];
+        Program {
+            schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
+            module: "test.clamped_index".to_owned(),
+            dependencies: Vec::new(),
+            finite_types: Vec::new(),
+            record_types: Vec::new(),
+            assumptions: Vec::new(),
+            binding_table: None,
+            functions: vec![Function {
+                name: "probe".to_owned(),
+                home_module: None,
+                is_test: false,
+                generic_params: Vec::new(),
+                inputs,
+                outputs: vec![Value {
+                    name: "result".to_owned(),
+                    value_type: "byte".to_owned(),
+                }],
+                contracts: Vec::new(),
+                effects: Vec::new(),
+                capabilities: Vec::new(),
+                assumptions: Vec::new(),
+                evidence: Vec::new(),
+                failure: crate::FailureMode::Isolated,
+                body: Some(FunctionBody {
+                    schema_version: crate::body::EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
+                    entry: "entry".to_owned(),
+                    parameters: parameters.clone(),
+                    generic_params: Vec::new(),
+                    cycle_policy: crate::BodyCyclePolicy::Legacy,
+                    bounded_iterations: Vec::new(),
+                    blocks: vec![BodyBlock {
+                        id: "entry".to_owned(),
+                        parameters: Vec::new(),
+                        operations,
+                        terminator: BodyTerminator::Return {
+                            values: vec!["proj".to_owned()],
+                        },
+                    }],
+                }),
+            }],
+            generic_specializations: Vec::new(),
+        }
+    }
+
     #[test]
     fn checked_bound_projection_discharges_after_bound_check() {
         let entries = obligation_statuses(&checked_index_program(BoundsEvidence::CheckedBound));
@@ -1572,6 +2132,56 @@ mod tests {
             "{entries:?}"
         );
         assert_eq!(entries[0].1, ObligationStatus::Unknown);
+    }
+
+    #[test]
+    fn exact_nonempty_same_sequence_clamp_discharges_projection_bounds() {
+        let entries = obligation_statuses(&clamped_projection_program(4, "seq", "lt", 0));
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert!(
+            entries[0].0.contains("sequence-index-bounds"),
+            "{entries:?}"
+        );
+        assert_eq!(entries[0].1, ObligationStatus::Pass);
+        assert_eq!(entries[0].2, "language-exact-sequence-clamp");
+    }
+
+    #[test]
+    fn exact_sequence_clamp_refuses_empty_wrong_fallback_wrong_sequence_and_wrong_predicate() {
+        let mut mismatched_length = clamped_projection_program(4, "seq", "lt", 0);
+        let operations = &mut mismatched_length.functions[0]
+            .body
+            .as_mut()
+            .expect("test body")
+            .blocks[0]
+            .operations;
+        for operation in operations {
+            match &mut operation.kind {
+                BodyOperationKind::SequenceLength { bound }
+                | BodyOperationKind::SequenceProject { bound, .. }
+                    if operation.id == "len" || operation.id == "proj" =>
+                {
+                    *bound = SequenceBound::Exact(5);
+                }
+                _ => {}
+            }
+        }
+
+        for program in [
+            clamped_projection_program(0, "seq", "lt", 0),
+            clamped_projection_program(1, "seq", "lt", 1),
+            clamped_projection_program(4, "other", "lt", 0),
+            clamped_projection_program(4, "seq", "le", 0),
+            mismatched_length,
+        ] {
+            let entries = obligation_statuses(&program);
+            assert_eq!(entries.len(), 1, "{entries:?}");
+            assert!(
+                entries[0].0.contains("sequence-index-bounds"),
+                "{entries:?}"
+            );
+            assert_eq!(entries[0].1, ObligationStatus::Unknown, "{entries:?}");
+        }
     }
 
     /// Unsigned division carries no signed-overflow obligation at all.
