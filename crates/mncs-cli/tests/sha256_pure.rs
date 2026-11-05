@@ -8,9 +8,12 @@
 //! repeated runs converge, and that different chunkings of one input
 //! converge to one digest.
 
+use std::path::PathBuf;
 use std::process::Command;
 
+use serde_json::json;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 fn library_dir() -> String {
     format!("{}/../../library", env!("CARGO_MANIFEST_DIR"))
@@ -47,6 +50,45 @@ fn source() -> String {
 
 fn corpus() -> String {
     example("execution/sha256-corpus.json")
+}
+
+fn byte_sequence(bytes: &[u8]) -> Value {
+    json!({
+        "sequence": {
+            "values": bytes.iter().map(|byte| json!({"byte": {"value": byte}})).collect::<Vec<_>>()
+        }
+    })
+}
+
+struct TemporaryCorpus(PathBuf);
+
+impl TemporaryCorpus {
+    fn write(value: &Value) -> Self {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mncs-sha256-digest-{}-{nonce}.json",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            serde_json::to_vec(value).expect("serialize SHA-256 corpus"),
+        )
+        .expect("write SHA-256 corpus");
+        Self(path)
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for TemporaryCorpus {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 fn run(backend: &str) -> Value {
@@ -126,4 +168,85 @@ fn sha256_chunkings_converge_deterministically() {
         "chunking independence"
     );
     assert_eq!(first, second, "repeatability");
+}
+
+/// The public one-shot function handles empty input, every SHA padding edge,
+/// multiple blocks, and the full application-identity bound on all executable
+/// backends. Rust's `sha2` implementation is the independent oracle.
+#[test]
+fn sha256_bounded_digest_matches_oracle_on_executable_backends() {
+    let lengths = [0usize, 1, 55, 56, 63, 64, 65, 127, 128, 129, 1024];
+    let cases = lengths
+        .iter()
+        .map(|length| {
+            let input = (0..*length)
+                .map(|index| ((index * 37 + 11) % 256) as u8)
+                .collect::<Vec<_>>();
+            let expected = Sha256::digest(&input);
+            json!({
+                "id": format!("sha256-digest-{length}"),
+                "request": {
+                    "schema_version": "0.1",
+                    "target": {
+                        "module": "mncs.std.sha256.v1",
+                        "function": "digest_standard"
+                    },
+                    "arguments": [byte_sequence(&input)],
+                    "step_budget": 8_000_000
+                },
+                "expected": [byte_sequence(&expected)]
+            })
+        })
+        .collect::<Vec<_>>();
+    let corpus = TemporaryCorpus::write(&json!({
+        "schema_version": "0.1",
+        "name": "sha256-bounded-digest",
+        "cases": cases
+    }));
+
+    for backend in EXECUTABLE_BACKENDS {
+        let output = binary()
+            .env("MNCS_LIBRARY_PATH", library_dir())
+            .args([
+                "experiment",
+                "run",
+                &source(),
+                "--backend",
+                backend,
+                "--corpus",
+                corpus.path().to_str().expect("UTF-8 temporary corpus path"),
+            ])
+            .output()
+            .expect("run bounded SHA-256 experiment");
+        assert!(
+            output.status.success(),
+            "{backend}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).expect("result JSON");
+        let observations = result["cases"].as_array().expect("case observations");
+        assert_eq!(observations.len(), lengths.len(), "{backend}: corpus drift");
+        let mut maximum_steps = 0;
+        for observation in observations {
+            assert_eq!(
+                observation["status"], "returned",
+                "{backend}: {observation}"
+            );
+            assert_eq!(
+                observation["expectation_met"], true,
+                "{backend}: {observation}"
+            );
+            let steps = observation["steps"]
+                .as_u64()
+                .expect("reported backend steps");
+            maximum_steps = maximum_steps.max(steps);
+            if backend == "mncs-research-bytecode" {
+                assert!(
+                    steps <= 500_000,
+                    "research-bytecode resource bound: {observation}"
+                );
+            }
+        }
+        eprintln!("{backend} maximum SHA-256 digest steps: {maximum_steps}");
+    }
 }

@@ -54,7 +54,6 @@ use mncs_translation_check::{
     validate_constant_folding, validate_unreachable_removal,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 const OBSERVED_EXECUTION_COMMAND_SCHEMA_VERSION: &str = "mncs.execution-observation-command/1";
 
@@ -575,6 +574,8 @@ const APPLICATION_CONTEXT_MAX_ENVIRONMENT_VALUE_BYTES: usize = 4096;
 const APPLICATION_CONTEXT_MAX_ENVIRONMENT_BYTES: usize = MAX_ENVIRONMENT_BYTES;
 const APPLICATION_CONTEXT_MAX_STDIN: usize = 1024;
 const APPLICATION_CONTEXT_MAX_CWD: usize = 1024;
+const APPLICATION_IDENTITY_HASH_STEP_BUDGET: u64 = 500_000;
+const APPLICATION_IDENTITY_HASH_PROFILE: &str = "0.14";
 
 fn validate_application_environment_limits(
     environment: &[(Vec<u8>, Vec<u8>)],
@@ -1160,10 +1161,35 @@ fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
                 return ExitCode::from(4);
             }
         };
+    let standard_library = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library");
+    let identity_hash_source = standard_library.join("std/sha256.mncs");
+    let identity_hash_source = match fs::canonicalize(&identity_hash_source) {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("error: native SHA-256 standard library source is unavailable: {error}");
+            return ExitCode::from(4);
+        }
+    };
+    let identity_hash_source = identity_hash_source.to_string_lossy().into_owned();
+    let identity_hash_session = match open_native_session(
+        &identity_hash_source,
+        &[standard_library],
+        APPLICATION_IDENTITY_HASH_PROFILE,
+        None,
+        cache.as_ref(),
+        "mncs-application-context-sha256-v1",
+    ) {
+        Ok(session) => session,
+        Err(error) => {
+            eprintln!("error: native application identity hasher could not be admitted: {error}");
+            return ExitCode::from(4);
+        }
+    };
     let context = match application_context_host_value(
         &descriptor.application_identity,
         &options.application_arguments,
         &descriptor.environment_keys,
+        &identity_hash_session,
     ) {
         Ok(context) => context,
         Err(error) => {
@@ -1279,6 +1305,7 @@ fn application_context_host_value(
     application_identity: &str,
     application_arguments: &[String],
     environment_keys: &[String],
+    identity_hash_session: &EmbedSession,
 ) -> Result<HostExecutionValue, String> {
     if application_arguments.len() > APPLICATION_CONTEXT_MAX_ARGV {
         return Err(format!(
@@ -1333,7 +1360,7 @@ fn application_context_host_value(
     if stdin.len() > APPLICATION_CONTEXT_MAX_STDIN {
         return Err("stdin exceeds the 1024-byte bound".to_owned());
     }
-    let identity = Sha256::digest(application_identity.as_bytes());
+    let identity = native_application_identity_digest(identity_hash_session, application_identity)?;
     let mut fields = BTreeMap::new();
     fields.insert("application_identity".to_owned(), host_byte_view(&identity));
     fields.insert(
@@ -1370,6 +1397,55 @@ fn application_context_host_value(
         type_name: "ApplicationContext".to_owned(),
         fields,
     })
+}
+
+/// Compute the application identity through the verified MNCS SHA-256 module.
+/// The host only transports the bounded UTF-8 bytes and converts the returned
+/// digest into the application-context ABI shape.
+fn native_application_identity_digest(
+    session: &EmbedSession,
+    application_identity: &str,
+) -> Result<Vec<u8>, String> {
+    let bytes = application_identity.as_bytes();
+    if bytes.len() > 1024 {
+        return Err("application identity exceeds the 1024-byte SHA-256 bound".to_owned());
+    }
+    let arguments = serde_json::to_string(&vec![host_byte_view(bytes)])
+        .map_err(|error| format!("application identity arguments could not be encoded: {error}"))?;
+    let output = session
+        .call_typed_json(
+            "mncs.std.sha256.v1",
+            "digest_standard",
+            &arguments,
+            &EmbedCallOptions::budgeted(APPLICATION_IDENTITY_HASH_STEP_BUDGET),
+        )
+        .map_err(|error| format!("MNCS SHA-256 invocation failed: {error}"))?;
+    if output.status != "returned" {
+        return Err(format!(
+            "MNCS SHA-256 returned {}: {}",
+            output.status,
+            output
+                .failure_reason
+                .as_deref()
+                .unwrap_or("no failure detail")
+        ));
+    }
+    let Some(ExecutionValue::Sequence { values }) = output.returned.first() else {
+        return Err("MNCS SHA-256 returned no byte sequence".to_owned());
+    };
+    if values.len() != 32 {
+        return Err(format!(
+            "MNCS SHA-256 returned {} bytes instead of 32",
+            values.len()
+        ));
+    }
+    values
+        .iter()
+        .map(|value| match value {
+            ExecutionValue::Byte { value } if (0..=255).contains(value) => Ok(*value as u8),
+            _ => Err("MNCS SHA-256 returned a non-byte digest value".to_owned()),
+        })
+        .collect()
 }
 
 #[cfg(test)]

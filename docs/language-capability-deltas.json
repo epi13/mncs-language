@@ -10,46 +10,6 @@
         "added": [],
         "removed": []
       },
-      "current_content_identity": "sha256:a016970cc4065b2a3eca272faca4b3231398935941f62798bb082a361ed83867",
-      "effects": {
-        "added": [],
-        "removed": []
-      },
-      "exports": {
-        "added": [],
-        "removed": []
-      },
-      "from_profile": "0.18",
-      "intrinsics": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "modules": {
-        "added": [],
-        "changed": [
-          "mncs.core.bounds.v1"
-        ],
-        "removed": []
-      },
-      "previous_content_identity": "sha256:20d4abe5f9e2db66eb641ae66da2b92a2cddec375982a948de2981da50779524",
-      "profiles": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "to_profile": "0.18"
-    },
-    {
-      "canonical_examples": {
-        "added": [],
-        "changed": [],
-        "removed": []
-      },
-      "capabilities": {
-        "added": [],
-        "removed": []
-      },
       "current_content_identity": "sha256:20d4abe5f9e2db66eb641ae66da2b92a2cddec375982a948de2981da50779524",
       "effects": {
         "added": [],
@@ -331,9 +291,52 @@
         "removed": []
       },
       "to_profile": "0.19"
+    },
+    {
+      "canonical_examples": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "capabilities": {
+        "added": [],
+        "removed": []
+      },
+      "current_content_identity": "sha256:0f8711fb39044765f4a4520c75ed1447b3beb7cf725c293f6961ccfa308dd142",
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "exports": {
+        "added": [
+          "mncs.std.sha256.v1::block_bytes",
+          "mncs.std.sha256.v1::digest_standard"
+        ],
+        "removed": []
+      },
+      "from_profile": "0.19",
+      "intrinsics": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "modules": {
+        "added": [],
+        "changed": [
+          "mncs.std.sha256.v1"
+        ],
+        "removed": []
+      },
+      "previous_content_identity": "sha256:869f4de01acaec8c911444c0539fa788b934b4b623476d2666d67524538e3191",
+      "profiles": {
+        "added": [],
+        "changed": [],
+        "removed": []
+      },
+      "to_profile": "0.19"
     }
   ],
-  "history_identity": "sha256:42e79153f13db56408aced04d3f5862b7c54cfd5e7e5974382e35f7ef58a3293",
+  "history_identity": "sha256:dbce8357d293b12ea2ddfa71234b7491015f26366ba65698f2c4ced806b53ee5",
   "retention": 8,
   "schema_version": "mncs.language-capability-deltas/1"
 }

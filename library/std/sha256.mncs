@@ -231,6 +231,35 @@ fn finalize_standard(st: DigestState) -> (result: [byte; 32]) {
     return finalize(st, standard_round_constants());
 }
 
+// One-shot SHA-256 for a bounded byte view. A runtime-length block traversal
+// feeds only the blocks present in the input. The partial final block is
+// zero-padded only in storage; chunk_length preserves the exact input length.
+fn block_bytes(data: [byte; up_to 1024], block_start: u64) -> (result: [byte; 64]) {
+    let zero_block: [byte; 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    iterate offset over zero_block carrying bytes: [byte; 64] = zero_block {
+        let position: u64 = block_start +% offset;
+        let safe_position: u64 = select(position < data.len, position, 0);
+        let value: byte = data[safe_position];
+        next bytes = replace(bytes, offset, select(position < data.len, value, 0));
+    }
+    return bytes;
+}
+
+fn digest_standard(data: [byte; up_to 1024]) -> (result: [byte; 32]) {
+    let initial: DigestState = init();
+    let block_indices: [u64; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let block_count: u64 = (data.len +% 63) / 64;
+    let active_blocks: [u64; up_to 16] = block_indices[0..block_count];
+    iterate block over active_blocks carrying state: DigestState = initial {
+        let block_start: u64 = block *% 64;
+        let remaining: u64 = data.len -% block_start;
+        let chunk_length: u64 = select(remaining < 64, remaining, 64);
+        let chunk: [byte; 64] = block_bytes(data, block_start);
+        next state = update_standard(state, chunk, chunk_length);
+    }
+    return finalize_standard(state);
+}
+
 // Eight words to 32 big-endian bytes.
 fn state_to_bytes(h: [u32; 8]) -> (result: [byte; 32]) {
     let seed: [byte; 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

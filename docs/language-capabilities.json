@@ -1200,7 +1200,7 @@
     ]
   },
   "compiler_inventory_identity": "sha256:fef48bfba2b784166f578f70125e8c0b3ca8fc654e4f1733f0e53b4103932f04",
-  "content_identity": "sha256:869f4de01acaec8c911444c0539fa788b934b4b623476d2666d67524538e3191",
+  "content_identity": "sha256:0f8711fb39044765f4a4520c75ed1447b3beb7cf725c293f6961ccfa308dd142",
   "current_profile": "0.19",
   "examples": [
     {
@@ -8968,18 +8968,20 @@
     },
     {
       "capabilities": [],
-      "compiler_source_identity": "mncs:source:artifact:f988916b8c6173e9b9036895e6ab186af0895d4ffbaaf89dc91f830ab3c4cc1b",
+      "compiler_source_identity": "mncs:source:artifact:d7da7ebe6f87d28ce7985faf9ccf204c4239b14c0644305a89f6d08e39faad67",
       "effects": [],
       "exports": [
         "DigestState",
         "State",
         "big_sigma0",
         "big_sigma1",
+        "block_bytes",
         "candidate_sha256_abc",
         "candidate_sha256_abc_standard",
         "candidate_sha256_blocks",
         "ch",
         "compress",
+        "digest_standard",
         "finalize",
         "finalize_standard",
         "init",
@@ -9000,11 +9002,11 @@
       "imports": [
         "mncs.std.encoding.v1"
       ],
-      "inventory_identity": "sha256:134fe32e380eafa838927086e97822c2e367c3db9ef8e653f345eb39e31d3cea",
+      "inventory_identity": "sha256:b6230ecfcd86966601649e09adbd75f623a6b2770a55ef612f2c9d4e4da323d9",
       "module": "mncs.std.sha256.v1",
       "path": "library/std/sha256.mncs",
       "profile": "0.14",
-      "source_identity": "sha256:d6e72aaf07234e4c83324b6055c9457804d9799c02fba5c8789c8bc54367cfbd",
+      "source_identity": "sha256:9458344edd856590292e2447b8e2ffb8f1054840615ede7ad11bc8f098a75212",
       "symbols": [
         {
           "identity": "mncs:0.2:function:mncs.std.sha256.v1::big_sigma0",
@@ -9015,6 +9017,11 @@
           "identity": "mncs:0.2:function:mncs.std.sha256.v1::big_sigma1",
           "kind": "function",
           "name": "big_sigma1"
+        },
+        {
+          "identity": "mncs:0.2:function:mncs.std.sha256.v1::block_bytes",
+          "kind": "function",
+          "name": "block_bytes"
         },
         {
           "identity": "mncs:0.2:function:mncs.std.sha256.v1::candidate_sha256_abc",
@@ -9040,6 +9047,11 @@
           "identity": "mncs:0.2:function:mncs.std.sha256.v1::compress",
           "kind": "function",
           "name": "compress"
+        },
+        {
+          "identity": "mncs:0.2:function:mncs.std.sha256.v1::digest_standard",
+          "kind": "function",
+          "name": "digest_standard"
         },
         {
           "identity": "mncs:0.2:function:mncs.std.sha256.v1::finalize",
@@ -10521,7 +10533,7 @@
     {
       "kind": "library_module",
       "path": "library/std/sha256.mncs",
-      "source_identity": "sha256:d6e72aaf07234e4c83324b6055c9457804d9799c02fba5c8789c8bc54367cfbd"
+      "source_identity": "sha256:9458344edd856590292e2447b8e2ffb8f1054840615ede7ad11bc8f098a75212"
     },
     {
       "kind": "library_module",
