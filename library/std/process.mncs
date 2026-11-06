@@ -26,14 +26,16 @@ record ProcessResourceEnvelope {
 }
 
 // Process launch vectors admit 256 entries: real invocations routinely
-// carry dozens of arguments and environment entries. Each environment value
-// allows 4096 bytes for long host paths and remains bounded by the runtime's
-// 64 KiB aggregate environment limit. This capacity must
+// carry dozens of arguments and environment entries, and the per-element
+// 1024-byte cap already bounds the worst-case request. This capacity must
 // agree with mncs.std.application.v1 and the language runtime's process
 // launch validation.
-// Standard input is bounded at the active source-profile ceiling of 4096
-// bytes, enough for structured tool requests while staying within the
-// language's bounded-sequence contract.
+// The first stdin view uses the Profile 0.19 ceiling of 4096 bytes. Larger
+// one-shot requests continue in at most 256 bounded 4096-byte chunks. The
+// explicit count and per-chunk bounds keep serialization finite while
+// admitting requests up to 1,052,672 bytes through the same process_run
+// capability grant. The runtime validates the count and total against its
+// lower-level process-input ceiling; it never truncates an oversized request.
 record ProcessRequest {
     program: [byte; up_to 1024],
     argv: [[byte; up_to 1024]; up_to 256],
@@ -43,6 +45,8 @@ record ProcessRequest {
     environment_count: u64,
     resources: ProcessResourceEnvelope,
     stdin: [byte; up_to 4096],
+    stdin_chunks: [[byte; up_to 4096]; up_to 256],
+    stdin_chunk_count: u64,
     stdout_limit: u64,
     stderr_limit: u64,
     deadline_ms: u64

@@ -1,4 +1,4 @@
-mncs 0.18;
+mncs 0.19;
 module mncs.language.process_lifecycle_smoke;
 use mncs.std.process.v1 as process;
 use mncs.std.process.v1;
@@ -20,7 +20,9 @@ fn request() -> (result: process.ProcessRequest) {
             has_swap_max: true,
             process_max: 16
         },
-        stdin: [],
+        stdin: [97],
+        stdin_chunks: [[98]],
+        stdin_chunk_count: 1,
         stdout_limit: 1024,
         stderr_limit: 1024,
         deadline_ms: 30000

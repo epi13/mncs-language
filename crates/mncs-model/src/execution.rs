@@ -704,6 +704,14 @@ pub enum HostExecutionValue {
     Byte {
         value: i128,
     },
+    /// Compact transport for a bounded `byte` sequence. `base64` uses the
+    /// canonical RFC 4648 alphabet and padding; the typed ABI expands it
+    /// only after checking the declared sequence capacity. This avoids
+    /// representing every input byte as a separate JSON object at host
+    /// boundaries.
+    ByteString {
+        base64: String,
+    },
     Finite {
         #[serde(rename = "type")]
         #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -1161,11 +1169,79 @@ pub(crate) fn process_request_from_value(
             .map_err(|_| "process request current_dir is not valid UTF-8".to_owned())?;
         Some(std::path::PathBuf::from(text))
     };
-    let stdin = process_bytes(
+    const PROCESS_STDIN_CHUNK_BYTES: usize = MAX_SEQUENCE_BOUND as usize;
+    const PROCESS_STDIN_CHUNK_CAPACITY: usize = PROCESS_LAUNCH_VECTOR_CAPACITY;
+    const PROCESS_STDIN_MAX_BYTES: usize =
+        PROCESS_STDIN_CHUNK_BYTES * (PROCESS_STDIN_CHUNK_CAPACITY + 1);
+
+    let initial_stdin = process_bytes(
         record_field(value, "stdin")
             .ok_or_else(|| "process request is missing stdin".to_owned())?,
         "stdin",
     )?;
+    if initial_stdin.len() > PROCESS_STDIN_CHUNK_BYTES {
+        return Err(format!(
+            "process request initial stdin exceeds its {PROCESS_STDIN_CHUNK_BYTES}-byte bound"
+        ));
+    }
+    let mut stdin_chunks = Vec::new();
+    let mut stdin_total = initial_stdin.len();
+    match (
+        record_field(value, "stdin_chunks"),
+        record_field(value, "stdin_chunk_count"),
+    ) {
+        (None, None) => {
+            // Older compiled v1 callers have only the original single stdin
+            // view. Preserve that request shape and behavior.
+        }
+        (Some(ExecutionValue::Sequence { values }), Some(count_value)) => {
+            let declared_count = process_u64(count_value, "stdin_chunk_count")?;
+            if declared_count != values.len() as u64 || values.len() > PROCESS_STDIN_CHUNK_CAPACITY
+            {
+                return Err(format!(
+                    "process request stdin_chunk_count does not match its bounded {}-chunk stdin_chunks",
+                    PROCESS_STDIN_CHUNK_CAPACITY
+                ));
+            }
+            stdin_chunks.reserve(values.len());
+            for (index, item) in values.iter().enumerate() {
+                let chunk = process_bytes(item, &format!("stdin_chunks[{index}]"))?;
+                if chunk.is_empty() {
+                    return Err(format!(
+                        "process request stdin_chunks[{index}] must not be empty"
+                    ));
+                }
+                if chunk.len() > PROCESS_STDIN_CHUNK_BYTES {
+                    return Err(format!(
+                        "process request stdin_chunks[{index}] exceeds its {PROCESS_STDIN_CHUNK_BYTES}-byte bound"
+                    ));
+                }
+                stdin_total = stdin_total
+                    .checked_add(chunk.len())
+                    .ok_or_else(|| "process request stdin byte count overflows".to_owned())?;
+                if stdin_total > PROCESS_STDIN_MAX_BYTES {
+                    return Err(format!(
+                        "process request stdin exceeds its {PROCESS_STDIN_MAX_BYTES}-byte bound"
+                    ));
+                }
+                stdin_chunks.push(chunk);
+            }
+        }
+        (Some(_), Some(_)) => {
+            return Err("process request stdin_chunks must be a bounded sequence".to_owned())
+        }
+        _ => {
+            return Err(
+                "process request stdin_chunks and stdin_chunk_count must be provided together"
+                    .to_owned(),
+            )
+        }
+    }
+    let mut stdin = Vec::with_capacity(stdin_total);
+    stdin.extend_from_slice(&initial_stdin);
+    for chunk in stdin_chunks {
+        stdin.extend_from_slice(&chunk);
+    }
     let stdout_limit = process_u64(
         record_field(value, "stdout_limit")
             .ok_or_else(|| "process request is missing stdout_limit".to_owned())?,
@@ -1701,7 +1777,11 @@ fn validate_standard_process_record_type(
         .map(|field| field.name.as_str())
         .collect::<BTreeSet<_>>();
     let expected_set = expected_fields.iter().copied().collect::<BTreeSet<_>>();
-    if actual_fields != expected_set {
+    let mut chunked_process_request_fields = expected_set.clone();
+    chunked_process_request_fields.extend(["stdin_chunks", "stdin_chunk_count"]);
+    let process_request_shape_matches = expected_name == "ProcessRequest"
+        && (actual_fields == expected_set || actual_fields == chunked_process_request_fields);
+    if !process_request_shape_matches && actual_fields != expected_set {
         return Err(format!(
             "standard process {expected_name} field set does not match mncs.std.process.v1"
         ));
@@ -1774,8 +1854,12 @@ fn validate_standard_process_record_type(
                 }
                 "resources" => standard_record("ProcessResourceEnvelope"),
                 "stdin" => Some(byte_view(SequenceBound::UpTo(MAX_SEQUENCE_BOUND))),
-                "argv_count" | "environment_count" | "stdout_limit" | "stderr_limit"
-                | "deadline_ms" => Some(u64_type.clone()),
+                "stdin_chunks" => Some(BodyType::Sequence {
+                    element: Box::new(byte_view(SequenceBound::UpTo(MAX_SEQUENCE_BOUND))),
+                    bound: SequenceBound::UpTo(PROCESS_LAUNCH_VECTOR_CAPACITY as u32),
+                }),
+                "argv_count" | "environment_count" | "stdin_chunk_count" | "stdout_limit"
+                | "stderr_limit" | "deadline_ms" => Some(u64_type.clone()),
                 _ => None,
             },
             "ProcessResourceEnvelope" => match field {

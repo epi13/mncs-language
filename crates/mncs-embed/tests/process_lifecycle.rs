@@ -14,7 +14,7 @@ use mncs_syntax::{SourceArtifactKind, SourceEnvelope};
 use serde_json::{json, Value};
 
 const SOURCE: &str = r#"
-mncs 0.18;
+mncs 0.19;
 module app.process_lifecycle_embed;
 use mncs.std.process.v1;
 
@@ -101,6 +101,29 @@ fn byte_sequence(bytes: &[u8]) -> Value {
     json!({"sequence":{"values":bytes.iter().map(|byte| json!({"byte":{"value":byte}})).collect::<Vec<_>>()}})
 }
 
+fn byte_string(bytes: &[u8]) -> Value {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or_default();
+        let third = chunk.get(2).copied().unwrap_or_default();
+        encoded.push(ALPHABET[(first >> 2) as usize] as char);
+        encoded.push(ALPHABET[(((first & 0x03) << 4) | (second >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            encoded.push(ALPHABET[(((second & 0x0f) << 2) | (third >> 6)) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+        if chunk.len() > 2 {
+            encoded.push(ALPHABET[(third & 0x3f) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+    }
+    json!({"byte_string":{"base64":encoded}})
+}
+
 fn integer(value: u64) -> Value {
     json!({"integer":{"value":value}})
 }
@@ -128,7 +151,15 @@ fn process_request_with_stdin(
 ) -> String {
     let mut request: Value = serde_json::from_str(&process_request(program, argv, environment))
         .expect("process request JSON");
-    request[0]["record"]["fields"]["stdin"] = byte_sequence(stdin);
+    let chunk_bytes = MAX_SEQUENCE_BOUND as usize;
+    let initial_len = stdin.len().min(chunk_bytes);
+    let chunks = stdin[initial_len..]
+        .chunks(chunk_bytes)
+        .map(byte_string)
+        .collect::<Vec<_>>();
+    request[0]["record"]["fields"]["stdin"] = byte_string(&stdin[..initial_len]);
+    request[0]["record"]["fields"]["stdin_chunks"] = json!({"sequence":{"values":chunks}});
+    request[0]["record"]["fields"]["stdin_chunk_count"] = integer(chunks.len() as u64);
     serde_json::to_string(&request).expect("process request JSON with stdin")
 }
 
@@ -169,6 +200,8 @@ fn process_request_with_envelope(
                 "environment_count": integer(environment.len() as u64),
                 "resources": resources,
                 "stdin": byte_sequence(b""),
+                "stdin_chunks": {"sequence":{"values":[]}},
+                "stdin_chunk_count": integer(0),
                 "stdout_limit": integer(stdout_limit),
                 "stderr_limit": integer(stderr_limit),
                 "deadline_ms": integer(10000)
@@ -632,18 +665,23 @@ fn process_launch_vectors_accept_capacity_and_reject_capacity_plus_one() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn process_stdin_accepts_profile_capacity_and_rejects_one_byte_over() {
+fn process_stdin_streams_the_full_mncs_capacity_without_loss_or_reordering() {
     let session = open_session();
-    let options = process_grant("/usr/bin/wc");
-    let at_limit = vec![b'x'; MAX_SEQUENCE_BOUND as usize];
+    let options = process_grant("/usr/bin/python3");
+    let chunk_bytes = MAX_SEQUENCE_BOUND as usize;
+    let max_bytes = chunk_bytes * (PROCESS_LAUNCH_VECTOR_CAPACITY + 1);
+    let at_limit = (0..max_bytes)
+        .map(|index| ((index * 131 + (index / chunk_bytes) * 29 + 17) & 0xff) as u8)
+        .collect::<Vec<_>>();
+    let hash_program = "import hashlib, sys\nsys.stdout.write(hashlib.sha256(sys.stdin.buffer.read()).hexdigest() + '\\n')\n";
     let started = session
         .call_typed_json(
             "app.process_lifecycle_embed",
             "start_owned",
-            &process_request_with_stdin("/usr/bin/wc", &["-c"], &[], &at_limit),
+            &process_request_with_stdin("/usr/bin/python3", &["-c", hash_program], &[], &at_limit),
             &options,
         )
-        .expect("stdin at the MNCS profile capacity is a valid typed request");
+        .expect("stdin at the full bounded MNCS capacity is a valid typed request");
     assert_eq!(started.status, "returned", "{:?}", started.failure_reason);
     let handle = process_handle(&started.returned[0]);
     let completed = call_observation(&session, "reap_owned", handle, &options);
@@ -651,8 +689,8 @@ fn process_stdin_accepts_profile_capacity_and_rejects_one_byte_over() {
     assert_eq!(observation_signed(&completed, "exit_code"), Some(0));
     assert_eq!(
         observation_bytes(&completed, "stdout"),
-        format!("{}\n", MAX_SEQUENCE_BOUND).into_bytes(),
-        "the process receives every input byte"
+        b"3608c6208fa3a2cec7131f9eee1e150abb7de7f9d5944d7eed56f18856d99437\n",
+        "the independent digest covers every byte in order across all chunks"
     );
     match observation_status(&completed) {
         1 => assert!(observation_bool(&completed, "success")),
@@ -663,21 +701,83 @@ fn process_stdin_accepts_profile_capacity_and_rejects_one_byte_over() {
             );
             assert!(!observation_bool(&completed, "observation_complete"));
         }
-        status => panic!("wc exits or remains explicitly UNKNOWN, got {status}: {completed:?}"),
+        status => {
+            panic!("the child exits or remains explicitly UNKNOWN, got {status}: {completed:?}")
+        }
     }
+    assert!(observation_bool(&completed, "launcher_reaped"));
+    assert!(observation_bool(&completed, "cleanup_complete"));
+    assert!(observation_bool(&completed, "tree_empty"));
 
-    let over_limit = vec![b'x'; MAX_SEQUENCE_BOUND as usize + 1];
+    let over_limit = vec![b'x'; max_bytes + 1];
     let rejected = session
         .call_typed_json(
             "app.process_lifecycle_embed",
             "start_owned",
-            &process_request_with_stdin("/usr/bin/wc", &["-c"], &[], &over_limit),
+            &process_request_with_stdin(
+                "/usr/bin/python3",
+                &["-c", hash_program],
+                &[],
+                &over_limit,
+            ),
             &options,
         )
-        .expect_err("stdin beyond the MNCS profile capacity is rejected before launch");
+        .expect_err("stdin beyond the MNCS contract capacity is rejected before launch");
     assert!(
-        rejected.message.contains("4096"),
-        "the declared capacity is reported: {rejected:?}"
+        rejected.message.contains("256")
+            || rejected.message.contains("capacity")
+            || rejected.message.contains("bound"),
+        "the bounded chunk capacity is reported: {rejected:?}"
+    );
+
+    let inconsistent_count = process_request_with_stdin(
+        "/usr/bin/python3",
+        &["-c", hash_program],
+        &[],
+        &at_limit[..chunk_bytes + 1],
+    );
+    let mut inconsistent_count: Value =
+        serde_json::from_str(&inconsistent_count).expect("chunked request JSON");
+    inconsistent_count[0]["record"]["fields"]["stdin_chunk_count"] = integer(0);
+    let inconsistent_count = serde_json::to_string(&inconsistent_count).expect("request JSON");
+    let rejected = session
+        .call_typed_json(
+            "app.process_lifecycle_embed",
+            "start_owned",
+            &inconsistent_count,
+            &options,
+        )
+        .expect("mismatched chunk count returns a structured request failure");
+    assert_eq!(rejected.status, "invalid_request");
+    let rejection_reason = rejected.failure_reason.as_deref().unwrap_or_default();
+    assert!(
+        rejection_reason.contains("stdin_chunk_count"),
+        "the invalid chunk count is identified: {rejected:?}"
+    );
+
+    let mut empty_chunk: Value = serde_json::from_str(&process_request(
+        "/usr/bin/python3",
+        &["-c", hash_program],
+        &[],
+    ))
+    .expect("process request JSON");
+    empty_chunk[0]["record"]["fields"]["stdin_chunks"] =
+        json!({"sequence":{"values":[byte_sequence(&[])]}});
+    empty_chunk[0]["record"]["fields"]["stdin_chunk_count"] = integer(1);
+    let empty_chunk = serde_json::to_string(&empty_chunk).expect("request JSON");
+    let rejected = session
+        .call_typed_json(
+            "app.process_lifecycle_embed",
+            "start_owned",
+            &empty_chunk,
+            &options,
+        )
+        .expect("empty continuation chunk returns a structured request failure");
+    assert_eq!(rejected.status, "invalid_request");
+    let rejection_reason = rejected.failure_reason.as_deref().unwrap_or_default();
+    assert!(
+        rejection_reason.contains("must not be empty"),
+        "the empty chunk is diagnosed: {rejected:?}"
     );
 }
 

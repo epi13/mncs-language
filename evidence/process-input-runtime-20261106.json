@@ -1,0 +1,106 @@
+{
+  "schema_version": "mncs.language.process-input-runtime-verification/1",
+  "identity": "ev_luna_process_input_chunks_runtime_20261106",
+  "owner": "mncs-language",
+  "recorded_at": "2026-11-06T03:19:51Z",
+  "campaign": {
+    "identity": "cmp_luna_max_native_ecosystem_20261105_0400z",
+    "session_id": "ses_25afddb7420e6585",
+    "environment_id": "renv_c53b248cd18a32f6",
+    "work_intent_identity": "int_99bcfedd8638356e",
+    "work_intent": "Develop and verify the MNCS language, compiler and runtime in the selected checkout.",
+    "claim_identity": "clm_308fbf5888b04b67",
+    "claim_basis": "explicit-adoption",
+    "claim_paths": [
+      "crates/mncs-codegen/src/support.rs",
+      "crates/mncs-embed/tests/process_lifecycle.rs",
+      "crates/mncs-model/src/execution.rs",
+      "library/std/process.mncs",
+      "library/stdlib-bundle.json",
+      "tests/process_lifecycle_effect.mncs"
+    ]
+  },
+  "implementation": {
+    "stdlib_contract": {
+      "source_module": "mncs.std.process.v1",
+      "upstream_feature_commit": "400a24e2a5ef01ef392cbcb6dd9e359c8b730c41",
+      "source_sha256": "6043a3aa2be1c664fa7004cc68f1d28874df261cc4834c47b89d99dbba35b4f4",
+      "language_bundle_identity": "mncs:stdlib-bundle:1c52f2a4cd5149c87b95c4657b4a43871193480ba87ff37002279a1712d24d4e",
+      "language_bundle_module_count": 61,
+      "input_bound": {
+        "initial_bytes": 4096,
+        "chunk_bytes": 4096,
+        "maximum_chunks": 256,
+        "maximum_total_bytes": 1052672,
+        "count_is_explicit": true,
+        "empty_continuation_chunks_refused": true,
+        "oversized_or_malformed_input_truncated": false
+      },
+      "runtime_compatibility": "The process runtime accepts the original v1 ProcessRequest field set and the extended chunked field set. It flattens validated bounded chunks into the existing host process request before launch."
+    },
+    "typed_host_transport": {
+      "representation": "HostExecutionValue.byte_string.base64",
+      "encoding": "canonical padded RFC 4648 base64",
+      "accepted_only_for": "byte sequences",
+      "decoded_against_declared_sequence_capacity": true,
+      "preserves_existing_structured_document_limits": true
+    },
+    "runtime_source_sha256": "5123a1992588eda89ce95f839e3ffc7458e3916074303bcfb370c6615df904bc",
+    "host_value_source_sha256": "0a80f03fc1bffd5578aac2fe1e8f3388ae7c5aed0a34980ced7df2c7a54fca39",
+    "integration_test_source_sha256": "3e838b80503189698a5a64dbc1bb983ab73b88bbed895d9b854be5f259b796cf",
+    "process_smoke_source_sha256": "64f79864136f788d678876252846a0db0037102b17daeee1a4b8b3b5f2b2b0fd"
+  },
+  "verification": {
+    "tests": {
+      "command": "cargo test -p mncs-model -p mncs-codegen -p mncs-embed",
+      "exit_code": 0,
+      "results": {
+        "mncs-model": { "passed": 258, "failed": 0 },
+        "mncs-codegen": { "passed": 75, "failed": 0 },
+        "mncs-embed": { "passed": 56, "failed": 0 }
+      },
+      "total_passed": 389,
+      "total_failed": 0
+    },
+    "bundle": {
+      "command": "target/debug/mncs bundle verify library/stdlib-bundle.json",
+      "exit_code": 0,
+      "identity": "mncs:stdlib-bundle:1c52f2a4cd5149c87b95c4657b4a43871193480ba87ff37002279a1712d24d4e",
+      "modules": 61
+    },
+    "source_compile": {
+      "command": "MNCS_LIBRARY_PATH=library:/home/epi13/Documents/Projects/mncs-test/native target/debug/mncs compile tests/process_lifecycle_effect.mncs --include-tests --emit semantic,hir,ssa,target-plan,backend --target mncs-research-bytecode --output-dir <temporary directory>",
+      "exit_code": 0,
+      "compilation_status": "completed_with_unresolved_obligations",
+      "backend_status": "PASS",
+      "diagnostics": {
+        "CMP301_unresolved_obligations": 6,
+        "other_errors": 0
+      }
+    },
+    "native_toolchain_execution": {
+      "operation": "mncs.std.process.v1::run via mncs call",
+      "backend": "mncs-research-bytecode",
+      "encoded_typed_request_bytes": 1412981,
+      "stdin_bytes": 1052672,
+      "stdin_sha256": "3608c6208fa3a2cec7131f9eee1e150abb7de7f9d5944d7eed56f18856d99437",
+      "status": "returned",
+      "process_exit_code": 0,
+      "stdout_ascii": "3608c6208fa3a2cec7131f9eee1e150abb7de7f9d5944d7eed56f18856d99437 + LF",
+      "stdout_hex": "333630386336323038666133613263656337313331663965656531653135306162623764653766396435393434643765656435366631383835366439393433370a",
+      "stdout_truncated": false,
+      "stderr_truncated": false,
+      "process_effect_count": 1,
+      "backend_artifact_identity": "mncs:compiler:backend-artifact:b121042a2d5c24fcf82ab208e6741c34a1da099fe97adcf2f3a7f1b0f7849711",
+      "backend_artifact_sha256": "f442232cb99d0e07611ac92ac68f78b401fd22aada66c5623d96f737dc7113ac"
+    },
+    "limitations": [
+      "The compiler source smoke completed with six unresolved CMP301 obligations; those remain visible and are not counted as discharged by the process execution result.",
+      "The Environment reference toolchain was unavailable in this checkout; Cargo and the built mncs CLI from the selected Language worktree were used directly."
+    ]
+  },
+  "verdict": {
+    "status": "PASS_WITH_RETAINED_OBLIGATIONS",
+    "summary": "The Language process runtime accepts the source-bounded chunked ProcessRequest, validates counts and byte limits without truncation, and passes the full 1,052,672-byte stream through the CLI and process_run effect. The child-computed digest matches an independent fixed expectation. All touched Rust crate suites pass; source compilation retains six unrelated/unresolved CMP301 obligations."
+  }
+}

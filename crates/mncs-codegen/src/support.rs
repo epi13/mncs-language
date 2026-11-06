@@ -1517,6 +1517,19 @@ fn resolve_host_value(
         BackendValueContract::Sequence {
             element, length, ..
         } => {
+            if let HostExecutionValue::ByteString { base64 } = value {
+                if !matches!(element.get(), BodyType::Byte) {
+                    return Err(format!(
+                        "MNCS_TYPED_VALUE {path}: byte_string is valid only for byte sequences"
+                    ));
+                }
+                return resolve_host_byte_string(
+                    base64,
+                    *length as usize,
+                    Some(*length as usize),
+                    path,
+                );
+            }
             let HostExecutionValue::Sequence { values } = value else {
                 return Err(format!(
                     "MNCS_TYPED_VALUE {path}: expected exact sequence, received a different host value"
@@ -1547,6 +1560,14 @@ fn resolve_host_value(
         BackendValueContract::View {
             element, capacity, ..
         } => {
+            if let HostExecutionValue::ByteString { base64 } = value {
+                if !matches!(element.get(), BodyType::Byte) {
+                    return Err(format!(
+                        "MNCS_TYPED_VALUE {path}: byte_string is valid only for byte sequences"
+                    ));
+                }
+                return resolve_host_byte_string(base64, *capacity as usize, None, path);
+            }
             let HostExecutionValue::Sequence { values } = value else {
                 return Err(format!(
                     "MNCS_TYPED_VALUE {path}: expected bounded sequence, received a different host value"
@@ -1820,6 +1841,104 @@ fn value_shape(value: &ExecutionValue) -> String {
         ExecutionValue::Vector { values } => format!("vector ({} lane(s))", values.len()),
         ExecutionValue::Mask { lanes } => format!("mask ({} lane(s))", lanes.len()),
     }
+}
+
+fn resolve_host_byte_string(
+    base64: &str,
+    capacity: usize,
+    exact_length: Option<usize>,
+    path: &str,
+) -> Result<ExecutionValue, String> {
+    let bytes = decode_bounded_base64(base64, capacity, path)?;
+    if let Some(expected) = exact_length {
+        if bytes.len() != expected {
+            return Err(format!(
+                "MNCS_TYPED_VALUE {path}: byte_string length mismatch: expected {expected}, received {}",
+                bytes.len()
+            ));
+        }
+    }
+    let values = bytes
+        .into_iter()
+        .map(|value| ExecutionValue::Byte {
+            value: i128::from(value),
+        })
+        .collect();
+    Ok(ExecutionValue::Sequence {
+        values: Arc::new(values),
+    })
+}
+
+fn decode_bounded_base64(encoded: &str, capacity: usize, path: &str) -> Result<Vec<u8>, String> {
+    fn value(byte: u8) -> Option<u8> {
+        match byte {
+            b'A'..=b'Z' => Some(byte - b'A'),
+            b'a'..=b'z' => Some(byte - b'a' + 26),
+            b'0'..=b'9' => Some(byte - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+
+    let invalid =
+        || format!("MNCS_TYPED_VALUE {path}: byte_string must use canonical padded base64");
+    let source = encoded.as_bytes();
+    if source.len() % 4 != 0 {
+        return Err(invalid());
+    }
+    let padding = source
+        .iter()
+        .rev()
+        .take_while(|byte| **byte == b'=')
+        .count();
+    if padding > 2 {
+        return Err(invalid());
+    }
+    let decoded_length = (source.len() / 4)
+        .checked_mul(3)
+        .and_then(|length| length.checked_sub(padding))
+        .ok_or_else(invalid)?;
+    if decoded_length > capacity {
+        return Err(format!(
+            "MNCS_TYPED_VALUE {path}: byte_string exceeds byte-sequence capacity {capacity}, decoded length {decoded_length}"
+        ));
+    }
+
+    let block_count = source.len() / 4;
+    let mut decoded = Vec::with_capacity(decoded_length);
+    for (block_index, block) in source.chunks_exact(4).enumerate() {
+        let final_block = block_index + 1 == block_count;
+        let first = value(block[0]).ok_or_else(invalid)?;
+        let second = value(block[1]).ok_or_else(invalid)?;
+        let third_is_padding = block[2] == b'=';
+        let fourth_is_padding = block[3] == b'=';
+        if block[0] == b'=' || block[1] == b'=' {
+            return Err(invalid());
+        }
+        if third_is_padding {
+            if !final_block || !fourth_is_padding || second & 0x0f != 0 {
+                return Err(invalid());
+            }
+            decoded.push((first << 2) | (second >> 4));
+            continue;
+        }
+        let third = value(block[2]).ok_or_else(invalid)?;
+        decoded.push((first << 2) | (second >> 4));
+        decoded.push((second << 4) | (third >> 2));
+        if fourth_is_padding {
+            if !final_block || third & 0x03 != 0 {
+                return Err(invalid());
+            }
+            continue;
+        }
+        let fourth = value(block[3]).ok_or_else(invalid)?;
+        decoded.push((third << 6) | fourth);
+    }
+    if decoded.len() != decoded_length {
+        return Err(invalid());
+    }
+    Ok(decoded)
 }
 
 /// Language-owned resource-exhaustion reason printed by the native process
@@ -2735,6 +2854,66 @@ mod contract_tests {
             ("WordPair".to_owned(), pair_contract()),
             ("Status".to_owned(), status_contract()),
         ])
+    }
+
+    fn byte_view_contract(capacity: u32) -> BackendValueContract {
+        BackendValueContract::View {
+            semantic_type: format!("[byte; up_to {capacity}]"),
+            element: AbiTypeRef(BodyType::Byte),
+            capacity,
+        }
+    }
+
+    #[test]
+    fn compact_byte_string_resolves_canonical_base64_within_sequence_capacity() {
+        let value = HostExecutionValue::ByteString {
+            base64: "AAEC/w==".to_owned(),
+        };
+        let resolved = resolve_host_value(
+            &byte_view_contract(4),
+            &value,
+            &BTreeMap::new(),
+            "arg.stdin",
+        )
+        .expect("bounded byte_string resolves");
+        assert_eq!(
+            resolved,
+            ExecutionValue::Sequence {
+                values: Arc::new(vec![
+                    ExecutionValue::Byte { value: 0 },
+                    ExecutionValue::Byte { value: 1 },
+                    ExecutionValue::Byte { value: 2 },
+                    ExecutionValue::Byte { value: 255 },
+                ]),
+            }
+        );
+    }
+
+    #[test]
+    fn compact_byte_string_rejects_noncanonical_and_oversized_base64() {
+        let noncanonical = HostExecutionValue::ByteString {
+            base64: "AB==".to_owned(),
+        };
+        let refused = resolve_host_value(
+            &byte_view_contract(4),
+            &noncanonical,
+            &BTreeMap::new(),
+            "arg.stdin",
+        )
+        .unwrap_err();
+        assert!(refused.contains("canonical padded base64"), "{refused}");
+
+        let oversized = HostExecutionValue::ByteString {
+            base64: "AAAAAA==".to_owned(),
+        };
+        let refused = resolve_host_value(
+            &byte_view_contract(3),
+            &oversized,
+            &BTreeMap::new(),
+            "arg.stdin",
+        )
+        .unwrap_err();
+        assert!(refused.contains("capacity 3"), "{refused}");
     }
 
     #[test]
