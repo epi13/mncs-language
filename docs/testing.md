@@ -78,3 +78,34 @@ Results remain epistemic: `PASS` is bounded evidence for the recorded cases,
 `FAIL` is an observed counterexample or execution failure, and `UNKNOWN` is
 preserved for unsupported capabilities, budgets, timeouts, or infrastructure
 uncertainty. A finite passing run is not a universal proof of the subject.
+
+## Retaining the reference oracle
+
+Host integration tests can retain research-bytecode compilation while replaying
+the existing body/SSA/backend comparison on each new stateless corpus.
+First admit the independently emitted `CompilationEvidenceBundle` with
+`Session::bind_reference` or `mncs_session_bind_reference(handle, evidence_json)`.
+The payload's semantic and SSA fingerprints must match the compiler's selected
+input and intermediate references, and its backend bytes must match the emitted
+backend reference. A self-consistent backend payload cannot serve as its own
+reference authority. The C admission response is the evidence identity; NULL
+reports invalid evidence. `mncs compile SOURCE --emit backend,evidence --quiet
+--omit-result --output-dir DIR` supplies the existing artifacts without
+redundant result output. Keep their source/compiler admission binding together.
+
+`mncs_embed::Session::compare_reference(corpus, grants)` and the stable C ABI
+`mncs_session_compare_reference(handle, corpus_json, grants_json)` return the
+ordinary `LayeredExecutionComparison` document. The C response is released with
+`mncs_response_free`; malformed inputs and unavailable reference preparation
+return NULL with `mncs_last_error`. An unsupported backend or stateful corpus
+is refused explicitly. Artifact admission still verifies identity and digest.
+
+The session retains immutable body and SSA preparation with independent
+runtime contexts for each validation layer and for real execution. Targets, arguments,
+generic selections, budgets and host grants remain request-specific. Comparison
+observes effects; the separate call/call-batch operation realizes them. No
+execution result is cached. Properties, expected values and full experiment
+status remain responsibilities of their existing experiment/test consumers;
+this operation reports bounded layer agreement only. Store's frozen filesystem
+oracle uses this surface without substituting a compiled backend for research
+verification or rewriting its lifecycle and fault-injection tests.

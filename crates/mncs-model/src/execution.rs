@@ -4213,7 +4213,7 @@ impl ExecutionResult {
 /// checks. Results are observationally identical to calling [`execute`]
 /// once per request.
 pub struct BodyExecutionSession<'a> {
-    program: &'a Program,
+    program: BodyProgram<'a>,
     valid: bool,
     program_identity: Option<SemanticId>,
     program_fingerprint: Option<String>,
@@ -4221,18 +4221,43 @@ pub struct BodyExecutionSession<'a> {
     lifecycle_enabled: bool,
 }
 
+enum BodyProgram<'a> {
+    Borrowed(&'a Program),
+    Shared(Arc<Program>),
+}
+
+impl BodyProgram<'_> {
+    fn as_ref(&self) -> &Program {
+        match self {
+            Self::Borrowed(program) => program,
+            Self::Shared(program) => program,
+        }
+    }
+}
+
 impl<'a> BodyExecutionSession<'a> {
     pub fn new(program: &'a Program) -> Self {
-        let valid = program.validate().valid;
+        Self::prepare(BodyProgram::Borrowed(program))
+    }
+
+    /// Own immutable program material alongside its validated preparation,
+    /// allowing native verification sessions to retain the body oracle.
+    pub fn from_shared(program: Arc<Program>) -> BodyExecutionSession<'static> {
+        BodyExecutionSession::prepare(BodyProgram::Shared(program))
+    }
+
+    fn prepare(program: BodyProgram<'a>) -> Self {
+        let source = program.as_ref();
+        let valid = source.validate().valid;
         let (program_identity, program_fingerprint) = if valid {
             (
-                program
+                source
                     .semantic_identities()
                     .objects
                     .into_iter()
                     .find(|record| record.kind == crate::IdentityKind::Program)
                     .map(|record| record.identity),
-                program.content_fingerprint().ok(),
+                source.content_fingerprint().ok(),
             )
         } else {
             (None, None)
@@ -4394,7 +4419,7 @@ fn execute_inner_body(
     profile: &mut BodyExecutionProfile,
     trusted_arguments: Option<Vec<bool>>,
 ) -> ExecutionResult {
-    let program = session.program;
+    let program = session.program.as_ref();
     if request.schema_version != EXECUTION_REQUEST_SCHEMA_VERSION {
         return ExecutionResult::invalid(
             request,
@@ -4866,7 +4891,7 @@ fn execute_operation(
     profile: &mut BodyExecutionProfile,
     reusable_sequence_parameters: &[&BodyParameter],
 ) -> Option<ExecutionResult> {
-    let program = session.program;
+    let program = session.program.as_ref();
     match &operation.kind {
         BodyOperationKind::Constant { value, ty } => {
             let Some(value) = constant_value(*value, ty) else {

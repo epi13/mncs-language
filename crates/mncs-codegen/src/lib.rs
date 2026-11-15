@@ -2707,8 +2707,16 @@ impl Drop for CraneliftWorker {
 pub struct OwnedExecutionSession {
     artifact: BackendArtifact,
     research: Option<(Box<ResearchBytecodePayload>, Box<SsaExecutionSession>)>,
+    reference: std::sync::OnceLock<Result<ReferencePreparation, String>>,
+    reference_evidence: std::sync::OnceLock<SemanticId>,
     wasm: Option<crate::wasm::WasmModule>,
     cranelift: Option<CraneliftWorker>,
+}
+
+struct ReferencePreparation {
+    body: BodyExecutionSession<'static>,
+    ssa: SsaExecutionSession,
+    backend: SsaExecutionSession,
 }
 
 impl OwnedExecutionSession {
@@ -2787,6 +2795,8 @@ impl OwnedExecutionSession {
         Ok(Self {
             artifact,
             research,
+            reference: std::sync::OnceLock::new(),
+            reference_evidence: std::sync::OnceLock::new(),
             wasm,
             cranelift,
         })
@@ -2799,6 +2809,121 @@ impl OwnedExecutionSession {
 
     pub fn artifact(&self) -> &BackendArtifact {
         &self.artifact
+    }
+
+    /// Bind the independently emitted compiler evidence before reusing the
+    /// reference forms carried in a research payload. An internally coherent
+    /// backend payload is insufficient: its semantic and SSA fingerprints must
+    /// agree with the compiler's selected input and intermediate artifacts.
+    pub fn bind_reference(
+        &self,
+        evidence: &mncs_model::CompilationEvidenceBundle,
+    ) -> Result<(), String> {
+        if !evidence.validate_integrity().is_empty() {
+            return Err("reference compilation evidence is invalid".to_owned());
+        }
+        let Some((payload, _)) = self.research.as_ref() else {
+            return Err("reference admission requires prepared research bytecode".to_owned());
+        };
+        let canonicalized = payload
+            .program
+            .canonicalize_for_hir()
+            .map_err(|error| format!("reference semantic canonicalization failed: {error}"))?;
+        let canonical = canonicalized.canonical_form();
+        let semantic = CompilerArtifactRef::new(
+            ArtifactRepresentation::Semantic,
+            canonical.schema_version.clone(),
+            canonical.fingerprint.clone(),
+        );
+        let selected = CompilerArtifactRef::new(
+            ArtifactRepresentation::SelectedSsa,
+            payload.ssa.schema_version.clone(),
+            payload
+                .ssa
+                .fingerprint()
+                .map_err(|error| error.to_string())?,
+        );
+        let backend = CompilerArtifactRef::new(
+            ArtifactRepresentation::BackendArtifact,
+            BACKEND_ARTIFACT_SCHEMA_VERSION,
+            self.artifact.bytes_sha256.clone(),
+        );
+        if evidence.input != semantic
+            || self.artifact.input != selected
+            || !evidence.emitted_artifacts.contains(&selected)
+            || !evidence.emitted_artifacts.contains(&backend)
+            || evidence.backend.as_ref() != Some(&self.artifact.backend)
+        {
+            return Err("research payload does not match independently emitted semantic/SSA/backend evidence".to_owned());
+        }
+        if let Err(identity) = self.reference_evidence.set(evidence.identity.clone()) {
+            if self.reference_evidence.get() != Some(&identity) {
+                return Err(
+                    "reference session is already bound to different compilation evidence"
+                        .to_owned(),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Replay the ordinary body/SSA/backend comparison using the immutable
+    /// program carried by a research artifact. No host effects are realized
+    /// during comparison. This retains the reference oracle on new inputs
+    /// without recompilation or repeated artifact decoding.
+    pub fn compare_reference(
+        &self,
+        corpus: &ExecutionCorpus,
+        host_grants: &[HostGrant],
+    ) -> Result<LayeredExecutionComparison, String> {
+        if self.reference_evidence.get().is_none() {
+            return Err("reference compilation evidence has not been admitted".to_owned());
+        }
+        let Some((payload, _)) = self.research.as_ref() else {
+            return Err(
+                "reference comparison requires a prepared research-bytecode artifact".to_owned(),
+            );
+        };
+        if !corpus.stateful_cases.is_empty() {
+            return Err("reference comparison accepts stateless corpora only".to_owned());
+        }
+        let preparation = self
+            .reference
+            .get_or_init(|| {
+                Ok(ReferencePreparation {
+                    body: BodyExecutionSession::from_shared(Arc::clone(&payload.program)),
+                    ssa: SsaExecutionSession::from_shared(
+                        Arc::clone(&payload.program),
+                        Arc::clone(&payload.ssa),
+                    )?,
+                    backend: SsaExecutionSession::from_shared(
+                        Arc::clone(&payload.program),
+                        Arc::clone(&payload.ssa),
+                    )?,
+                })
+            })
+            .as_ref()
+            .map_err(Clone::clone)?;
+        Ok(compare_with_prepared_backend(
+            &payload.program,
+            &payload.ssa,
+            corpus,
+            host_grants,
+            Some(&preparation.body),
+            Some(&preparation.ssa),
+            // Keep independent runtime contexts for SSA comparison, backend
+            // comparison, and real execution. Only immutable program/SSA
+            // material is shared, as in the ordinary fresh-layer comparator.
+            |request| {
+                execute_research_bytecode_payload(
+                    &self.artifact,
+                    payload,
+                    request,
+                    false,
+                    Some(&preparation.backend),
+                )
+            },
+        ))
     }
 
     pub fn execute(&self, request: &ExecutionRequest) -> BackendExecutionResult {
@@ -2996,6 +3121,21 @@ pub fn compare_body_ssa_and_backend(
     corpus: &ExecutionCorpus,
     host_grants: &[HostGrant],
 ) -> LayeredExecutionComparison {
+    let backend_session = BackendExecutionSession::new(artifact);
+    compare_with_prepared_backend(program, ssa, corpus, host_grants, None, None, |request| {
+        backend_session.execute(request)
+    })
+}
+
+fn compare_with_prepared_backend(
+    program: &Program,
+    ssa: &SsaModule,
+    corpus: &ExecutionCorpus,
+    host_grants: &[HostGrant],
+    prepared_body: Option<&BodyExecutionSession<'_>>,
+    prepared_ssa: Option<&SsaExecutionSession>,
+    execute_backend: impl Fn(&ExecutionRequest) -> BackendExecutionResult,
+) -> LayeredExecutionComparison {
     let started = Instant::now();
     let mut matching = 0usize;
     let mut mismatching = 0usize;
@@ -3006,12 +3146,22 @@ pub fn compare_body_ssa_and_backend(
     // SSA validation, block indexes, WASM module decoding) is built once for
     // the corpus. Sessions that fail to prepare fall back to the per-case
     // one-shot path, so validation semantics never weaken.
-    let backend_session = BackendExecutionSession::new(artifact);
-    let ssa_session = SsaExecutionSession::new(program, ssa).ok();
+    let ssa_fallback = if prepared_ssa.is_none() {
+        SsaExecutionSession::new(program, ssa).ok()
+    } else {
+        None
+    };
+    let ssa_session = prepared_ssa.or(ssa_fallback.as_ref());
     // Issue #112: the body interpreter shares one validated program across
     // the corpus instead of re-validating and re-fingerprinting per
     // (nested) call. Request-specific checks still run every time.
-    let body_session = BodyExecutionSession::new(program);
+    let body_fallback;
+    let body_session = if let Some(session) = prepared_body {
+        session
+    } else {
+        body_fallback = BodyExecutionSession::new(program);
+        &body_fallback
+    };
     for case_ in &corpus.cases {
         // Granted requests travel with validation authority, but validation
         // OBSERVES rather than realizes: mutating effects validate their
@@ -3029,7 +3179,7 @@ pub fn compare_body_ssa_and_backend(
             },
         );
         trace_timing("compare-ssa", started);
-        let backend = backend_session.execute(&request);
+        let backend = execute_backend(&request);
         trace_timing("compare-backend", started);
         unsupported |= matches!(body.status, ExecutionStatus::Unsupported)
             || matches!(ssa_result.status, ExecutionStatus::Unsupported)
@@ -3333,6 +3483,159 @@ mod tests {
             host_grants: Vec::new(),
             call_depth_budget: None,
         }
+    }
+
+    #[test]
+    fn retained_reference_comparison_matches_fresh_layers_on_new_requests() {
+        let program = program();
+        let compiler = mncs_compiler::ReferenceCompiler::default();
+        let compilation_request = compiler
+            .request_for_program_with_backend(
+                &program,
+                [
+                    ArtifactRepresentation::Ssa,
+                    ArtifactRepresentation::BackendArtifact,
+                    ArtifactRepresentation::EvidenceBundle,
+                ]
+                .into_iter()
+                .collect(),
+                RESEARCH_BYTECODE_BACKEND_NAME,
+            )
+            .unwrap();
+        let compilation = compiler.compile(compilation_request, &program);
+        let ssa = compilation.emissions.ssa.unwrap();
+        let artifact = compilation.emissions.backend.unwrap();
+        let evidence = compilation.evidence.unwrap();
+        let session = OwnedExecutionSession::new(artifact.clone()).unwrap();
+        let empty: ExecutionCorpus = serde_json::from_value(serde_json::json!({
+            "schema_version": "0.1", "name": "empty", "cases": []
+        }))
+        .unwrap();
+        assert!(session.compare_reference(&empty, &[]).is_err());
+        let mut stale = evidence.clone();
+        stale.input.fingerprint.push('f');
+        assert!(session.bind_reference(&stale).is_err());
+        session.bind_reference(&evidence).unwrap();
+        // Model a lowering defect that emits a self-consistent, validly
+        // sealed payload for the wrong computation. Updating the emitted
+        // backend reference keeps the compiler bundle structurally valid;
+        // its independently selected semantic/SSA roots must still reject it.
+        let mut drift = serde_json::to_value(&program).unwrap();
+        drift["functions"][0]["body"]["blocks"][0]["operations"][0]["operands"] =
+            serde_json::json!(["a", "a"]);
+        let drift: Program = serde_json::from_value(drift).unwrap();
+        let drift_ssa = drift.lower_to_ssa().unwrap();
+        let drift_artifact = BackendArtifact::new_with_serialized_payload_and_compiler_metadata(
+            artifact.backend.clone(),
+            artifact.input.clone(),
+            artifact.target.clone(),
+            artifact.artifact_kind.clone(),
+            artifact.format.clone(),
+            &ResearchBytecodePayloadRef {
+                schema_version: "0.1",
+                program: &drift,
+                ssa: &drift_ssa,
+            },
+            artifact.exports.clone(),
+            artifact.assumptions.clone(),
+            artifact.obligations_generated.clone(),
+            artifact.proof_bindings.clone(),
+            artifact.execution_applicability.clone(),
+            artifact.evidence_dependencies.clone(),
+            artifact.unsupported.clone(),
+            artifact.status,
+            mncs_model::BackendArtifactCompilerMetadata {
+                function_value_contracts: artifact.function_value_contracts.clone(),
+                callable_bindings: artifact.callable_bindings.clone(),
+                composite_value_contracts: artifact.composite_value_contracts.clone(),
+                interface_identity: artifact.interface_identity.clone(),
+                generic_entrypoints: artifact.generic_entrypoints.clone(),
+            },
+        )
+        .unwrap();
+        let replacement = CompilerArtifactRef::new(
+            ArtifactRepresentation::BackendArtifact,
+            BACKEND_ARTIFACT_SCHEMA_VERSION,
+            drift_artifact.bytes_sha256.clone(),
+        );
+        let mut drift_evidence = evidence.clone();
+        for reference in &mut drift_evidence.emitted_artifacts {
+            if reference.representation == ArtifactRepresentation::BackendArtifact {
+                *reference = replacement.clone();
+            }
+        }
+        for edge in &mut drift_evidence.transformation_edges {
+            if edge.output.representation == ArtifactRepresentation::BackendArtifact {
+                *edge = mncs_model::TransformationEdge::new(
+                    edge.input.clone(),
+                    replacement.clone(),
+                    edge.pass.clone(),
+                    edge.assumptions_consumed.clone(),
+                    edge.obligations_generated.clone(),
+                    edge.evidence.clone(),
+                    edge.status,
+                    edge.provenance.clone(),
+                );
+            }
+        }
+        drift_evidence.seal();
+        assert!(drift_evidence.validate_integrity().is_empty());
+        let drift_session = OwnedExecutionSession::new(drift_artifact).unwrap();
+        assert!(drift_session.reused());
+        assert!(drift_session
+            .bind_reference(&drift_evidence)
+            .unwrap_err()
+            .contains("independently emitted"));
+        let shared_body = BodyExecutionSession::from_shared(Arc::new(program.clone()));
+        for mut request in [
+            request(20, 22),
+            request(i128::from(i32::MAX), 1),
+            request(-3, 7),
+        ] {
+            for budget in [1, 32768] {
+                request.step_budget = budget;
+                assert_eq!(
+                    shared_body.execute(&request),
+                    BodyExecutionSession::new(&program).execute(&request)
+                );
+                let corpus = ExecutionCorpus {
+                    schema_version: mncs_model::EXECUTION_CORPUS_SCHEMA_VERSION.to_owned(),
+                    name: "new-reference-input".to_owned(),
+                    properties: Vec::new(),
+                    stateful_cases: Vec::new(),
+                    cases: vec![ExecutionCase {
+                        id: "case".to_owned(),
+                        request: request.clone(),
+                        expected: None,
+                        expected_status: None,
+                        maximum_steps: None,
+                        expected_effects: Vec::new(),
+                        prohibit_unexpected_effects: false,
+                    }],
+                };
+                assert_eq!(
+                    session.compare_reference(&corpus, &[]).unwrap(),
+                    compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus, &[]),
+                );
+            }
+        }
+        assert_eq!(
+            session.compare_reference(&empty, &[]).unwrap().status,
+            LayeredExecutionStatus::InvalidInput
+        );
+        let selected = selected_ssa_ref(&ssa);
+        let wasm = lower_selected_ssa(
+            &program,
+            &ssa,
+            selected.clone(),
+            &portable_wasm_plan(selected),
+        )
+        .artifact
+        .unwrap();
+        assert!(OwnedExecutionSession::new(wasm)
+            .unwrap()
+            .compare_reference(&empty, &[])
+            .is_err());
     }
 
     #[test]

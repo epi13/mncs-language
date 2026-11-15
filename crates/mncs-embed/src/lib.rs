@@ -452,6 +452,37 @@ impl Session {
         self.inner.reused()
     }
 
+    /// Admit the independent compiler input/intermediate evidence used as
+    /// reference material by compare_reference. This is separate from backend
+    /// artifact identity admission and does not execute the program.
+    pub fn bind_reference(
+        &self,
+        evidence: &mncs_model::CompilationEvidenceBundle,
+    ) -> Result<(), EmbedError> {
+        self.inner
+            .bind_reference(evidence)
+            .map_err(|message| EmbedError::new("invalid_reference_evidence", message))
+    }
+
+    /// Compare a new stateless corpus against body, SSA, and retained
+    /// research bytecode. Grants are observed, never realized. Unsupported
+    /// artifacts and stateful corpora return an error rather than dropping
+    /// a verification layer. Real execution remains a separate call.
+    pub fn compare_reference(
+        &self,
+        corpus: &mncs_model::ExecutionCorpus,
+        grants: &[Grant],
+    ) -> Result<mncs_codegen::LayeredExecutionComparison, EmbedError> {
+        let grants = grants
+            .iter()
+            .cloned()
+            .map(Grant::into_host_grant)
+            .collect::<Vec<_>>();
+        self.inner
+            .compare_reference(corpus, &grants)
+            .map_err(|message| EmbedError::new("reference_comparison_unavailable", message))
+    }
+
     pub fn digest(&self) -> &str {
         &self.inner.artifact().bytes_sha256
     }
@@ -1317,6 +1348,81 @@ pub unsafe extern "C" fn mncs_session_info(handle: *const Session) -> *mut CallR
         "reused_session": session.reused(),
     });
     match CallResponse::of(&info) {
+        Ok(response) => response,
+        Err(message) => {
+            stash_error(message);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Compare a stateless ExecutionCorpus JSON document through all three
+/// reference layers on a retained artifact. `grants_json` is a Grant array;
+/// these grants are observed only. Returns the ordinary layered comparison
+/// document, or NULL with mncs_last_error on malformed/unsupported input.
+///
+/// # Safety
+///
+/// `handle` must be NULL or live; JSON arguments must be NULL or valid
+/// NUL-terminated UTF-8 strings. Free the result with mncs_response_free.
+#[no_mangle]
+pub unsafe extern "C" fn mncs_session_compare_reference(
+    handle: *const Session,
+    corpus_json: *const c_char,
+    grants_json: *const c_char,
+) -> *mut CallResponse {
+    let result = (|| -> Result<*mut CallResponse, String> {
+        if handle.is_null() {
+            return Err("null session handle".to_owned());
+        }
+        let corpus: mncs_model::ExecutionCorpus =
+            serde_json::from_str(&read_c_str(corpus_json).ok_or("missing corpus JSON")?)
+                .map_err(|error| format!("corpus JSON rejected: {error}"))?;
+        let grants: Vec<Grant> =
+            serde_json::from_str(&read_c_str(grants_json).unwrap_or_else(|| "[]".to_owned()))
+                .map_err(|error| format!("grant JSON rejected: {error}"))?;
+        let comparison = unsafe { &*handle }
+            .compare_reference(&corpus, &grants)
+            .map_err(|error| error.to_string())?;
+        CallResponse::of(&comparison)
+    })();
+    match result {
+        Ok(response) => response,
+        Err(message) => {
+            stash_error(message);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Bind independently emitted CompilationEvidenceBundle JSON to a session's
+/// reference forms. Returns the admitted evidence identity as a JSON string,
+/// or NULL with mncs_last_error. Backend-only sessions do not require this;
+/// reference comparison refuses to run until it succeeds.
+///
+/// # Safety
+///
+/// `handle` must be NULL or live; evidence_json must be NULL or valid
+/// NUL-terminated UTF-8. Free the response with mncs_response_free.
+#[no_mangle]
+pub unsafe extern "C" fn mncs_session_bind_reference(
+    handle: *const Session,
+    evidence_json: *const c_char,
+) -> *mut CallResponse {
+    let result = (|| -> Result<*mut CallResponse, String> {
+        if handle.is_null() {
+            return Err("null session handle".to_owned());
+        }
+        let evidence: mncs_model::CompilationEvidenceBundle = serde_json::from_str(
+            &read_c_str(evidence_json).ok_or("missing compilation evidence JSON")?,
+        )
+        .map_err(|error| format!("compilation evidence JSON rejected: {error}"))?;
+        unsafe { &*handle }
+            .bind_reference(&evidence)
+            .map_err(|error| error.to_string())?;
+        CallResponse::of(&evidence.identity)
+    })();
+    match result {
         Ok(response) => response,
         Err(message) => {
             stash_error(message);

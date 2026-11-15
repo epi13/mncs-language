@@ -30,6 +30,139 @@ fn open_session() -> (Session, String) {
     (session, digest)
 }
 
+fn reference_compilation(source: &str) -> mncs_model::CompilationResult {
+    let compiler = mncs_compiler::ReferenceCompiler::default();
+    let program = compiler
+        .front_end(mncs_syntax::SourceEnvelope::inline(
+            mncs_syntax::SourceArtifactKind::Program,
+            "reference-probe",
+            source,
+        ))
+        .program
+        .unwrap();
+    let request = compiler
+        .request_for_program_with_backend(
+            &program,
+            [
+                mncs_model::ArtifactRepresentation::BackendArtifact,
+                mncs_model::ArtifactRepresentation::EvidenceBundle,
+            ]
+            .into_iter()
+            .collect(),
+            "mncs-research-bytecode",
+        )
+        .unwrap();
+    compiler.compile(request, &program)
+}
+
+#[test]
+fn reference_comparison_crosses_c_abi_and_refuses_bad_input() {
+    let compilation = reference_compilation(SOURCE);
+    let bytes = serde_json::to_vec(&compilation.emissions.backend.unwrap()).unwrap();
+    let evidence = compilation.evidence.unwrap();
+    let handle = unsafe { mncs_embed::mncs_session_open(bytes.as_ptr(), bytes.len()) };
+    assert!(!handle.is_null());
+    let evidence_text = CString::new(serde_json::to_string(&evidence).unwrap()).unwrap();
+    let bound = unsafe { mncs_embed::mncs_session_bind_reference(handle, evidence_text.as_ptr()) };
+    assert!(!bound.is_null());
+    unsafe { mncs_embed::mncs_response_free(bound) };
+    for (input, budget, expected) in [
+        (150, 8192, "consistent_over_corpus"),
+        (5, 1, "consistent_over_corpus"),
+    ] {
+        let corpus = CString::new(format!(r#"{{"schema_version":"0.1","name":"retained","cases":[{{"id":"fresh","request":{{"schema_version":"0.1","target":{{"module":"probe.embed","function":"decide"}},"arguments":{},"step_budget":{budget}}}}}]}}"#, i64_arg(input))).unwrap();
+        let grants = CString::new("[]").unwrap();
+        let response = unsafe {
+            mncs_embed::mncs_session_compare_reference(handle, corpus.as_ptr(), grants.as_ptr())
+        };
+        assert!(!response.is_null());
+        let document: serde_json::Value = unsafe {
+            serde_json::from_slice(
+                CStr::from_ptr(mncs_embed::mncs_response_text(response)).to_bytes(),
+            )
+            .unwrap()
+        };
+        assert_eq!(document["status"], expected);
+        assert_eq!(document["matching_cases"], 1);
+        unsafe { mncs_embed::mncs_response_free(response) };
+    }
+    let malformed = CString::new("{").unwrap();
+    assert!(unsafe {
+        mncs_embed::mncs_session_compare_reference(handle, malformed.as_ptr(), std::ptr::null())
+    }
+    .is_null());
+    assert!(unsafe {
+        mncs_embed::mncs_session_compare_reference(
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    }
+    .is_null());
+    unsafe { mncs_embed::mncs_session_close(handle) };
+}
+
+#[test]
+fn reference_validation_observes_writes_and_realizes_only_the_explicit_call() {
+    let compilation = reference_compilation(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/source/host-write-append.mncs"
+    )));
+    let artifact =
+        Artifact::from_json(&serde_json::to_vec(&compilation.emissions.backend.unwrap()).unwrap())
+            .unwrap();
+    let session = Session::open(artifact).unwrap();
+    session
+        .bind_reference(&compilation.evidence.unwrap())
+        .unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "mncs-reference-write-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(path.clone());
+    std::fs::write(&path, b"seed").unwrap();
+    let grants = [mncs_embed::Grant::write_path(
+        "ledger_writer",
+        path.to_str().unwrap(),
+    )];
+    let corpus: mncs_model::ExecutionCorpus = serde_json::from_value(serde_json::json!({
+        "schema_version":"0.1", "name":"reference-effects", "cases":[{"id":"write", "request":{
+            "schema_version":"0.1", "target":{"module":"examples.host_write_append","function":"append_word"},
+            "arguments":[{"sequence":{"values":[{"byte":{"value":1}},{"byte":{"value":2}},{"byte":{"value":3}}]}}],
+            "step_budget":8192}}]
+    })).unwrap();
+    let mut expected = b"seed".to_vec();
+    for _ in 0..2 {
+        let compared = session.compare_reference(&corpus, &grants).unwrap();
+        assert_eq!(
+            compared.status,
+            mncs_codegen::LayeredExecutionStatus::ConsistentOverCorpus
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), expected);
+        let mut options = CallOptions::budgeted(8192);
+        options.grants = grants.to_vec();
+        let output = session.call(
+            "examples.host_write_append",
+            "append_word",
+            corpus.cases[0].request.arguments.clone(),
+            &options,
+        );
+        assert_eq!(output.status, "returned");
+        expected.extend([1, 2, 3]);
+        assert_eq!(std::fs::read(&path).unwrap(), expected);
+    }
+}
+
 /// Repeated calls against one loaded artifact agree verdict-for-verdict
 /// with fresh expectations and carry the executed digest on every call.
 #[test]
