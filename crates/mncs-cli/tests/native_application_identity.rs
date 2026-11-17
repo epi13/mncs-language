@@ -98,3 +98,122 @@ fn main(context: app.ApplicationContext) -> (result: app.ApplicationExit) {
         }
     }
 }
+
+fn write_stdin_echo_application(directory: &Path) -> (PathBuf, PathBuf) {
+    let source_path = directory.join("stdin_echo.mncs");
+    let descriptor_path = directory.join("stdin_echo.json");
+    let source = r#"mncs 0.19;
+module test.native_application_stdin_echo;
+
+use mncs.std.application.v1 as app;
+
+fn main(context: app.ApplicationContext) -> (result: app.ApplicationExit) {
+    return app.success(context.stdin);
+}
+"#;
+    let descriptor = serde_json::json!({
+        "schema_version": "mncs.native-application/1",
+        "application_identity": "test.native_application_stdin_echo",
+        "source": source_path,
+        "module": "test.native_application_stdin_echo",
+        "entry_function": "main",
+        "profile": "0.19",
+        "libraries": [library_dir()],
+        "environment_keys": [],
+        "required_capabilities": []
+    });
+    std::fs::write(&source_path, source).expect("write stdin echo source");
+    std::fs::write(
+        &descriptor_path,
+        serde_json::to_vec(&descriptor).expect("serialize stdin echo descriptor"),
+    )
+    .expect("write stdin echo descriptor");
+    (descriptor_path, directory.join("cache"))
+}
+
+#[test]
+fn run_app_preserves_piped_stdin_bytes() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let temporary = TemporaryDirectory::new();
+    let (descriptor_path, cache_path) = write_stdin_echo_application(temporary.path());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mncs"))
+        .args([
+            "run-app",
+            descriptor_path.to_str().expect("UTF-8 descriptor path"),
+            "--cache-dir",
+            cache_path.to_str().expect("UTF-8 cache path"),
+            "--library",
+            library_dir().to_str().expect("UTF-8 library path"),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn run-app with piped stdin");
+    child
+        .stdin
+        .take()
+        .expect("piped stdin")
+        .write_all(b"piped-application-input")
+        .expect("write piped stdin");
+    let output = child.wait_with_output().expect("collect piped run-app output");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"piped-application-input");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_app_does_not_block_on_interactive_tty_stdin() {
+    let temporary = TemporaryDirectory::new();
+    let (descriptor_path, cache_path) = write_stdin_echo_application(temporary.path());
+    let script = r#"
+import os, pty, subprocess, sys
+master, slave = pty.openpty()
+try:
+    proc = subprocess.Popen(
+        sys.argv[1:],
+        stdin=slave,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    os.close(slave)
+    try:
+        out, err = proc.communicate(timeout=15)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        sys.exit(124)
+    if proc.returncode != 0 or out != b"":
+        sys.stderr.buffer.write(err)
+        sys.exit(proc.returncode or 1)
+finally:
+    os.close(master)
+"#;
+    let output = Command::new("python3")
+        .args([
+            "-c",
+            script,
+            env!("CARGO_BIN_EXE_mncs"),
+            "run-app",
+            descriptor_path.to_str().expect("UTF-8 descriptor path"),
+            "--cache-dir",
+            cache_path.to_str().expect("UTF-8 cache path"),
+            "--library",
+            library_dir().to_str().expect("UTF-8 library path"),
+        ])
+        .output()
+        .expect("run PTY harness");
+    assert!(
+        output.status.success(),
+        "run-app blocked or failed with TTY stdin (code={:?}): {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

@@ -3,7 +3,7 @@ mod issuance;
 use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
-    io::{self, Read, Write},
+    io::{self, IsTerminal, Read, Write},
     path::{Path, PathBuf},
     process::{Command, ExitCode},
     time::Instant,
@@ -1352,13 +1352,18 @@ fn application_context_host_value(
     if current_dir.len() > APPLICATION_CONTEXT_MAX_CWD {
         return Err("current directory exceeds the 1024-byte bound".to_owned());
     }
+    // An interactive terminal without piped/redirected input waits on manual
+    // EOF rather than feeding request bytes; keep stdin empty instead of
+    // hanging non-interactive `run-app` invocations from shells or agents.
     let mut stdin = Vec::new();
-    io::stdin()
-        .take((APPLICATION_CONTEXT_MAX_STDIN + 1) as u64)
-        .read_to_end(&mut stdin)
-        .map_err(|error| format!("stdin could not be read: {error}"))?;
-    if stdin.len() > APPLICATION_CONTEXT_MAX_STDIN {
-        return Err("stdin exceeds the 1024-byte bound".to_owned());
+    if !io::stdin().is_terminal() {
+        io::stdin()
+            .take((APPLICATION_CONTEXT_MAX_STDIN + 1) as u64)
+            .read_to_end(&mut stdin)
+            .map_err(|error| format!("stdin could not be read: {error}"))?;
+        if stdin.len() > APPLICATION_CONTEXT_MAX_STDIN {
+            return Err("stdin exceeds the 1024-byte bound".to_owned());
+        }
     }
     let identity = native_application_identity_digest(identity_hash_session, application_identity)?;
     let mut fields = BTreeMap::new();
