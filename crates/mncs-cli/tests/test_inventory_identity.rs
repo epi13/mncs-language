@@ -321,3 +321,191 @@ fn language_inventory_uses_explicit_public_intrinsics() {
         .unwrap()
         .starts_with("sha256:"));
 }
+
+#[test]
+fn native_test_prunes_unreachable_functions_while_preserving_identities_and_generics() {
+    let binary = PathBuf::from(
+        env::var_os("CARGO_BIN_EXE_mncs").expect("Cargo should provide the mncs binary path"),
+    );
+    let root = env::temp_dir().join(format!(
+        "mncs-test-closure-pruning-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let source = root.join("suite.mncs");
+    let library = root.join("library");
+    let assertions = library.join("mncs/test/assertions.mncs");
+    let suite = library.join("mncs/test/suite.mncs");
+    let helpers = library.join("demo/helpers.mncs");
+    let result_path = root.join("result.json");
+    fs::create_dir_all(assertions.parent().expect("assertion dir")).expect("assertion dir");
+    fs::create_dir_all(helpers.parent().expect("helpers dir")).expect("helpers dir");
+    fs::write(
+        &assertions,
+        r#"mncs 0.18;
+module mncs.test.assertions;
+enum Verdict { PASS, FAIL, SKIP, UNSUPPORTED }
+enum FailureKind { NoFailure, Assertion, Setup, Compile, Runtime, Timeout, Unsupported, Infrastructure }
+enum TestStatus { PASSED, FAILED, SKIPPED, UNSUPPORTED }
+enum TestClassification { PASSED, TEST_FAILURE, UNSUPPORTED }
+record TestResult {
+    verdict: Verdict,
+    verdict_code: u64,
+    failure_kind: FailureKind,
+    failure_code: u64,
+    assertions: u64,
+    failures: u64,
+    expected: i64,
+    actual: i64,
+    assertion_code: u64
+}
+record TestProjection {
+    status: TestStatus,
+    classification: TestClassification,
+    verdict: Verdict,
+    failed: bool,
+    skipped: bool,
+    unsupported: bool
+}
+fn pass() -> (result: TestResult) {
+    return TestResult {
+        verdict: Verdict.PASS, verdict_code: 0,
+        failure_kind: FailureKind.NoFailure, failure_code: 0,
+        assertions: 1, failures: 0, expected: 1, actual: 1, assertion_code: 0
+    };
+}
+fn fail_code(code: u64) -> (result: TestResult) {
+    return TestResult {
+        verdict: Verdict.FAIL, verdict_code: 1,
+        failure_kind: FailureKind.Assertion, failure_code: 1,
+        assertions: 1, failures: 1, expected: 1, actual: 0, assertion_code: code
+    };
+}
+fn project_test(result: TestResult) -> (projection: TestProjection) {
+    return match result.verdict {
+        PASS => TestProjection { status: TestStatus.PASSED, classification: TestClassification.PASSED, verdict: Verdict.PASS, failed: false, skipped: false, unsupported: false },
+        FAIL => TestProjection { status: TestStatus.FAILED, classification: TestClassification.TEST_FAILURE, verdict: Verdict.FAIL, failed: true, skipped: false, unsupported: false },
+        SKIP => TestProjection { status: TestStatus.SKIPPED, classification: TestClassification.PASSED, verdict: Verdict.SKIP, failed: false, skipped: true, unsupported: false },
+        UNSUPPORTED => TestProjection { status: TestStatus.UNSUPPORTED, classification: TestClassification.UNSUPPORTED, verdict: Verdict.UNSUPPORTED, failed: false, skipped: false, unsupported: true }
+    };
+}
+"#,
+    )
+    .expect("assertions");
+    fs::write(
+        &suite,
+        r#"mncs 0.18;
+module mncs.test.suite;
+use mncs.test.assertions;
+record SuiteSummary {
+    verdict: Verdict, verdict_code: u64,
+    total: u64, passed: u64, failed: u64, skipped: u64, unsupported: u64
+}
+record SuiteProjection {
+    verdict: Verdict,
+    classification: TestClassification,
+    failed: bool,
+    unsupported: bool
+}
+fn empty() -> (summary: SuiteSummary) {
+    return SuiteSummary { verdict: Verdict.PASS, verdict_code: 0, total: 0, passed: 0, failed: 0, skipped: 0, unsupported: 0 };
+}
+fn observe(summary: SuiteSummary, item: TestResult) -> (next_summary: SuiteSummary) {
+    let is_fail: bool = item.verdict_code != 0;
+    return SuiteSummary {
+        verdict: Verdict.PASS,
+        verdict_code: summary.verdict_code + select(is_fail, 1, 0),
+        total: summary.total + 1,
+        passed: summary.passed + select(is_fail, 0, 1),
+        failed: summary.failed + select(is_fail, 1, 0),
+        skipped: summary.skipped,
+        unsupported: summary.unsupported
+    };
+}
+fn project(summary: SuiteSummary) -> (projection: SuiteProjection) {
+    if summary.failed > 0 {
+        return SuiteProjection { verdict: Verdict.FAIL, classification: TestClassification.TEST_FAILURE, failed: true, unsupported: false };
+    }
+    return SuiteProjection { verdict: Verdict.PASS, classification: TestClassification.PASSED, failed: false, unsupported: false };
+}
+"#,
+    )
+    .expect("suite");
+    fs::write(
+        &helpers,
+        r#"mncs 0.18;
+module demo.helpers;
+fn reached_generic<N: Nat>(buf: [byte; up_to N]) -> (result: u64) {
+    return buf.len;
+}
+fn unused_dead_1(x: u64) -> (result: u64) { return x + 1; }
+fn unused_dead_2(x: u64) -> (result: u64) { return unused_dead_1(x) + 2; }
+fn unused_dead_3(x: u64) -> (result: u64) { return unused_dead_2(x) + 3; }
+fn unused_dead_4(x: u64) -> (result: u64) { return unused_dead_3(x) + 4; }
+fn unused_dead_generic<N: Nat>(buf: [byte; up_to N]) -> (result: u64) { return buf.len + 99; }
+"#,
+    )
+    .expect("helpers");
+    fs::write(
+        &source,
+        r#"mncs 0.18;
+module tests.closure_pruning;
+use demo.helpers as h;
+use mncs.test.assertions;
+use mncs.test.suite;
+
+test uses_generic_helper() -> (result: TestResult) {
+    let b: [byte; up_to 4] = [1, 2, 3];
+    if h.reached_generic<4>(b) == 3 {
+        return pass();
+    }
+    return fail_code(1);
+}
+
+test unselected_test() -> (result: TestResult) {
+    return pass();
+}
+"#,
+    )
+    .expect("source");
+
+    let output = Command::new(&binary)
+        .arg("test")
+        .arg(&source)
+        .arg("--library")
+        .arg(&library)
+        .arg("--filter")
+        .arg("uses_generic_helper")
+        .arg("--result")
+        .arg(&result_path)
+        .output()
+        .expect("native test command should run");
+    assert!(
+        output.status.success(),
+        "native test command failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value =
+        serde_json::from_slice(&fs::read(&result_path).expect("result file"))
+            .expect("valid JSON");
+    assert_eq!(result["verdict"], "PASS");
+    assert_eq!(result["selection"]["available_test_count"], 2);
+    assert_eq!(result["selection"]["selected_test_count"], 1);
+    let original = result["execution"]["original_function_count"]
+        .as_u64()
+        .expect("original_function_count");
+    let compiled = result["execution"]["compiled_function_count"]
+        .as_u64()
+        .expect("compiled_function_count");
+    assert!(
+        compiled < original,
+        "expected unreachable functions to be pruned: compiled={compiled} original={original}"
+    );
+    assert!(
+        result["execution"]["artifact_bytes"].as_u64().unwrap_or(0) > 0,
+        "artifact_bytes should be reported"
+    );
+
+    fs::remove_dir_all(root).expect("cleanup");
+}

@@ -2383,15 +2383,36 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
         return finish_native_test_output(&result, options, ExitCode::from(2));
     }
 
-    let emit = [
-        ArtifactRepresentation::Semantic,
-        ArtifactRepresentation::Hir,
-        ArtifactRepresentation::Ssa,
-        ArtifactRepresentation::TargetLoweringPlan,
-        ArtifactRepresentation::BackendArtifact,
-    ]
-    .into_iter()
-    .collect();
+    let closure_started = std::time::Instant::now();
+    let original_function_count = program.functions.len();
+    let (program, compiled_function_count) = match project_native_test_program(program, &selected) {
+        Ok((projected, compiled_count)) => (projected, compiled_count),
+        Err(error) => {
+            let result = serde_json::json!({
+                "schema_version": "mncs.test-result/1",
+                "verdict": "UNKNOWN",
+                "classification": "compile_failure",
+                "failure_class": "compile",
+                "failure": {"message": format!("native test reachable-closure projection failed: {error}")},
+                "tests": [],
+                "selection": {"level": "invalid_invocation", "selected_test_count": selected.len(), "available_test_count": inventory.tests.len()},
+                "execution": {"mode": "native-toolchain-embed", "host_subprocesses": 0, "fallback": false}
+            });
+            return finish_native_test_output(&result, options, ExitCode::from(4));
+        }
+    };
+    if std::env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!(
+            "mncs-timing stage=native-test-closure-project elapsed_ms={} original_functions={} compiled_functions={}",
+            closure_started.elapsed().as_millis(),
+            original_function_count,
+            compiled_function_count,
+        );
+    }
+
+    let emit = [ArtifactRepresentation::BackendArtifact]
+        .into_iter()
+        .collect();
     let request = match compiler.request_for_program_with_backend(
         &program,
         emit,
@@ -2430,6 +2451,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
         eprintln!("error: native test compilation emitted no executable backend artifact");
         return ExitCode::from(4);
     };
+    let admit_started = std::time::Instant::now();
     let backend_bytes = match serde_json::to_vec(&backend) {
         Ok(bytes) => bytes,
         Err(error) => {
@@ -2437,6 +2459,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             return ExitCode::from(3);
         }
     };
+    let artifact_bytes = backend_bytes.len();
     let artifact = match EmbedArtifact::from_json(&backend_bytes) {
         Ok(artifact) => artifact,
         Err(error) => {
@@ -2444,6 +2467,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             return ExitCode::from(3);
         }
     };
+    let open_started = std::time::Instant::now();
     let session = match EmbedSession::open(artifact) {
         Ok(session) => session,
         Err(error) => {
@@ -2451,6 +2475,14 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             return ExitCode::from(3);
         }
     };
+    if std::env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!(
+            "mncs-timing stage=native-test-embed-admit-and-open elapsed_ms={} open_ms={} artifact_bytes={}",
+            admit_started.elapsed().as_millis(),
+            open_started.elapsed().as_millis(),
+            artifact_bytes,
+        );
+    }
     let call_options = EmbedCallOptions::budgeted(options.step_budget);
     let selected_test_identities: Vec<String> = selected
         .iter()
@@ -2517,7 +2549,15 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             EmbedBatchCall::identity(reference.clone(), Vec::new(), call_options.clone())
         })
         .collect();
+    let batch_started = std::time::Instant::now();
     let batch_outputs = session.call_batch(&batch_calls);
+    if std::env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!(
+            "mncs-timing stage=native-test-batch-exec elapsed_ms={} batch_size={}",
+            batch_started.elapsed().as_millis(),
+            batch_calls.len(),
+        );
+    }
     let mut test_reports = Vec::with_capacity(selected.len());
     let mut transport_failure = None;
     for (index, ((test, callable_reference), output)) in selected
@@ -2755,6 +2795,9 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             "inventory_identity": inventory_identity,
             "artifact_identity": session.artifact_identity(),
             "artifact_sha256": session.digest(),
+            "artifact_bytes": artifact_bytes,
+            "original_function_count": original_function_count,
+            "compiled_function_count": compiled_function_count,
             "backend": session.backend_name(),
             "reused_session": session.reused(),
             "compiler_owned_inventory": true
@@ -2788,6 +2831,169 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
     result["exit_code"] = serde_json::Value::from(exit_code);
     let exit = ExitCode::from(exit_code);
     finish_native_test_output(&result, options, exit)
+}
+
+fn project_native_test_program(
+    program: Program,
+    selected: &[&mncs_compiler::TestInventoryEntry],
+) -> Result<(Program, usize), String> {
+    use mncs_model::{function_id, BodyOperationKind};
+
+    let program_module = program.module.clone();
+    let fn_identity = |function: &mncs_model::Function| {
+        function_id(function.identity_namespace(&program_module), &function.name)
+    };
+    let mut functions_by_identity: BTreeMap<SemanticId, &mncs_model::Function> = BTreeMap::new();
+    for function in &program.functions {
+        functions_by_identity.insert(fn_identity(function), function);
+    }
+
+    let mut pending: Vec<SemanticId> = Vec::with_capacity(selected.len() + 4);
+    for test in selected {
+        if !functions_by_identity.contains_key(&test.function_identity) {
+            return Err(format!(
+                "selected test function {} is absent from elaborated program",
+                test.function_identity.0
+            ));
+        }
+        pending.push(test.function_identity.clone());
+    }
+    for (module, name) in [
+        ("mncs.test.suite", "empty"),
+        ("mncs.test.suite", "observe"),
+        ("mncs.test.suite", "project"),
+        ("mncs.test.assertions", "project_test"),
+    ] {
+        let id = function_id(module, name);
+        if functions_by_identity.contains_key(&id) {
+            pending.push(id);
+        }
+    }
+
+    let mut metadata_only: BTreeSet<SemanticId> = BTreeSet::new();
+    let mut included: BTreeSet<SemanticId> = BTreeSet::new();
+    let mut body_closure: BTreeSet<SemanticId> = BTreeSet::new();
+    while let Some(identity) = pending.pop() {
+        if !body_closure.insert(identity.clone()) {
+            continue;
+        }
+        included.insert(identity.clone());
+        metadata_only.remove(&identity);
+        let function = functions_by_identity.get(&identity).ok_or_else(|| {
+            format!(
+                "native test call closure references missing function identity {}",
+                identity.0
+            )
+        })?;
+        for record in program
+            .generic_specializations
+            .iter()
+            .filter(|record| record.specialization_function == identity)
+        {
+            if included.insert(record.generic_function.clone()) {
+                metadata_only.insert(record.generic_function.clone());
+            }
+        }
+        let Some(body) = &function.body else {
+            continue;
+        };
+        for block in &body.blocks {
+            for operation in &block.operations {
+                if let BodyOperationKind::Call { function, .. } = &operation.kind {
+                    pending.push(function.clone());
+                }
+            }
+        }
+        for iteration in &body.bounded_iterations {
+            pending.extend(iteration.callees.iter().cloned());
+        }
+    }
+
+    let mut projected = program;
+    projected.functions.retain_mut(|function| {
+        let identity = fn_identity(function);
+        if !included.contains(&identity) {
+            return false;
+        }
+        if metadata_only.contains(&identity) && !body_closure.contains(&identity) {
+            function.body = None;
+        }
+        true
+    });
+    projected.generic_specializations.retain(|record| {
+        included.contains(&record.generic_function)
+            && included.contains(&record.specialization_function)
+    });
+    if let Some(table) = projected.binding_table.take() {
+        let mut needed_bindings: BTreeSet<SemanticId> = BTreeSet::new();
+        for function in &projected.functions {
+            for evidence in function
+                .evidence
+                .iter()
+                .filter(|ev| ev.property == mncs_model::STRUCTURAL_DECREASE_PROPERTY)
+            {
+                if let Some(Ok(claim)) = evidence
+                    .artifact
+                    .as_deref()
+                    .map(mncs_model::parse_structural_decrease_claim)
+                {
+                    needed_bindings.insert(claim.param_binding);
+                    needed_bindings.insert(claim.arg_binding);
+                    for link in claim.links {
+                        needed_bindings.insert(link.parent_binding);
+                        needed_bindings.insert(link.child_binding);
+                    }
+                }
+            }
+        }
+        if !needed_bindings.is_empty() {
+            let retained_bindings: Vec<_> = table
+                .bindings
+                .into_iter()
+                .filter(|binding| needed_bindings.contains(&binding.identity))
+                .collect();
+            let needed_scopes: BTreeSet<SemanticId> = retained_bindings
+                .iter()
+                .map(|binding| binding.scope.clone())
+                .collect();
+            let retained_scopes: Vec<_> = table
+                .scopes
+                .into_iter()
+                .filter(|scope| needed_scopes.contains(&scope.identity))
+                .collect();
+            let needed_namespaces: BTreeSet<SemanticId> = retained_bindings
+                .iter()
+                .map(|binding| binding.namespace.clone())
+                .chain(retained_scopes.iter().map(|scope| scope.namespace.clone()))
+                .collect();
+            let retained_namespaces: Vec<_> = table
+                .namespaces
+                .into_iter()
+                .filter(|namespace| needed_namespaces.contains(&namespace.identity))
+                .collect();
+            projected.binding_table = Some(mncs_model::SemanticBindingTable::new(
+                retained_namespaces,
+                retained_scopes,
+                retained_bindings,
+                Vec::new(),
+            ));
+        }
+    }
+    let compiled_count = projected.functions.len();
+    let validation = projected.validate();
+    if !validation.valid {
+        let details = validation
+            .errors
+            .iter()
+            .take(5)
+            .map(|err| format!("{}: {}", err.code, err.message))
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(format!(
+            "projected native test closure failed semantic validation: {details}"
+        ));
+    }
+    Ok((projected, compiled_count))
 }
 
 fn returned_value(output: &mncs_embed::CallOutput) -> Option<&ExecutionValue> {
