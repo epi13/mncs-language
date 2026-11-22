@@ -1848,11 +1848,11 @@ pub fn execute_cranelift(
             }
             result.status = status;
             result.steps = 1;
-            match crate::support::decode_native_observation(
+            match decode_jit_observation(
                 contract.outputs.first(),
                 status,
                 value,
-                read_jit_arena_hex(arena_image.is_some()).as_deref(),
+                arena_image.is_some(),
                 &artifact.composite_value_contracts,
             ) {
                 Ok(returned) => {
@@ -4414,23 +4414,31 @@ fn jit_boundary_arguments_for_request(
     Ok((raw_args, Some(writer.into_image())))
 }
 
-/// Hex-encode the post-call JIT arena so composite results decode through
-/// the same observation path as the C realizations.
-fn read_jit_arena_hex(installed: bool) -> Option<String> {
+/// Decode the returned value while borrowing the in-process arena.
+fn decode_jit_observation(
+    output_contract: Option<&mncs_model::BackendValueContract>,
+    status: ExecutionStatus,
+    value: i128,
+    installed: bool,
+    composite_contracts: &BTreeMap<String, mncs_model::BackendValueContract>,
+) -> Result<Vec<mncs_model::ExecutionValue>, String> {
     if !installed {
-        return None;
+        return crate::support::decode_native_observation_bytes(
+            output_contract,
+            status,
+            value,
+            None,
+            composite_contracts,
+        );
     }
-    const HEX: &[u8; 16] = b"0123456789abcdef";
     with_jit_arena(|arena| {
-        if arena.is_empty() {
-            return None;
-        }
-        let mut out = String::with_capacity(arena.len() * 2);
-        for byte in arena.iter() {
-            out.push(HEX[(byte >> 4) as usize] as char);
-            out.push(HEX[(byte & 15) as usize] as char);
-        }
-        Some(out)
+        crate::support::decode_native_observation_bytes(
+            output_contract,
+            status,
+            value,
+            (!arena.is_empty()).then_some(arena.as_slice()),
+            composite_contracts,
+        )
     })
 }
 
@@ -4868,11 +4876,11 @@ impl CraneliftStatefulSession {
                 }
                 result.status = status;
                 result.steps = 1;
-                match crate::support::decode_native_observation(
+                match decode_jit_observation(
                     contract.outputs.first(),
                     status,
                     value,
-                    read_jit_arena_hex(arena_image.is_some()).as_deref(),
+                    arena_image.is_some(),
                     &self.artifact.composite_value_contracts,
                 ) {
                     Ok(returned) => {

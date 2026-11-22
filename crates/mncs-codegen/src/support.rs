@@ -2201,14 +2201,36 @@ pub(crate) fn decode_native_observation(
     arena_hex: Option<&str>,
     composite_contracts: &BTreeMap<String, BackendValueContract>,
 ) -> Result<Vec<ExecutionValue>, String> {
+    let image = if status == ExecutionStatus::Returned
+        && output_contract.is_some_and(contract_needs_arena)
+    {
+        arena_hex.map(hex_decode_bytes).transpose()?
+    } else {
+        None
+    };
+    decode_native_observation_bytes(
+        output_contract,
+        status,
+        value,
+        image.as_deref(),
+        composite_contracts,
+    )
+}
+
+pub(crate) fn decode_native_observation_bytes(
+    output_contract: Option<&BackendValueContract>,
+    status: ExecutionStatus,
+    value: i128,
+    arena: Option<&[u8]>,
+    composite_contracts: &BTreeMap<String, BackendValueContract>,
+) -> Result<Vec<ExecutionValue>, String> {
     if status != ExecutionStatus::Returned {
         return Ok(Vec::new());
     }
     let needs_arena = output_contract.is_some_and(contract_needs_arena);
-    match (needs_arena, arena_hex, output_contract) {
-        (true, Some(hex), Some(contract)) => {
-            let image = hex_decode_bytes(hex)?;
-            let reader = crate::composite::ArenaReader::new(&image, composite_contracts);
+    match (needs_arena, arena, output_contract) {
+        (true, Some(image), Some(contract)) => {
+            let reader = crate::composite::ArenaReader::new(image, composite_contracts);
             Ok(vec![reader.decode_boundary(value as u64, contract)?])
         }
         (true, _, _) => Err(
