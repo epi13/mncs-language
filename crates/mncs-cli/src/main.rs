@@ -436,6 +436,8 @@ struct NativeTestOptions {
     check_result_path: Option<PathBuf>,
     artifacts_path: Option<PathBuf>,
     allow_unsupported: bool,
+    elaboration_cache_dir: Option<PathBuf>,
+    elaboration_cache_enabled: bool,
 }
 
 /// Generic typed MNCS application invocation.  The CLI owns only source
@@ -2125,11 +2127,19 @@ where
     let mut options = NativeTestOptions {
         step_budget: 200_000,
         format: "json".to_owned(),
+        elaboration_cache_enabled: true,
         ..NativeTestOptions::default()
     };
     let mut args = args.into_iter();
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            "--elaboration-cache-dir" => match args.next() {
+                Some(value) if !value.is_empty() => {
+                    options.elaboration_cache_dir = Some(PathBuf::from(value));
+                }
+                _ => return native_test_usage("--elaboration-cache-dir requires a non-empty path"),
+            },
+            "--no-elaboration-cache" => options.elaboration_cache_enabled = false,
             "--source" => match args.next() {
                 Some(value) => options.source_path = Some(value),
                 None => return native_test_usage("--source requires a path"),
@@ -2207,9 +2217,42 @@ where
 fn native_test_usage(message: &str) -> ExitCode {
     eprintln!("error: {message}");
     eprintln!(
-        "usage: mncs test SOURCE [--library ROOT ...] [--filter SELECTOR ...] [--test-identity ID ... | --verification-plan FILE] [--step-budget N] [--result FILE] [--check-result FILE] [--artifacts DIR] [--format json|text]"
+        "usage: mncs test SOURCE [--library ROOT ...] [--filter SELECTOR ...] [--test-identity ID ... | --verification-plan FILE] [--elaboration-cache-dir DIR | --no-elaboration-cache] [--step-budget N] [--result FILE] [--check-result FILE] [--artifacts DIR] [--format json|text]"
     );
     ExitCode::from(2)
+}
+
+fn native_test_elaboration_cache(
+    options: &NativeTestOptions,
+) -> Option<mncs_compiler::ModuleElaborationCache> {
+    if !options.elaboration_cache_enabled {
+        return None;
+    }
+    let root = options.elaboration_cache_dir.clone().or_else(|| {
+        env::var_os("MNCS_MODULE_ELABORATION_CACHE_DIR")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    })?;
+    let exe_scope = env::current_exe()
+        .ok()
+        .and_then(|path| fs::canonicalize(&path).ok().or(Some(path)))
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
+    let scope_material = format!(
+        "{exe_scope}:{}:{}",
+        mncs_compiler::MODULE_ELABORATION_CACHE_SCHEMA_VERSION,
+        mncs_compiler::MODULE_ELABORATION_POLICY_IDENTITY
+    );
+    let scope_hash = mncs_model::sha256_hex(scope_material.as_bytes());
+    let max_bytes = env::var("MNCS_MODULE_ELABORATION_CACHE_MAX_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(512 * 1024 * 1024);
+    Some(mncs_compiler::ModuleElaborationCache::open_dir(
+        root.join(&scope_hash[..16]),
+        max_bytes,
+    ))
 }
 
 /// Validate the bounded external projection of a Commons-owned verification
@@ -2297,7 +2340,26 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
     let envelope = SourceEnvelope::inline(SourceArtifactKind::Program, "native-test", source);
     let resolver = FileModuleResolver::with_explicit_libraries(source_path, &options.libraries);
     let compiler = ReferenceCompiler::default();
-    let front_end = compiler.front_end_with_resolver(envelope, &resolver);
+    let front_end = match native_test_elaboration_cache(options) {
+        Some(mut cache) => {
+            compiler.front_end_with_module_elaboration_cache(envelope, &resolver, &mut cache)
+        }
+        None => compiler.front_end_with_resolver(envelope, &resolver),
+    };
+    let module_elaboration_cache_observation = front_end.module_elaboration_cache_reuse.clone();
+    if std::env::var_os("MNCS_TIMINGS").is_some() {
+        if let Some(obs) = &module_elaboration_cache_observation {
+            eprintln!(
+                "mncs-timing stage=module-elaboration-cache reused={} linked={} invalidated={} published={} evicted={} rejected={}",
+                obs.reused_module_subjects.len(),
+                obs.linked_module_subjects.len(),
+                obs.invalidated_module_subjects.len(),
+                obs.published_entry_count,
+                obs.evicted_entry_count,
+                obs.rejected_entry_count,
+            );
+        }
+    }
     if !front_end.is_valid() {
         let diagnostics = serde_json::to_value(&front_end.diagnostics).unwrap_or_else(|_| {
             serde_json::json!([{"code": "MNCS_NATIVE_FRONTEND", "message": "front end diagnostics could not be serialized"}])
@@ -2814,6 +2876,20 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             "step_budget": options.step_budget
         }
     });
+    if let Some(obs) = &module_elaboration_cache_observation {
+        result["execution"]["module_elaboration_cache"] = serde_json::json!({
+            "schema_version": obs.schema_version,
+            "reused_module_subjects": obs.reused_module_subjects,
+            "linked_module_subjects": obs.linked_module_subjects,
+            "invalidated_module_subjects": obs.invalidated_module_subjects,
+            "reused_count": obs.reused_module_subjects.len(),
+            "linked_count": obs.linked_module_subjects.len(),
+            "invalidated_count": obs.invalidated_module_subjects.len(),
+            "published_entry_count": obs.published_entry_count,
+            "evicted_entry_count": obs.evicted_entry_count,
+            "rejected_entry_count": obs.rejected_entry_count
+        });
+    }
     if let Some(message) = transport_failure {
         result["failure"] =
             serde_json::json!({"class": "infrastructure_failure", "message": message});

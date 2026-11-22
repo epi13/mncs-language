@@ -3979,3 +3979,94 @@ fn unrelated(value: u64) -> (result: u64) { return value; }
         .as_str()
         .ends_with("app.capability_facts::unrelated")));
 }
+
+#[test]
+fn module_elaboration_cache_preserves_local_shadowing_nominal_types_and_disk_backing() {
+    let compiler = ReferenceCompiler::default();
+    let base_source = concat!(
+        "mncs 0.18;\n",
+        "module lib.shadow_base;\n",
+        "enum Tag { A, B }\n",
+        "record Pair { x: u64, y: u64 }\n",
+        "fn base_sum(p: Pair) -> (result: u64) { return p.x +% p.y; }\n",
+    );
+    let mid_source = concat!(
+        "mncs 0.18;\n",
+        "module lib.shadow_mid;\n",
+        "use lib.shadow_base as base;\n",
+        "enum Tag { C, D }\n",
+        "record Pair { tag: Tag, base_pair: base.Pair }\n",
+        "fn make_mid(bp: base.Pair) -> (result: Pair) {\n",
+        "    return Pair { tag: Tag.C, base_pair: bp };\n",
+        "}\n",
+        "fn mid_value(p: Pair) -> (result: u64) {\n",
+        "    return match p.tag {\n",
+        "        Tag.C => base.base_sum(p.base_pair),\n",
+        "        Tag.D => 99\n",
+        "    };\n",
+        "}\n",
+    );
+    let root_source = concat!(
+        "mncs 0.18;\n",
+        "module app.shadow_root;\n",
+        "use lib.shadow_base as base;\n",
+        "use lib.shadow_mid as mid;\n",
+        "fn run() -> (result: u64) {\n",
+        "    let bp: base.Pair = base.Pair { x: 4, y: 5 };\n",
+        "    return mid.mid_value(mid.make_mid(bp));\n",
+        "}\n",
+    );
+    let resolver = MapResolver::default()
+        .with("lib.shadow_base", base_source)
+        .with("lib.shadow_mid", mid_source);
+    let cache_dir = std::env::temp_dir().join(format!(
+        "mncs_shadow_cache_test_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&cache_dir);
+
+    let mut cold_cache = ModuleElaborationCache::open_dir(cache_dir.clone(), 64 * 1024 * 1024);
+    let cold = compiler.front_end_with_module_elaboration_cache(
+        resolver.envelope("root", root_source.to_owned()),
+        &resolver,
+        &mut cold_cache,
+    );
+    assert!(cold.is_valid(), "{:?}", cold.diagnostics);
+    let cold_obs = cold
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("cold cache observation");
+    assert_eq!(cold_obs.published_entry_count, 2);
+    assert_eq!(cold_obs.evicted_entry_count, 0);
+
+    // Reopen fresh from disk as a separate process would.
+    let mut warm_cache = ModuleElaborationCache::open_dir(cache_dir.clone(), 64 * 1024 * 1024);
+    let warm = compiler.front_end_with_module_elaboration_cache(
+        resolver.envelope("root", format!("// root edit\n{root_source}")),
+        &resolver,
+        &mut warm_cache,
+    );
+    assert!(warm.is_valid(), "{:?}", warm.diagnostics);
+    let warm_obs = warm
+        .module_elaboration_cache_reuse
+        .as_ref()
+        .expect("warm cache observation");
+    assert_eq!(
+        warm_obs.reused_module_subjects,
+        vec!["lib.shadow_base", "lib.shadow_mid"]
+    );
+    assert!(warm_obs.linked_module_subjects.is_empty());
+    assert_eq!(
+        cold.program
+            .as_ref()
+            .expect("cold program")
+            .content_fingerprint()
+            .expect("cold fp"),
+        warm.program
+            .as_ref()
+            .expect("warm program")
+            .content_fingerprint()
+            .expect("warm fp"),
+    );
+    let _ = std::fs::remove_dir_all(&cache_dir);
+}

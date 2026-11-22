@@ -56,7 +56,7 @@ pub const MODULE_ELABORATION_CACHE_OBSERVATION_SCHEMA_VERSION: &str =
     "mncs.language-module-elaboration-cache-observation/1";
 /// Bump this identity whenever source-to-Program linking changes without an
 /// AST or Language profile schema change.
-pub const MODULE_ELABORATION_POLICY_IDENTITY: &str = "mncs-language-module-linker/2";
+pub const MODULE_ELABORATION_POLICY_IDENTITY: &str = "mncs-language-module-linker/3";
 
 /// Bump this identity whenever exported module interface extraction changes.
 const MODULE_INTERFACE_POLICY_IDENTITY: &str = "mncs-language-module-interface-extractor/1";
@@ -77,6 +77,10 @@ pub struct ModuleElaborationCache {
     entries: Vec<ModuleElaborationCacheEntry>,
     #[serde(skip)]
     entry_sizes: Vec<usize>,
+    #[serde(skip)]
+    max_bytes: usize,
+    #[serde(skip)]
+    backing_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for ModuleElaborationCache {
@@ -85,6 +89,37 @@ impl Default for ModuleElaborationCache {
             schema_version: module_elaboration_cache_schema_version(),
             entries: Vec::new(),
             entry_sizes: Vec::new(),
+            max_bytes: MODULE_ELABORATION_CACHE_MAX_BYTES,
+            backing_dir: None,
+        }
+    }
+}
+
+impl ModuleElaborationCache {
+    /// Creates an in-memory cache with an explicit bounded byte budget.
+    pub fn with_max_bytes(max_bytes: usize) -> Self {
+        Self {
+            max_bytes: max_bytes.max(1),
+            ..Self::default()
+        }
+    }
+
+    /// Creates a lazy per-module disk-backed cache in `dir` bounded by `max_bytes`.
+    /// Entries are loaded on demand per imported module subject and verified with
+    /// the exact same source, dependency-interface, policy, and digest guards.
+    pub fn open_dir(dir: std::path::PathBuf, max_bytes: usize) -> Self {
+        Self {
+            max_bytes: max_bytes.max(1),
+            backing_dir: Some(dir),
+            ..Self::default()
+        }
+    }
+
+    fn effective_max_bytes(&self) -> usize {
+        if self.max_bytes == 0 {
+            MODULE_ELABORATION_CACHE_MAX_BYTES
+        } else {
+            self.max_bytes
         }
     }
 }
@@ -564,6 +599,27 @@ impl ReferenceCompiler {
     }
 
     /// Runs the Language frontend with a caller-owned imported-module linking
+    /// cache (without emitting per-body verification facts). Cache entries are
+    /// accepted only for an exact source snapshot and transitive interface
+    /// closure under the same parser, profile, and linker policies.
+    pub fn front_end_with_module_elaboration_cache(
+        &self,
+        envelope: SourceEnvelope,
+        resolver: &dyn ModuleResolver,
+        module_elaboration_cache: &mut ModuleElaborationCache,
+    ) -> SourceFrontEndResult {
+        self.front_end_with_resolver_seeds_and_facts(
+            envelope,
+            resolver,
+            &[],
+            None,
+            None,
+            None,
+            Some(module_elaboration_cache),
+        )
+    }
+
+    /// Runs the Language frontend with a caller-owned imported-module linking
     /// cache. Cache entries are serializable between processes and are
     /// accepted only for an exact source snapshot and transitive dependency
     /// closure under the same parser, profile, and linker policies.
@@ -718,6 +774,7 @@ impl ReferenceCompiler {
                                 &resolved_modules,
                             )
                         });
+                        let fe_val_started = Instant::now();
                         let frontend_validation = match dependency_summary_cache {
                             Some(cache) => elaborated
                                 .validate_for_frontend_with_dependency_summary_cache(
@@ -726,6 +783,7 @@ impl ReferenceCompiler {
                                 ),
                             None => elaborated.validate_for_frontend(scoped_request.as_ref()),
                         };
+                        trace_timing("frontend-validation", fe_val_started);
                         if let Some(fact_result) = frontend_validation.verification {
                             verification_facts = fact_result.facts;
                             verification_fact_reuse = Some(fact_result.reuse);
@@ -1219,6 +1277,7 @@ fn elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
         .map(|_| ModuleElaborationCacheObservation::default());
     let mut module_elaboration_cache = module_elaboration_cache;
     let mut operation_sources = None;
+    let closure_started = Instant::now();
     let result = if let Err(mut errors) = elaborate_import_closure(
         ast,
         &recording_resolver,
@@ -1232,9 +1291,12 @@ fn elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
         &mut module_elaboration_cache,
         &mut cache_observation,
     ) {
+        trace_timing("elaboration-import-closure", closure_started);
         diagnostics.append(&mut errors);
         Err(diagnostics)
     } else {
+        trace_timing("elaboration-import-closure", closure_started);
+        let root_link_started = Instant::now();
         match link_module_with_closure_and_source_map(
             ast,
             &elaborated,
@@ -1243,11 +1305,13 @@ fn elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
             &ast.module.text,
         ) {
             Ok((program, root_operation_sources)) => {
+                trace_timing("elaboration-root-link", root_link_started);
                 // Admitted-ceiling enforcement for concrete bounds
                 // substituted into generic specializations (RFC 0036) lives
                 // inside `specialize_program_with_host_seeds`, which also
                 // compiles any host-requested instantiations through the
                 // same queue, identity scheme, and sweep.
+                let spec_started = Instant::now();
                 let fallback_ceiling =
                     mncs_syntax::max_sequence_bound_for(&ast.language_version.text).unwrap_or(0);
                 match specialize_program_with_host_seeds(
@@ -1259,21 +1323,25 @@ fn elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
                     None,
                 ) {
                     Ok(specialized) => {
+                        trace_timing("elaboration-specialize", spec_started);
                         operation_sources = Some(root_operation_sources);
                         Ok(specialized)
                     }
                     Err(mut errors) => {
+                        trace_timing("elaboration-specialize", spec_started);
                         diagnostics.append(&mut errors);
                         Err(diagnostics)
                     }
                 }
             }
             Err(mut errors) => {
+                trace_timing("elaboration-root-link", root_link_started);
                 diagnostics.append(&mut errors);
                 Err(diagnostics)
             }
         }
     };
+    let resolutions_started = Instant::now();
     let sources = recording_resolver.sources.into_inner();
     let module_resolutions = elaborated
         .into_iter()
@@ -1291,6 +1359,7 @@ fn elaborate_program_with_resolver_and_modules_and_seeds_with_map_and_cache(
             })
         })
         .collect();
+    trace_timing("elaboration-module-resolutions", resolutions_started);
     (
         result,
         resolutions,
@@ -1347,9 +1416,9 @@ impl ModuleResolver for RecordingResolver<'_> {
 }
 
 #[derive(Debug, Clone)]
-struct ImportedModule {
+struct ImportedModule<'a> {
     requested_name: String,
-    program: Program,
+    program: &'a Program,
     declarations: DeclarationSpans,
 }
 
@@ -1593,22 +1662,21 @@ fn elaborate_import_closure(
             dependency_name.clone(),
             dependency_interface_closure_fingerprint.clone(),
         );
-        let declarations = declaration_spans
-            .get(&dependency_name)
-            .cloned()
-            .unwrap_or_default();
         if let (Some(cache), Some(observation)) = (
             module_elaboration_cache.as_deref_mut(),
             cache_observation.as_mut(),
         ) {
+            let local_program =
+                local_only_cached_program(&dependency_ast, dependency_program, elaborated);
+            let local_declarations = DeclarationSpans::from_ast(&dependency_ast);
             cache.publish(
                 &dependency_name,
                 &dependency_ast.module.text,
                 &dependency_envelope,
                 &dependency_ast.language_version.text,
                 &dependency_import_interface_fingerprint,
-                dependency_program,
-                declarations,
+                local_program,
+                local_declarations,
                 observation,
             );
         }
@@ -1676,7 +1744,7 @@ fn link_module_with_closure_and_source_map(
         match elaborated.get(&name) {
             Some(program) => imported.push(ImportedModule {
                 requested_name: name.clone(),
-                program: program.clone(),
+                program,
                 declarations: declaration_spans.get(&name).cloned().unwrap_or_default(),
             }),
             None => diagnostics.push(elaboration_diagnostic(
@@ -1708,6 +1776,91 @@ fn link_module_with_closure_and_source_map(
     Ok((program, operation_sources))
 }
 
+/// Strip transitively merged imported functions, nominal types, and binding-table
+/// entries before storing a module in `ModuleElaborationCache`.
+/// `refresh_cached_module_program` always re-attaches fresh imported declarations,
+/// bodies, and binding tables on cache hit, so caching transitive copies would
+/// waste quadratic disk and memory space.
+fn local_only_cached_program(
+    ast: &AbstractSyntaxTree,
+    mut program: Program,
+    elaborated: &BTreeMap<String, Program>,
+) -> Program {
+    let local_function_identities = ast
+        .functions
+        .iter()
+        .map(|function| function_id(&ast.module.text, &function.name.text))
+        .collect::<BTreeSet<_>>();
+    let local_finite_type_identities = ast
+        .finite_types
+        .iter()
+        .map(|finite_type| finite_type_id(&ast.module.text, &finite_type.name.text))
+        .collect::<BTreeSet<_>>();
+    let local_record_type_names = ast
+        .record_types
+        .iter()
+        .map(|record_type| record_type.name.text.as_str())
+        .collect::<BTreeSet<_>>();
+
+    program.functions.retain(|function| {
+        local_function_identities.contains(&function_id(
+            function.identity_namespace(&program.module),
+            &function.name,
+        ))
+    });
+    program
+        .finite_types
+        .retain(|finite_type| local_finite_type_identities.contains(&finite_type.identity));
+    program.record_types.retain(|record_type| {
+        semantic_namespace_from_identity(&record_type.identity) == ast.module.text
+            && local_record_type_names.contains(record_type.name.as_str())
+    });
+
+    if let Some(table) = program.binding_table.as_mut() {
+        let mut imported_namespaces = std::collections::HashMap::new();
+        let mut imported_scopes = std::collections::HashMap::new();
+        let mut imported_bindings = std::collections::HashMap::new();
+        let mut imported_references = std::collections::HashMap::new();
+        let mut seen = BTreeSet::new();
+        for use_decl in &ast.uses {
+            let name = use_decl.module.text.as_str();
+            if !seen.insert(name) {
+                continue;
+            }
+            if let Some(imported_table) = elaborated
+                .get(name)
+                .and_then(|imported| imported.binding_table.as_ref())
+            {
+                for item in &imported_table.namespaces {
+                    imported_namespaces.entry(&item.identity).or_insert(item);
+                }
+                for item in &imported_table.scopes {
+                    imported_scopes.entry(&item.identity).or_insert(item);
+                }
+                for item in &imported_table.bindings {
+                    imported_bindings.entry(&item.identity).or_insert(item);
+                }
+                for item in &imported_table.references {
+                    imported_references.entry(&item.identity).or_insert(item);
+                }
+            }
+        }
+        table
+            .namespaces
+            .retain(|item| imported_namespaces.get(&item.identity) != Some(&item));
+        table
+            .scopes
+            .retain(|item| imported_scopes.get(&item.identity) != Some(&item));
+        table
+            .bindings
+            .retain(|item| imported_bindings.get(&item.identity) != Some(&item));
+        table
+            .references
+            .retain(|item| imported_references.get(&item.identity) != Some(&item));
+    }
+    program
+}
+
 /// Refresh the imports of a cached module without re-elaborating its own
 /// functions. Module Programs contain the transitive imported declarations
 /// needed by the root, so returning a cached aggregate unchanged would leak
@@ -1729,7 +1882,7 @@ fn refresh_cached_module_program(
         match elaborated.get(&name) {
             Some(imported_program) => imported.push(ImportedModule {
                 requested_name: name.clone(),
-                program: imported_program.clone(),
+                program: imported_program,
                 declarations: declaration_spans.get(&name).cloned().unwrap_or_default(),
             }),
             None => diagnostics.push(elaboration_diagnostic(
@@ -1786,10 +1939,10 @@ fn refresh_cached_module_program(
 
     program.functions = context.imported_functions;
     program.functions.extend(local_functions);
-    program.finite_types = context.imported_finite_types;
-    program.finite_types.extend(local_finite_types);
-    program.record_types = context.imported_record_types;
-    program.record_types.extend(local_record_types);
+    program.finite_types = local_finite_types;
+    program.finite_types.extend(context.imported_finite_types);
+    program.record_types = local_record_types;
+    program.record_types.extend(context.imported_record_types);
     let mut dependencies = ast
         .uses
         .iter()
@@ -1797,6 +1950,29 @@ fn refresh_cached_module_program(
         .collect::<BTreeSet<_>>();
     dependencies.extend(context.imported_dependencies);
     program.dependencies = dependencies.into_iter().collect();
+
+    if let Some(mut table) = program.binding_table.take() {
+        for module in &imported {
+            if let Some(imported_table) = &module.program.binding_table {
+                table
+                    .namespaces
+                    .extend(imported_table.namespaces.iter().cloned());
+                table.scopes.extend(imported_table.scopes.iter().cloned());
+                table
+                    .bindings
+                    .extend(imported_table.bindings.iter().cloned());
+                table
+                    .references
+                    .extend(imported_table.references.iter().cloned());
+            }
+        }
+        program.binding_table = Some(SemanticBindingTable::new(
+            table.namespaces,
+            table.scopes,
+            table.bindings,
+            table.references,
+        ));
+    }
 
     let mut declarations = DeclarationSpans::from_ast(ast);
     declarations.merge_missing(&context.imported_declarations);
@@ -1808,7 +1984,7 @@ fn refresh_cached_module_program(
 /// other name conflict is an error.
 fn merge_imported_declarations(
     ast: &AbstractSyntaxTree,
-    imported: &[ImportedModule],
+    imported: &[ImportedModule<'_>],
     diagnostics: &mut Vec<SourceDiagnostic>,
 ) -> MergedContext {
     let mut context = MergedContext::default();
@@ -1877,6 +2053,9 @@ fn merge_imported_declarations(
     // one identity can arrive through several paths; that is a diamond
     // re-export and binds once. Only a name conflict between DIFFERENT
     // identities fails closed.
+    let mut seen_finite_identities = std::collections::HashSet::<SemanticId>::new();
+    let mut seen_record_identities = std::collections::HashSet::<SemanticId>::new();
+    let mut seen_function_keys = std::collections::HashSet::<(String, String)>::new();
     for module in imported {
         context
             .imported_dependencies
@@ -1887,9 +2066,13 @@ fn merge_imported_declarations(
         context
             .imported_declarations
             .merge_missing(&module.declarations);
+        let routes = if namespaced {
+            namespace_routes(ast, module)
+        } else {
+            Vec::new()
+        };
         if namespaced {
-            let routes = namespace_routes(ast, module);
-            for route in routes {
+            for route in &routes {
                 for (name, span) in &module.declarations.functions {
                     context
                         .imported_declarations
@@ -1929,7 +2112,7 @@ fn merge_imported_declarations(
         }
         for finite_type in &module.program.finite_types {
             if namespaced {
-                for route in namespace_routes(ast, module) {
+                for route in &routes {
                     context
                         .qualified_finite_types
                         .insert(format!("{route}.{}", finite_type.name), finite_type.clone());
@@ -1967,17 +2150,13 @@ fn merge_imported_declarations(
             context
                 .finite_types_by_name
                 .insert(finite_type.name.clone(), finite_type.clone());
-            if !context
-                .imported_finite_types
-                .iter()
-                .any(|existing| existing.identity == finite_type.identity)
-            {
+            if seen_finite_identities.insert(finite_type.identity.clone()) {
                 context.imported_finite_types.push(finite_type.clone());
             }
         }
         for record_type in &module.program.record_types {
             if namespaced {
-                for route in namespace_routes(ast, module) {
+                for route in &routes {
                     context
                         .qualified_record_types
                         .insert(format!("{route}.{}", record_type.name), record_type.clone());
@@ -2013,22 +2192,15 @@ fn merge_imported_declarations(
             context
                 .record_types_by_name
                 .insert(record_type.name.clone(), record_type.clone());
-            if !context
-                .imported_record_types
-                .iter()
-                .any(|existing| existing.identity == record_type.identity)
-            {
+            if seen_record_identities.insert(record_type.identity.clone()) {
                 context.imported_record_types.push(record_type.clone());
             }
         }
+        let type_lookup = ImportedModuleTypeLookup::new(module.program);
         for function in &module.program.functions {
-            let mut imported_function = function.clone();
+            let candidate_signature = signature_from_function(module, function, &type_lookup);
             if namespaced {
-                canonicalize_function_types(&mut imported_function, module);
-            }
-            let candidate_signature = signature_from_function(module, &imported_function);
-            if namespaced {
-                for route in namespace_routes(ast, module) {
+                for route in &routes {
                     context.qualified_signatures.insert(
                         format!("{route}.{}", function.name),
                         candidate_signature.clone(),
@@ -2062,22 +2234,26 @@ fn merge_imported_declarations(
                     continue;
                 }
             }
-            if imported_function.home_module.is_none() {
-                // Locals of the dependency become linked imports here;
-                // declarations that already carry a home keep it.
-                imported_function.home_module = Some(module.program.module.clone());
-            }
             // Imported names live in `signatures`, not in the locals-only
             // `function_names` set, so later diamond arrivals compare by
             // identity instead of colliding as locals.
             context
                 .signatures
                 .insert(function.name.clone(), candidate_signature);
-            if !context.imported_functions.iter().any(|existing| {
-                existing.name == imported_function.name
-                    && existing.identity_namespace(&module.program.module)
-                        == imported_function.identity_namespace(&module.program.module)
-            }) {
+            let home_namespace = function
+                .home_module
+                .as_deref()
+                .unwrap_or(&module.program.module);
+            if seen_function_keys.insert((function.name.clone(), home_namespace.to_owned())) {
+                let mut imported_function = function.clone();
+                if namespaced {
+                    canonicalize_function_types(&mut imported_function, &type_lookup);
+                }
+                if imported_function.home_module.is_none() {
+                    // Locals of the dependency become linked imports here;
+                    // declarations that already carry a home keep it.
+                    imported_function.home_module = Some(module.program.module.clone());
+                }
                 context.imported_functions.push(imported_function);
             }
         }
@@ -2089,31 +2265,29 @@ fn merge_imported_declarations(
         context.signatures.clear();
         context.finite_types_by_name.clear();
         context.record_types_by_name.clear();
+        let mut finite_name_counts = std::collections::HashMap::<&str, usize>::new();
+        for imported in &context.imported_finite_types {
+            *finite_name_counts.entry(imported.name.as_str()).or_default() += 1;
+        }
         for imported in &context.imported_finite_types {
             if context.finite_type_names.contains(&imported.name) {
                 continue;
             }
-            let same_name = context
-                .imported_finite_types
-                .iter()
-                .filter(|candidate| candidate.name == imported.name)
-                .collect::<Vec<_>>();
-            if same_name.len() == 1 {
+            if finite_name_counts.get(imported.name.as_str()) == Some(&1) {
                 context
                     .finite_types_by_name
                     .insert(imported.name.clone(), imported.clone());
             }
         }
+        let mut record_name_counts = std::collections::HashMap::<&str, usize>::new();
+        for imported in &context.imported_record_types {
+            *record_name_counts.entry(imported.name.as_str()).or_default() += 1;
+        }
         for imported in &context.imported_record_types {
             if context.record_type_names.contains(&imported.name) {
                 continue;
             }
-            let same_name = context
-                .imported_record_types
-                .iter()
-                .filter(|candidate| candidate.name == imported.name)
-                .collect::<Vec<_>>();
-            if same_name.len() == 1 {
+            if record_name_counts.get(imported.name.as_str()) == Some(&1) {
                 context
                     .record_types_by_name
                     .insert(imported.name.clone(), imported.clone());
@@ -2146,7 +2320,7 @@ fn merge_imported_declarations(
     context
 }
 
-fn namespace_routes(ast: &AbstractSyntaxTree, module: &ImportedModule) -> Vec<String> {
+fn namespace_routes(ast: &AbstractSyntaxTree, module: &ImportedModule<'_>) -> Vec<String> {
     let mut routes = vec![module.program.module.clone()];
     for use_decl in ast
         .uses
@@ -2203,11 +2377,79 @@ fn decode_identity_component(encoded: &str) -> String {
     decoded
 }
 
+struct ImportedModuleTypeLookup<'a> {
+    program: &'a Program,
+    finite_by_identity: std::collections::HashMap<&'a str, &'a FiniteType>,
+    record_by_identity: std::collections::HashMap<&'a str, &'a RecordType>,
+    finite_by_name: std::collections::HashMap<&'a str, &'a FiniteType>,
+    record_by_name: std::collections::HashMap<&'a str, &'a RecordType>,
+    sequence_maps: std::cell::OnceCell<(BTreeMap<String, FiniteType>, BTreeMap<String, RecordType>)>,
+}
+
+impl<'a> ImportedModuleTypeLookup<'a> {
+    fn new(program: &'a Program) -> Self {
+        let mut finite_by_identity =
+            std::collections::HashMap::with_capacity(program.finite_types.len());
+        let mut finite_by_name =
+            std::collections::HashMap::with_capacity(program.finite_types.len());
+        for finite_type in &program.finite_types {
+            finite_by_identity
+                .entry(finite_type.identity.0.as_str())
+                .or_insert(finite_type);
+            finite_by_name
+                .entry(finite_type.name.as_str())
+                .or_insert(finite_type);
+        }
+        let mut record_by_identity =
+            std::collections::HashMap::with_capacity(program.record_types.len());
+        let mut record_by_name =
+            std::collections::HashMap::with_capacity(program.record_types.len());
+        for record_type in &program.record_types {
+            record_by_identity
+                .entry(record_type.identity.0.as_str())
+                .or_insert(record_type);
+            record_by_name
+                .entry(record_type.name.as_str())
+                .or_insert(record_type);
+        }
+        Self {
+            program,
+            finite_by_identity,
+            record_by_identity,
+            finite_by_name,
+            record_by_name,
+            sequence_maps: std::cell::OnceCell::new(),
+        }
+    }
+
+    fn sequence_maps(&self) -> &(BTreeMap<String, FiniteType>, BTreeMap<String, RecordType>) {
+        self.sequence_maps.get_or_init(|| {
+            let finite_types = self
+                .program
+                .finite_types
+                .iter()
+                .map(|finite| (finite.name.clone(), finite.clone()))
+                .collect::<BTreeMap<_, _>>();
+            let record_types = self
+                .program
+                .record_types
+                .iter()
+                .map(|record| (record.name.clone(), record.clone()))
+                .collect::<BTreeMap<_, _>>();
+            (finite_types, record_types)
+        })
+    }
+}
+
 /// Builds the call-checking signature for a function declared in another
 /// module. Identities stay anchored to the declaring module: a function that
 /// itself arrived through linking keeps its original home namespace.
-fn signature_from_function(module: &ImportedModule, function: &Function) -> FunctionSignature {
-    let body_type = |name: &str| body_type_from_name(module, name, &function.generic_params);
+fn signature_from_function(
+    module: &ImportedModule<'_>,
+    function: &Function,
+    lookup: &ImportedModuleTypeLookup<'_>,
+) -> FunctionSignature {
+    let body_type = |name: &str| body_type_from_name(lookup, name, &function.generic_params);
     let mut inputs: Vec<BodyType> = function
         .inputs
         .iter()
@@ -2271,49 +2513,29 @@ fn signature_from_function(module: &ImportedModule, function: &Function) -> Func
 /// dependency programs are valid by the time merging happens, so unknown
 /// names cannot occur here.
 fn body_type_from_name(
-    module: &ImportedModule,
+    lookup: &ImportedModuleTypeLookup<'_>,
     name: &str,
     generic_params: &[mncs_model::GenericParam],
 ) -> BodyType {
-    if let Some(finite_type) = module
-        .program
-        .finite_types
-        .iter()
-        .find(|decl| decl.identity.0 == name)
-    {
+    if let Some(finite_type) = lookup.finite_by_identity.get(name) {
         return BodyType::Finite {
             identity: finite_type.identity.clone(),
             name: finite_type.name.clone(),
         };
     }
-    if let Some(record_type) = module
-        .program
-        .record_types
-        .iter()
-        .find(|decl| decl.identity.0 == name)
-    {
+    if let Some(record_type) = lookup.record_by_identity.get(name) {
         return BodyType::Record {
             identity: record_type.identity.clone(),
             name: record_type.name.clone(),
         };
     }
-    if let Some(finite_type) = module
-        .program
-        .finite_types
-        .iter()
-        .find(|decl| decl.name == name)
-    {
+    if let Some(finite_type) = lookup.finite_by_name.get(name) {
         return BodyType::Finite {
             identity: finite_type.identity.clone(),
             name: finite_type.name.clone(),
         };
     }
-    if let Some(record_type) = module
-        .program
-        .record_types
-        .iter()
-        .find(|decl| decl.name == name)
-    {
+    if let Some(record_type) = lookup.record_by_name.get(name) {
         return BodyType::Record {
             identity: record_type.identity.clone(),
             name: record_type.name.clone(),
@@ -2325,52 +2547,43 @@ fn body_type_from_name(
     // identity-bearing type as the corresponding local sequence. Without
     // this, an imported `[Status; N]` is rehydrated as `Named("Status")` and
     // valid calls fail closed as a type mismatch.
-    let finite_types = module
-        .program
-        .finite_types
-        .iter()
-        .map(|finite| (finite.name.clone(), finite.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let record_types = module
-        .program
-        .record_types
-        .iter()
-        .map(|record| (record.name.clone(), record.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let generic_map = generic_params
-        .iter()
-        .map(|parameter| (parameter.name.clone(), parameter.kind))
-        .collect::<BTreeMap<_, _>>();
-    let mut diagnostics = Vec::new();
-    if let Some(sequence) = profile_sequence_type_with_generics(
-        name,
-        &finite_types,
-        &record_types,
-        &generic_map,
-        &mut diagnostics,
-        SourceSpan {
-            start: 0,
-            end: 0,
-            line: 1,
-            column: 1,
-        },
-        // Import-path re-resolution of an already-validated artifact:
-        // absolute model ceiling. Admission was enforced at origin
-        // elaboration under the origin profile.
-        mncs_model::MODEL_MAX_SEQUENCE_BOUND,
-    ) {
-        return sequence;
+    if name.contains('[') {
+        let (finite_types, record_types) = lookup.sequence_maps();
+        let generic_map = generic_params
+            .iter()
+            .map(|parameter| (parameter.name.clone(), parameter.kind))
+            .collect::<BTreeMap<_, _>>();
+        let mut diagnostics = Vec::new();
+        if let Some(sequence) = profile_sequence_type_with_generics(
+            name,
+            finite_types,
+            record_types,
+            &generic_map,
+            &mut diagnostics,
+            SourceSpan {
+                start: 0,
+                end: 0,
+                line: 1,
+                column: 1,
+            },
+            // Import-path re-resolution of an already-validated artifact:
+            // absolute model ceiling. Admission was enforced at origin
+            // elaboration under the origin profile.
+            mncs_model::MODEL_MAX_SEQUENCE_BOUND,
+        ) {
+            return sequence;
+        }
     }
     BodyType::from_semantic_name(name)
 }
 
-fn canonicalize_function_types(function: &mut Function, module: &ImportedModule) {
+fn canonicalize_function_types(function: &mut Function, lookup: &ImportedModuleTypeLookup<'_>) {
     for value in function
         .inputs
         .iter_mut()
         .chain(function.outputs.iter_mut())
     {
-        let ty = body_type_from_name(module, &value.value_type, &function.generic_params);
+        let ty = body_type_from_name(lookup, &value.value_type, &function.generic_params);
         value.value_type = match ty {
             BodyType::Sequence { .. } => canonical_imported_sequence_type(&value.value_type, &ty),
             BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => identity.0,
@@ -3245,6 +3458,114 @@ struct ModuleElaborationCacheContent<'a> {
 }
 
 impl ModuleElaborationCache {
+    fn subject_disk_path(dir: &std::path::Path, subject: &str) -> std::path::PathBuf {
+        let key = mncs_model::sha256_hex(subject.as_bytes());
+        dir.join(format!("{key}.json"))
+    }
+
+    fn load_subject_from_disk(
+        &mut self,
+        subject: &str,
+        observation: &mut ModuleElaborationCacheObservation,
+    ) {
+        let Some(dir) = self.backing_dir.as_ref() else {
+            return;
+        };
+        if self.entries.iter().any(|entry| entry.subject == subject) {
+            return;
+        }
+        let path = Self::subject_disk_path(dir, subject);
+        let Ok(metadata) = std::fs::metadata(&path) else {
+            return;
+        };
+        let max_bytes = self.effective_max_bytes();
+        if !metadata.is_file() || (metadata.len() as usize) > max_bytes {
+            observation.rejected_entry_count += 1;
+            let _ = std::fs::remove_file(&path);
+            return;
+        }
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let Ok(entry) = serde_json::from_slice::<ModuleElaborationCacheEntry>(&bytes) else {
+            observation.rejected_entry_count += 1;
+            let _ = std::fs::remove_file(&path);
+            return;
+        };
+        if entry.subject != subject {
+            observation.rejected_entry_count += 1;
+            let _ = std::fs::remove_file(&path);
+            return;
+        }
+        self.ensure_entry_sizes();
+        self.entries.push(entry);
+        self.entry_sizes.push(bytes.len());
+    }
+
+    fn persist_entry_to_disk(&self, subject: &str, entry: &ModuleElaborationCacheEntry) {
+        let Some(dir) = self.backing_dir.as_ref() else {
+            return;
+        };
+        if std::fs::create_dir_all(dir).is_err() {
+            return;
+        }
+        let Ok(bytes) = serde_json::to_vec(entry) else {
+            return;
+        };
+        let max_bytes = self.effective_max_bytes();
+        if bytes.len() > max_bytes {
+            return;
+        }
+        let target = Self::subject_disk_path(dir, subject);
+        let tmp = dir.join(format!(
+            ".{}.tmp.{}",
+            mncs_model::sha256_hex(subject.as_bytes()),
+            std::process::id()
+        ));
+        if std::fs::write(&tmp, &bytes).is_ok() {
+            if std::fs::rename(&tmp, &target).is_err() {
+                let _ = std::fs::remove_file(&tmp);
+            }
+        }
+        Self::prune_backing_dir(dir, max_bytes);
+    }
+
+    fn prune_backing_dir(dir: &std::path::Path, max_bytes: usize) {
+        let Ok(read_dir) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut files: Vec<(std::time::SystemTime, usize, std::path::PathBuf)> = Vec::new();
+        let mut total_bytes: usize = 0;
+        for item in read_dir.flatten() {
+            let path = item.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(meta) = item.metadata() {
+                if meta.is_file() {
+                    let size = meta.len() as usize;
+                    let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+                    total_bytes = total_bytes.saturating_add(size);
+                    files.push((mtime, size, path));
+                }
+            }
+        }
+        if files.len() <= MODULE_ELABORATION_CACHE_MAX_ENTRIES && total_bytes <= max_bytes {
+            return;
+        }
+        files.sort_by_key(|(mtime, _, _)| *mtime);
+        let mut count = files.len();
+        for (_, size, path) in files {
+            if count <= MODULE_ELABORATION_CACHE_MAX_ENTRIES && total_bytes <= max_bytes {
+                break;
+            }
+            if std::fs::remove_file(&path).is_ok() {
+                count = count.saturating_sub(1);
+                total_bytes = total_bytes.saturating_sub(size);
+            }
+        }
+    }
+
     fn lookup(
         &mut self,
         subject: &str,
@@ -3260,6 +3581,7 @@ impl ModuleElaborationCache {
             self.entry_sizes.clear();
             self.schema_version = MODULE_ELABORATION_CACHE_SCHEMA_VERSION.to_owned();
         }
+        self.load_subject_from_disk(subject, observation);
         self.ensure_entry_sizes();
         observation.evicted_entry_count += self.trim_bounded();
 
@@ -3281,9 +3603,13 @@ impl ModuleElaborationCache {
                 self.entries.remove(index);
                 self.entry_sizes.remove(index);
             }
+            if let Some(dir) = self.backing_dir.as_ref() {
+                let _ = std::fs::remove_file(Self::subject_disk_path(dir, subject));
+            }
             return None;
         }
 
+        let max_bytes = self.effective_max_bytes();
         let index = matches[0];
         let entry = &self.entries[index];
         let profile_registry = profile_registry_identity();
@@ -3297,9 +3623,8 @@ impl ModuleElaborationCache {
             && entry.ast_schema_version == AST_SCHEMA_VERSION
             && entry.elaboration_policy_identity == MODULE_ELABORATION_POLICY_IDENTITY
             && entry.dependency_closure_fingerprint == dependency_closure_fingerprint;
-        let integrity = module_elaboration_entry_content(entry).and_then(|content| {
-            serialized_hash_and_size(&content, MODULE_ELABORATION_CACHE_MAX_BYTES)
-        });
+        let integrity = module_elaboration_entry_content(entry)
+            .and_then(|content| serialized_hash_and_size(&content, max_bytes));
         let integrity_matches = integrity
             .as_ref()
             .is_some_and(|(digest, _)| digest == &entry.output_digest);
@@ -3310,6 +3635,9 @@ impl ModuleElaborationCache {
                 .push(subject.to_owned());
             self.entries.remove(index);
             self.entry_sizes.remove(index);
+            if let Some(dir) = self.backing_dir.as_ref() {
+                let _ = std::fs::remove_file(Self::subject_disk_path(dir, subject));
+            }
             return None;
         }
 
@@ -3336,6 +3664,7 @@ impl ModuleElaborationCache {
         if !envelope.identity_is_valid() {
             return;
         }
+        let max_bytes = self.effective_max_bytes();
         let profile_registry = profile_registry_identity();
         let mut entry = ModuleElaborationCacheEntry {
             subject: subject.to_owned(),
@@ -3351,17 +3680,16 @@ impl ModuleElaborationCache {
             program,
             declarations,
         };
-        let Some((digest, _)) = module_elaboration_entry_content(&entry).and_then(|content| {
-            serialized_hash_and_size(&content, MODULE_ELABORATION_CACHE_MAX_BYTES)
-        }) else {
-            return;
-        };
-        entry.output_digest = digest;
-        let Some((_, entry_size)) =
-            serialized_hash_and_size(&entry, MODULE_ELABORATION_CACHE_MAX_BYTES)
+        let Some((digest, _)) = module_elaboration_entry_content(&entry)
+            .and_then(|content| serialized_hash_and_size(&content, max_bytes))
         else {
             return;
         };
+        entry.output_digest = digest;
+        let Some((_, entry_size)) = serialized_hash_and_size(&entry, max_bytes) else {
+            return;
+        };
+        self.persist_entry_to_disk(subject, &entry);
         self.ensure_entry_sizes();
         for index in (0..self.entries.len()).rev() {
             if self.entries[index].subject == subject {
@@ -3381,22 +3709,24 @@ impl ModuleElaborationCache {
         if self.entry_sizes.len() == self.entries.len() {
             return;
         }
+        let max_bytes = self.effective_max_bytes();
         self.entry_sizes = self
             .entries
             .iter()
             .map(|entry| {
-                serialized_hash_and_size(entry, MODULE_ELABORATION_CACHE_MAX_BYTES)
+                serialized_hash_and_size(entry, max_bytes)
                     .map(|(_, size)| size)
-                    .unwrap_or(MODULE_ELABORATION_CACHE_MAX_BYTES.saturating_add(1))
+                    .unwrap_or(max_bytes.saturating_add(1))
             })
             .collect();
     }
 
     fn trim_bounded(&mut self) -> usize {
         self.ensure_entry_sizes();
+        let max_bytes = self.effective_max_bytes();
         let mut removed = 0;
         while self.entries.len() > MODULE_ELABORATION_CACHE_MAX_ENTRIES
-            || self.entry_sizes.iter().sum::<usize>() > MODULE_ELABORATION_CACHE_MAX_BYTES
+            || self.entry_sizes.iter().sum::<usize>() > max_bytes
         {
             if self.entries.is_empty() {
                 break;

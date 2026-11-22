@@ -509,3 +509,213 @@ test unselected_test() -> (result: TestResult) {
 
     fs::remove_dir_all(root).expect("cleanup");
 }
+
+#[test]
+fn native_test_module_elaboration_cache_reuses_invalidates_and_refreshes_spans() {
+    let binary = PathBuf::from(
+        env::var_os("CARGO_BIN_EXE_mncs").expect("Cargo should provide the mncs binary path"),
+    );
+    let root = env::temp_dir().join(format!(
+        "mncs-test-mod-elab-cache-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let cache_dir = root.join("elab-cache");
+    let source = root.join("suite.mncs");
+    let library = root.join("library");
+    let assertions = library.join("mncs/test/assertions.mncs");
+    let suite = library.join("mncs/test/suite.mncs");
+    let leaf = library.join("demo/leaf.mncs");
+    let mid = library.join("demo/mid.mncs");
+    let result_path = root.join("result.json");
+    fs::create_dir_all(assertions.parent().expect("assertion dir")).expect("assertion dir");
+    fs::create_dir_all(leaf.parent().expect("demo dir")).expect("demo dir");
+    fs::write(
+        &assertions,
+        r#"mncs 0.18;
+module mncs.test.assertions;
+enum Verdict { PASS, FAIL, SKIP, UNSUPPORTED }
+enum FailureKind { NoFailure, Assertion, Setup, Compile, Runtime, Timeout, Unsupported, Infrastructure }
+enum TestStatus { PASSED, FAILED, SKIPPED, UNSUPPORTED }
+enum TestClassification { PASSED, TEST_FAILURE, UNSUPPORTED }
+record TestResult { verdict: Verdict, assertions: u64, failures: u64, failure_kind: FailureKind, failure_code: u64, expected: u64, actual: u64 }
+record TestProjection { verdict: Verdict, status: TestStatus, classification: TestClassification, failure_kind: FailureKind }
+fn pass_result(v: u64) -> (result: TestResult) {
+    return TestResult { verdict: Verdict.PASS, assertions: 1, failures: 0, failure_kind: FailureKind.NoFailure, failure_code: 0, expected: v, actual: v };
+}
+fn fail_result(e: u64, a: u64) -> (result: TestResult) {
+    return TestResult { verdict: Verdict.FAIL, assertions: 1, failures: 1, failure_kind: FailureKind.Assertion, failure_code: 1, expected: e, actual: a };
+}
+fn equals_u64(e: u64, a: u64) -> (result: TestResult) {
+    if e == a { return pass_result(e); }
+    return fail_result(e, a);
+}
+fn project_test(r: TestResult) -> (result: TestProjection) {
+    return match r.verdict {
+        Verdict.PASS => TestProjection { verdict: Verdict.PASS, status: TestStatus.PASSED, classification: TestClassification.PASSED, failure_kind: FailureKind.NoFailure },
+        Verdict.FAIL => TestProjection { verdict: Verdict.FAIL, status: TestStatus.FAILED, classification: TestClassification.TEST_FAILURE, failure_kind: r.failure_kind },
+        Verdict.SKIP => TestProjection { verdict: Verdict.SKIP, status: TestStatus.SKIPPED, classification: TestClassification.PASSED, failure_kind: FailureKind.NoFailure },
+        Verdict.UNSUPPORTED => TestProjection { verdict: Verdict.UNSUPPORTED, status: TestStatus.UNSUPPORTED, classification: TestClassification.UNSUPPORTED, failure_kind: FailureKind.Unsupported }
+    };
+}
+"#,
+    )
+    .expect("assertions");
+    fs::write(
+        &suite,
+        r#"mncs 0.18;
+module mncs.test.suite;
+use mncs.test.assertions;
+record SuiteSummary { verdict: Verdict, total: u64, passed: u64, failed: u64, skipped: u64, unsupported: u64 }
+record SuiteProjection { verdict: Verdict, classification: TestClassification }
+fn empty() -> (result: SuiteSummary) {
+    return SuiteSummary { verdict: Verdict.PASS, total: 0, passed: 0, failed: 0, skipped: 0, unsupported: 0 };
+}
+fn observe(s: SuiteSummary, r: TestResult) -> (result: SuiteSummary) {
+    return match r.verdict {
+        Verdict.PASS => SuiteSummary { verdict: s.verdict, total: s.total + 1, passed: s.passed + 1, failed: s.failed, skipped: s.skipped, unsupported: s.unsupported },
+        Verdict.FAIL => SuiteSummary { verdict: Verdict.FAIL, total: s.total + 1, passed: s.passed, failed: s.failed + 1, skipped: s.skipped, unsupported: s.unsupported },
+        Verdict.SKIP => SuiteSummary { verdict: s.verdict, total: s.total + 1, passed: s.passed, failed: s.failed, skipped: s.skipped + 1, unsupported: s.unsupported },
+        Verdict.UNSUPPORTED => SuiteSummary { verdict: Verdict.UNSUPPORTED, total: s.total + 1, passed: s.passed, failed: s.failed, skipped: s.skipped, unsupported: s.unsupported + 1 }
+    };
+}
+fn project(s: SuiteSummary) -> (result: SuiteProjection) {
+    if s.failed > 0 { return SuiteProjection { verdict: Verdict.FAIL, classification: TestClassification.TEST_FAILURE }; }
+    return SuiteProjection { verdict: Verdict.PASS, classification: TestClassification.PASSED };
+}
+"#,
+    )
+    .expect("suite");
+    fs::write(
+        &leaf,
+        r#"mncs 0.18;
+module demo.leaf;
+fn compute(x: u64) -> (result: u64) { return x +% 7; }
+"#,
+    )
+    .expect("leaf");
+    fs::write(
+        &mid,
+        r#"mncs 0.18;
+module demo.mid;
+use demo.leaf as leaf;
+fn forward(x: u64) -> (result: u64) { return leaf.compute(x); }
+"#,
+    )
+    .expect("mid");
+    let base_suite = r#"mncs 0.18;
+module tests.elab_cache_witness;
+use demo.mid as mid;
+use mncs.test.assertions;
+use mncs.test.suite;
+
+test checks_mid_value() -> (result: TestResult) {
+    return equals_u64(10, mid.forward(3));
+}
+"#;
+    fs::write(&source, base_suite).expect("source");
+
+    let run_cached = |expect_ok: bool| -> serde_json::Value {
+        let output = Command::new(&binary)
+            .arg("test")
+            .arg(&source)
+            .arg("--library")
+            .arg(&library)
+            .arg("--elaboration-cache-dir")
+            .arg(&cache_dir)
+            .arg("--result")
+            .arg(&result_path)
+            .output()
+            .expect("mncs test should run");
+        if expect_ok {
+            assert!(
+                output.status.success(),
+                "expected success: stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        serde_json::from_slice(&fs::read(&result_path).expect("result json"))
+            .expect("valid result json")
+    };
+
+    // 1. Cold run: links and publishes all imported modules.
+    let cold = run_cached(true);
+    assert_eq!(cold["verdict"], "PASS");
+    let cold_line = cold["tests"][0]["source_span"]["line"].as_u64().unwrap();
+    assert_eq!(cold_line, 7);
+    let cold_obs = &cold["execution"]["module_elaboration_cache"];
+    assert_eq!(cold_obs["reused_count"].as_u64(), Some(0));
+    assert!(cold_obs["linked_count"].as_u64().unwrap() >= 4, "{cold_obs}");
+    assert!(cold_obs["published_entry_count"].as_u64().unwrap() >= 4, "{cold_obs}");
+
+    // 2. Warm run after inserting 3 comment lines at top of root suite:
+    //    reuses ALL imported modules and reports fresh source_span line 10!
+    fs::write(&source, format!("// line 1\n// line 2\n// line 3\n{base_suite}")).expect("root edit");
+    let warm = run_cached(true);
+    assert_eq!(warm["verdict"], "PASS");
+    assert_eq!(warm["tests"][0]["source_span"]["line"].as_u64(), Some(10));
+    let warm_obs = &warm["execution"]["module_elaboration_cache"];
+    assert_eq!(warm_obs["linked_count"].as_u64(), Some(0), "{warm_obs}");
+    assert!(warm_obs["reused_count"].as_u64().unwrap() >= 4, "{warm_obs}");
+
+    // 3. Imported-body edit in demo.leaf (7 -> 8, identical signature):
+    //    demo.leaf relinks, demo.mid is reused with refreshed leaf body, and test FAILS (actual 11 != 10)!
+    fs::write(
+        &leaf,
+        r#"mncs 0.18;
+module demo.leaf;
+fn compute(x: u64) -> (result: u64) { return x +% 8; }
+"#,
+    )
+    .expect("leaf body edit");
+    let body_edit = run_cached(false);
+    assert_eq!(body_edit["verdict"], "FAIL", "{body_edit}");
+    assert_eq!(body_edit["tests"][0]["native_result"]["actual"].as_u64(), Some(11));
+    let body_obs = &body_edit["execution"]["module_elaboration_cache"];
+    let linked: Vec<&str> = body_obs["linked_module_subjects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    let reused: Vec<&str> = body_obs["reused_module_subjects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(linked.contains(&"demo.leaf"), "demo.leaf must relink: {body_obs}");
+    assert!(reused.contains(&"demo.mid"), "demo.mid should reuse when leaf interface unchanged: {body_obs}");
+
+    // 4. Imported-interface edit in demo.leaf (return type u64 -> bool) + shifted line:
+    //    invalidates BOTH demo.leaf and downstream demo.mid, failing compilation with fresh diagnostic!
+    fs::write(
+        &leaf,
+        r#"// extra comment 1
+// extra comment 2
+mncs 0.18;
+module demo.leaf;
+fn compute(x: u64) -> (result: bool) { return x == 0; }
+"#,
+    )
+    .expect("leaf interface edit");
+    let iface_edit = run_cached(false);
+    assert_eq!(iface_edit["verdict"], "UNKNOWN", "{iface_edit}");
+    assert_eq!(iface_edit["classification"], "compile_failure", "{iface_edit}");
+
+    // 5. Restore demo.leaf -> PASS again with fresh spans.
+    fs::write(
+        &leaf,
+        r#"mncs 0.18;
+module demo.leaf;
+fn compute(x: u64) -> (result: u64) { return x +% 7; }
+"#,
+    )
+    .expect("leaf restore");
+    let restored = run_cached(true);
+    assert_eq!(restored["verdict"], "PASS");
+    assert_eq!(restored["tests"][0]["source_span"]["line"].as_u64(), Some(10));
+
+    fs::remove_dir_all(root).expect("cleanup");
+}
